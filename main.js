@@ -154,10 +154,43 @@ class Komplexiti {
     // -------------------------------------------------------------------------
     initEventListeners() {
         this.hamburgerBtn.addEventListener('click', () => this.togglePanel());
+
+        // Close panel on overlay click/tap (touchstart for iOS responsiveness)
         this.mobileOverlay.addEventListener('click', () => this.closePanel());
+        this.mobileOverlay.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            this.closePanel();
+        }, { passive: false });
+
+        // Close panel when tapping the canvas on narrow screens
+        this.canvas.addEventListener('pointerdown', () => {
+            if (this.isNarrow() && this.panelOpen) this.closePanel();
+        });
+
         this.launchBtn.addEventListener('click', () => this.launchApp());
         this.returnBtn.addEventListener('click', () => this.returnToTitle());
-        window.addEventListener('resize', () => this.resizeCanvas());
+        window.addEventListener('resize', () => this.handleResize());
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') this.returnToTitle();
+            if (e.key === ' ' && this.currentState === this.states.TITLE) {
+                e.preventDefault();
+                this.launchApp();
+            }
+        });
+    }
+
+    isNarrow() {
+        return window.innerWidth < 768;
+    }
+
+    handleResize() {
+        this.resizeCanvas();
+        if (this.currentState !== this.states.APP) return;
+        // Auto-open on wide screens; remove stale overlay if screen widens
+        if (!this.isNarrow()) {
+            this.mobileOverlay.classList.remove('active');
+            if (!this.panelOpen) this.openPanel();
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -167,7 +200,8 @@ class Komplexiti {
         this.panelOpen = true;
         this.sidebarPanel.classList.add('mobile-open');
         this.hamburgerBtn.classList.add('active', 'panel-open');
-        this.mobileOverlay.classList.add('active');
+        // Only darken the canvas on narrow screens; wide screens keep it visible
+        if (this.isNarrow()) this.mobileOverlay.classList.add('active');
     }
 
     closePanel() {
@@ -195,14 +229,17 @@ class Komplexiti {
 
         this.sidebarPanel.classList.remove('hidden');
         this.hamburgerBtn.classList.remove('hidden');
-
-        requestAnimationFrame(() => {
-            this.hamburgerBtn.classList.add('loaded');
-        });
-
         this.canvas.classList.add('loaded');
         this.resizeCanvas();
         this.drawCanvas();
+
+        // Double rAF: panel must paint at left:-100% before mobile-open triggers the slide
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                this.hamburgerBtn.classList.add('loaded');
+                this.openPanel();
+            });
+        });
     }
 
     returnToTitle() {
@@ -242,30 +279,11 @@ class Komplexiti {
     }
 
     // -------------------------------------------------------------------------
-    // Initial page load fade-in and tagline animation
+    // Initial page load fade-in
     // -------------------------------------------------------------------------
     showLoadedState() {
         requestAnimationFrame(() => {
             this.titleScreen.classList.add('loaded');
-        });
-        this.animateTagline();
-    }
-
-    animateTagline() {
-        const container = document.getElementById('animated-tagline');
-        if (!container) return;
-
-        const text = 'Explore the Complex Plane';
-        const n = text.length;
-
-        container.innerHTML = '';
-        [...text].forEach((char, i) => {
-            const span = document.createElement('span');
-            span.textContent = char === ' ' ? '\u00A0' : char;
-            span.style.setProperty('--char-index', i);
-            // Amplitude follows a sine envelope across the full string
-            span.style.setProperty('--amplitude', Math.sin((i / n) * Math.PI).toFixed(3));
-            container.appendChild(span);
         });
     }
 

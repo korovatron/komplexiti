@@ -226,47 +226,6 @@
             margin-bottom: 20px;
         }
 
-        /* Animated sine-wave tagline */
-        .sine-wave-text {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 2px;
-            font-size: 1.3em;
-            font-weight: 500;
-            color: #4A90E2;
-            margin: 20px 0;
-            min-height: 60px;
-            padding: 0 15px;
-        }
-
-        @media (max-width: 500px) {
-            .sine-wave-text {
-                font-size: 1.1em;
-                gap: 1px;
-                padding: 0 20px;
-            }
-        }
-
-        @media (max-width: 380px) {
-            .sine-wave-text {
-                font-size: 0.95em;
-                padding: 0 15px;
-            }
-        }
-
-        .sine-wave-text span {
-            display: inline-block;
-            animation: sineWave 2s ease-in-out infinite;
-            animation-delay: calc(var(--char-index) * 0.05s);
-        }
-
-        @keyframes sineWave {
-            0%, 100% { transform: translateY(0); }
-            25%       { transform: translateY(calc(-20px * var(--amplitude))); }
-            75%       { transform: translateY(calc(20px  * var(--amplitude))); }
-        }
-
         .title-screen .title-button {
             background: var(--bg-secondary);
             color: var(--text-primary);
@@ -369,13 +328,6 @@
         html.pwa-landscape .title-subtitle,
         html.title-compact-landscape .title-subtitle {
             margin-bottom: 8px !important;
-        }
-
-        html.pwa-landscape .sine-wave-text,
-        html.title-compact-landscape .sine-wave-text {
-            margin: 8px 0 !important;
-            font-size: 1em !important;
-            min-height: 40px !important;
         }
 
         html.pwa-landscape .title-screen .title-button,
@@ -619,6 +571,7 @@
         #mobile-overlay.active {
             display: block;
             pointer-events: auto;
+            cursor: pointer;
         }
 
         /* ------------------------------------------------------------------ */
@@ -655,10 +608,6 @@
             <div id="title-screen" class="title-screen">
                 <div class="title-wordmark"><span class="wordmark-k">K</span>omplexiti</div>
                 <div class="title-subtitle">Complex Numbers</div>
-
-                <div id="animated-tagline" class="sine-wave-text">
-                    <!-- Populated by JS -->
-                </div>
 
                 <button id="title-launch-button" class="title-button">Open Komplexiti</button>
 
