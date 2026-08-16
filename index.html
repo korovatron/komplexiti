@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+    <!-- iOS PWA meta tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Komplexiti">
+
+    <title>Komplexiti - Complex Numbers for A Level Maths</title>
+    <meta name="description" content="Interactive complex number explorer for A Level and Further Maths students. Visualise the complex plane, Argand diagrams, modulus-argument form, and more.">
+
+    <!-- PWA meta tags -->
+    <meta name="theme-color" content="#1A2F42">
+    <meta name="mobile-web-app-capable" content="yes">
+
+    <!-- Manifest -->
+    <link rel="manifest" href="./manifest.json">
+
+    <!-- Favicon placeholders - replace with real icons when available -->
+    <link rel="icon" href="./icon-192.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="./icon-192.png">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Theme variables                                                      */
+        /* ------------------------------------------------------------------ */
+        :root {
+            --bg-primary:    #1A2F42;
+            --bg-secondary:  #2A3F5A;
+            --canvas-bg:     #000000;
+            --text-primary:  #E8F4FD;
+            --text-secondary: #888;
+            --accent-color:  #4A90E2;
+            --accent-hover:  #6BA3E8;
+            --panel-bg:      rgba(42, 63, 90, 0.95);
+            --border-color:  #555;
+            --input-bg:      #3A4F6A;
+            --button-bg:     #4A90E2;
+            --primary-color: #4A90E2;
+
+            /* Safe area support for iOS notch / home-bar devices */
+            --safe-area-top:    env(safe-area-inset-top);
+            --safe-area-bottom: env(safe-area-inset-bottom);
+            --safe-area-left:   env(safe-area-inset-left);
+            --safe-area-right:  env(safe-area-inset-right);
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Base - iOS PWA fix: JS writes --actual-vh; CSS falls back to 100vh  */
+        /* ------------------------------------------------------------------ */
+        html, body {
+            width: 100%;
+            height: 100%;
+            height: var(--actual-vh, 100vh);
+            min-height: 100vh;
+            min-height: var(--actual-vh, 100vh);
+            overflow: hidden;
+            overscroll-behavior: none;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            touch-action: none;
+        }
+
+        /* Hide scroll bars on desktop */
+        @media (hover: hover) and (pointer: fine) {
+            html, body {
+                overflow: hidden;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+            }
+            html::-webkit-scrollbar,
+            body::-webkit-scrollbar {
+                display: none;
+            }
+        }
+
+        /* Suppress text selection / drag on all UI chrome */
+        button, label, img,
+        .title-wordmark, .title-screen,
+        #hamburger-menu, #return-to-title,
+        #sidebar-panel, .panel-section-title,
+        .panel-placeholder {
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-user-drag: none;
+            -webkit-touch-callout: none;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* App shell                                                            */
+        /* ------------------------------------------------------------------ */
+
+        /* Pin the app shell to the installed-PWA viewport so a transient short
+           height (share sheet, screenshots, app switching) cannot expose the
+           page background below the app. */
+        #app-container {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            height: var(--actual-vh, 100vh);
+            min-height: var(--actual-vh, 100vh);
+            display: flex;
+            flex-direction: column;
+        }
+
+        #canvas {
+            display: block;
+            background: var(--canvas-bg);
+            touch-action: none;
+            margin: 0;
+            padding: 0;
+            opacity: 0;
+            transition: opacity 0.3s ease-in;
+        }
+
+        #canvas.loaded {
+            opacity: 1;
+        }
+
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Buttons                                                              */
+        /* ------------------------------------------------------------------ */
+        button {
+            background: var(--button-bg);
+            color: var(--text-primary);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        @media (hover: hover) {
+            button:hover {
+                filter: brightness(1.15);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        button:active {
+            filter: brightness(1.15);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Title screen                                                         */
+        /* ------------------------------------------------------------------ */
+        .title-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            pointer-events: auto;
+            background: #1A2F42;
+            position: relative;
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 0.3s ease-in;
+        }
+
+        .title-screen.loaded {
+            opacity: 1;
+        }
+
+        /* Text wordmark - used on both title screen and in the sidebar panel */
+        .title-wordmark {
+            font-size: 3.2em;
+            font-weight: 700;
+            letter-spacing: -1px;
+            color: #E8F4FD;
+            margin-bottom: 4px;
+            line-height: 1;
+        }
+
+        .title-wordmark .wordmark-k {
+            color: #4A90E2;
+        }
+
+        .title-subtitle {
+            font-size: 0.85em;
+            color: rgba(232, 244, 253, 0.55);
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 20px;
+        }
+
+        /* Animated sine-wave tagline */
+        .sine-wave-text {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 2px;
+            font-size: 1.3em;
+            font-weight: 500;
+            color: #4A90E2;
+            margin: 20px 0;
+            min-height: 60px;
+            padding: 0 15px;
+        }
+
+        @media (max-width: 500px) {
+            .sine-wave-text {
+                font-size: 1.1em;
+                gap: 1px;
+                padding: 0 20px;
+            }
+        }
+
+        @media (max-width: 380px) {
+            .sine-wave-text {
+                font-size: 0.95em;
+                padding: 0 15px;
+            }
+        }
+
+        .sine-wave-text span {
+            display: inline-block;
+            animation: sineWave 2s ease-in-out infinite;
+            animation-delay: calc(var(--char-index) * 0.05s);
+        }
+
+        @keyframes sineWave {
+            0%, 100% { transform: translateY(0); }
+            25%       { transform: translateY(calc(-20px * var(--amplitude))); }
+            75%       { transform: translateY(calc(20px  * var(--amplitude))); }
+        }
+
+        .title-screen .title-button {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid #555;
+            padding: 12px 30px;
+            font-size: 1em;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: filter 0.2s, box-shadow 0.2s;
+            margin: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            display: inline-block;
+            min-width: 200px;
+        }
+
+        @media (hover: hover) {
+            .title-screen .title-button:hover {
+                filter: brightness(1.15);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        .title-screen .title-button:active {
+            filter: brightness(1.1);
+        }
+
+        /* Copyright notice - pinned to bottom of title screen */
+        .title-screen p.copyright {
+            position: absolute;
+            bottom: calc(20px + var(--safe-area-bottom, 0px));
+            left: 50%;
+            transform: translateX(-50%);
+            margin: 0;
+            max-width: 90%;
+            text-align: center;
+            line-height: 1.3;
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.6);
+            white-space: nowrap;
+        }
+
+        .title-screen p.copyright a {
+            color: rgba(255, 255, 255, 0.6);
+            text-decoration: none;
+        }
+
+        .title-screen p.copyright a:hover {
+            color: #B7DCFF;
+        }
+
+        .title-screen p.copyright .tools-row {
+            display: block;
+        }
+
+        .title-screen p.copyright .tool-separator {
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .title-screen p.copyright .tool-link:nth-of-type(1) { color: #ff355e; }
+        .title-screen p.copyright .tool-link:nth-of-type(1):hover { color: #ff5c7d; }
+        .title-screen p.copyright .tool-link:nth-of-type(2) { color: #39ff14; }
+        .title-screen p.copyright .tool-link:nth-of-type(2):hover { color: #66ff47; }
+        .title-screen p.copyright .tool-link:nth-of-type(3) { color: #00c8ff; }
+        .title-screen p.copyright .tool-link:nth-of-type(3):hover { color: #35d6ff; }
+
+        @media (max-width: 700px) {
+            .title-screen p.copyright .tool-separator { display: none; }
+            .title-screen p.copyright .tool-link { display: block; margin-top: 2px; }
+            .title-screen p.copyright { white-space: normal; }
+        }
+
+        /* Short landscape: let copyright flow naturally to avoid overlap */
+        @media (orientation: landscape) and (max-height: 500px),
+               (display-mode: standalone)  and (orientation: landscape) and (max-width: 950px),
+               (display-mode: fullscreen)  and (orientation: landscape) and (max-width: 950px) {
+            .title-screen p.copyright {
+                position: static;
+                left: auto;
+                bottom: auto;
+                transform: none;
+                margin-top: 10px;
+            }
+        }
+
+        html.pwa-landscape .title-screen p.copyright,
+        html.title-compact-landscape .title-screen p.copyright {
+            position: static;
+            left: auto;
+            bottom: auto;
+            transform: none;
+            margin-top: 10px;
+        }
+
+        html.pwa-landscape .title-wordmark,
+        html.title-compact-landscape .title-wordmark {
+            font-size: 2em !important;
+            margin-bottom: 2px !important;
+        }
+
+        html.pwa-landscape .title-subtitle,
+        html.title-compact-landscape .title-subtitle {
+            margin-bottom: 8px !important;
+        }
+
+        html.pwa-landscape .sine-wave-text,
+        html.title-compact-landscape .sine-wave-text {
+            margin: 8px 0 !important;
+            font-size: 1em !important;
+            min-height: 40px !important;
+        }
+
+        html.pwa-landscape .title-screen .title-button,
+        html.title-compact-landscape .title-screen .title-button {
+            padding: 8px 24px !important;
+            font-size: 0.95em !important;
+        }
+
+        /* Landscape: compact hamburger position */
+        html.pwa-landscape #hamburger-menu,
+        html.title-compact-landscape #hamburger-menu {
+            top:   calc(10px + var(--safe-area-top, 0px))   !important;
+            right: calc(10px + var(--safe-area-right, 0px)) !important;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Hamburger button                                                     */
+        /* ------------------------------------------------------------------ */
+        #hamburger-menu {
+            position: absolute;
+            top:   calc(20px + var(--safe-area-top, 0px));
+            right: calc(20px + var(--safe-area-right, 0px));
+            width: 40px;
+            height: 40px;
+            background: rgba(42, 63, 90, 0.95);
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            pointer-events: auto;
+            backdrop-filter: blur(5px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+            touch-action: manipulation;
+            opacity: 0;
+            transition: all 0.3s ease;
+            box-shadow: none;
+        }
+
+        #hamburger-menu.loaded {
+            opacity: 1;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            #hamburger-menu:hover {
+                background: rgba(74, 144, 226, 0.9);
+            }
+        }
+
+        /* Red background when the panel is open - signals "tap to close" */
+        #hamburger-menu.panel-open {
+            background: rgba(231, 76, 60, 0.9) !important;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            #hamburger-menu.panel-open:hover {
+                background: rgba(192, 57, 43, 0.95) !important;
+            }
+        }
+
+        .hamburger-line {
+            width: 20px;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.9);
+            margin: 2px 0;
+            transition: all 0.3s ease;
+        }
+
+        /* Animate hamburger lines into an X when active */
+        #hamburger-menu.active .hamburger-line:nth-child(1) {
+            transform: rotate(45deg) translate(5px, 5px);
+        }
+        #hamburger-menu.active .hamburger-line:nth-child(2) {
+            opacity: 0;
+        }
+        #hamburger-menu.active .hamburger-line:nth-child(3) {
+            transform: rotate(-45deg) translate(6px, -6px);
+        }
+
+        /* Force position: fixed on small screens / short screens */
+        @media (max-width: 500px), (max-height: 500px) {
+            #hamburger-menu {
+                position: fixed !important;
+            }
+        }
+
+        /* Hardware acceleration for iOS Safari - prevents UI disappearing after
+           orientation change */
+        @media (hover: none) and (pointer: coarse) {
+            #hamburger-menu {
+                transform: translateZ(0);
+                will-change: transform;
+            }
+            #sidebar-panel {
+                transform: translateZ(0) !important;
+                will-change: transform, left !important;
+            }
+            #mobile-overlay {
+                transform: translateZ(0) !important;
+                will-change: transform !important;
+            }
+        }
+
+        /* Landscape orientation: tighten hamburger position */
+        @media (max-width: 500px) and (orientation: landscape),
+               (max-height: 500px) and (orientation: landscape),
+               (display-mode: standalone) and (orientation: landscape) and (max-width: 950px),
+               (display-mode: fullscreen) and (orientation: landscape) and (max-width: 950px) {
+            #hamburger-menu {
+                top:   calc(10px + var(--safe-area-top, 0px))   !important;
+                right: calc(10px + var(--safe-area-right, 0px)) !important;
+            }
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Sidebar panel                                                        */
+        /* ------------------------------------------------------------------ */
+
+        /* The sidebar slides in from the left. It is always position:fixed so
+           it overlays the canvas without pushing it aside. The actual-vh fix
+           ensures it never leaves a gap at the bottom on iOS PWA. */
+        #sidebar-panel {
+            position: fixed !important;
+            top: 0 !important;
+            left: -100% !important;
+            width: 100% !important;
+            max-width: 330px !important;
+            height: 100vh !important;
+            height: var(--actual-vh, 100vh) !important;
+            min-height: var(--actual-vh, 100vh) !important;
+            z-index: 15;
+            transition: left 0.3s ease;
+            overflow-y: scroll;
+            border-radius: 0 !important;
+            padding: 20px !important;
+            padding-top:    max(20px, calc(var(--safe-area-top, 0px)    + 20px)) !important;
+            padding-bottom: max(20px, calc(var(--safe-area-bottom, 0px) + 20px)) !important;
+            backdrop-filter: blur(10px);
+            background: rgba(26, 47, 66, 0.95) !important;
+            /* Hide scrollbar on desktop */
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        #sidebar-panel::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* iOS PWA portrait: push content below the notch */
+        @media (max-width: 500px) and (display-mode: standalone),
+               (max-width: 500px) and (display-mode: fullscreen) {
+            #sidebar-panel {
+                padding-top: max(70px, calc(var(--safe-area-top, 0px) + 20px)) !important;
+            }
+        }
+
+        #sidebar-panel.mobile-open {
+            left: 0 !important;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Sidebar panel contents                                               */
+        /* ------------------------------------------------------------------ */
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .panel-wordmark {
+            font-size: 1.4em;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: #E8F4FD;
+        }
+
+        .panel-wordmark .wordmark-k {
+            color: #4A90E2;
+        }
+
+        #return-to-title {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid #555;
+            padding: 6px 14px;
+            font-size: 0.8em;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: filter 0.2s, box-shadow 0.2s;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+            white-space: nowrap;
+        }
+
+        @media (hover: hover) {
+            #return-to-title:hover {
+                filter: brightness(1.15);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        #return-to-title:active {
+            filter: brightness(1.1);
+        }
+
+        .panel-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 40px 20px;
+            gap: 12px;
+            color: rgba(232, 244, 253, 0.4);
+        }
+
+        .panel-placeholder p {
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Mobile overlay - darkens canvas when sidebar is open                */
+        /* ------------------------------------------------------------------ */
+        #mobile-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 14;
+            display: none;
+            pointer-events: none;
+        }
+
+        #mobile-overlay.active {
+            display: block;
+            pointer-events: auto;
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Small-screen overrides                                               */
+        /* ------------------------------------------------------------------ */
+        @media (max-width: 500px) {
+            #sidebar-panel {
+                max-width: 330px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="sr-only" aria-label="Komplexiti app description">
+        <h1>Komplexiti - Complex Number Explorer</h1>
+        <p>Komplexiti is an interactive complex number tool for A Level and Further Maths students. Visualise the Argand diagram, modulus-argument form, loci, and transformations in the complex plane.</p>
+    </main>
+
+    <div id="app-container">
+        <canvas id="canvas"></canvas>
+
+        <div id="ui-overlay">
+            <!-- Hamburger menu button -->
+            <button id="hamburger-menu" class="hidden" aria-label="Toggle sidebar">
+                <div class="hamburger-line"></div>
+                <div class="hamburger-line"></div>
+                <div class="hamburger-line"></div>
+            </button>
+
+            <!-- Tap-outside-to-close overlay -->
+            <div id="mobile-overlay"></div>
+
+            <!-- Title screen -->
+            <div id="title-screen" class="title-screen">
+                <div class="title-wordmark"><span class="wordmark-k">K</span>omplexiti</div>
+                <div class="title-subtitle">Complex Numbers</div>
+
+                <div id="animated-tagline" class="sine-wave-text">
+                    <!-- Populated by JS -->
+                </div>
+
+                <button id="title-launch-button" class="title-button">Open Komplexiti</button>
+
+                <p class="copyright">
+                    &copy; 2026 Neil Kendall
+                    <span class="tools-row">
+                        <a class="tool-link" href="https://www.korovatron.co.uk/graphiti/" target="_blank" rel="noopener noreferrer">Graphiti</a>
+                        <span class="tool-separator"> | </span>
+                        <a class="tool-link" href="https://www.korovatron.co.uk/vectorama/" target="_blank" rel="noopener noreferrer">Vectorama</a>
+                        <span class="tool-separator"> | </span>
+                        <a class="tool-link" href="https://www.korovatron.co.uk/" target="_blank" rel="noopener noreferrer">Korovatron</a>
+                    </span>
+                </p>
+            </div>
+
+            <!-- Sidebar panel -->
+            <div id="sidebar-panel" class="hidden">
+                <div class="panel-header">
+                    <span class="panel-wordmark"><span class="wordmark-k">K</span>omplexiti</span>
+                    <button id="return-to-title">&#8592; Title</button>
+                </div>
+
+                <div class="panel-placeholder">
+                    <p>Complex number tools will appear here.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="./main.js"></script>
+</body>
+</html>
