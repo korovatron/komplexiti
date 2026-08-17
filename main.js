@@ -1591,12 +1591,14 @@ class Komplexiti {
                     c.re   = null;
                     c.im   = null;
                     hasError = true;
+                    c.errorMessage = `'${assignment.name}' is a reserved name`;
                 } else {
                     c.name = assignment.name; // keep name even if duplicate; _refreshDuplicateNameErrors handles it
                     const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, this.buildConstantScope(c.id));
                     c.re = parsed !== null ? parsed.re : null;
                     c.im = parsed !== null ? parsed.im : null;
                     hasError = parsed === null;
+                    c.errorMessage = hasError ? 'Cannot evaluate expression' : '';
                 }
             } else if (raw.includes('=')) {
                 // Not a simple name=value assignment — try to solve as an equation
@@ -1608,8 +1610,10 @@ class Komplexiti {
                     c.type = 'equation';
                     c.roots = eq.roots;
                     c.equationVar = eq.variable;
+                    c.errorMessage = '';
                 } else {
                     hasError = true;
+                    c.errorMessage = 'Needs exactly one undefined variable';
                 }
             } else {
                 c.name = null;
@@ -1617,6 +1621,7 @@ class Komplexiti {
                 c.re = parsed !== null ? parsed.re : null;
                 c.im = parsed !== null ? parsed.im : null;
                 hasError = raw.length > 0 && parsed === null;
+                c.errorMessage = hasError ? 'Cannot evaluate expression' : '';
             }
 
             c.hasParseError = hasError;
@@ -1787,6 +1792,9 @@ class Komplexiti {
                 if (isDuplicate) {
                     errLabel.textContent = `'${c.name}' is defined more than once`;
                     errLabel.style.display = 'block';
+                } else if (c.hasParseError && c.errorMessage) {
+                    errLabel.textContent = c.errorMessage;
+                    errLabel.style.display = 'block';
                 } else {
                     errLabel.textContent = '';
                     errLabel.style.display = 'none';
@@ -1835,15 +1843,17 @@ class Komplexiti {
                     c.re = parsed !== null ? parsed.re : null;
                     c.im = parsed !== null ? parsed.im : null;
                     c.hasParseError = parsed === null;
+                    c.errorMessage  = parsed === null ? 'Cannot evaluate expression' : '';
                 } else if (!assignment && raw.includes('=')) {
                     const eq = this.parseEquation(raw, c.id);
-                    if (eq) { c.type = 'equation'; c.roots = eq.roots; c.equationVar = eq.variable; c.hasParseError = false; }
-                    else    { c.roots = null; c.hasParseError = true; }
+                    if (eq) { c.type = 'equation'; c.roots = eq.roots; c.equationVar = eq.variable; c.hasParseError = false; c.errorMessage = ''; }
+                    else    { c.roots = null; c.hasParseError = true; c.errorMessage = 'Needs exactly one undefined variable'; }
                 } else if (!assignment) {
                     const parsed = this.parseComplexFromLatex(raw, scope);
                     c.re = parsed !== null ? parsed.re : null;
                     c.im = parsed !== null ? parsed.im : null;
                     c.hasParseError = raw.length > 0 && parsed === null;
+                    c.errorMessage  = c.hasParseError ? 'Cannot evaluate expression' : '';
                 }
             }
         }
@@ -1916,7 +1926,7 @@ class Komplexiti {
         const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'Infinity', 'NaN']);
         const known    = new Set(Object.keys(scope));
         const free     = new Set();
-        for (const [, id] of expr.matchAll(/\b([a-zA-Z][a-zA-Z0-9]*)\b/g)) {
+        for (const [, id] of expr.matchAll(/(?<![a-zA-Z_])([a-zA-Z][a-zA-Z0-9]*)/g)) {
             if (!reserved.has(id) && !known.has(id)) free.add(id);
         }
         return free.size === 1 ? [...free][0] : null;
