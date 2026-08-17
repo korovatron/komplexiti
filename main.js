@@ -26,6 +26,16 @@ class Komplexiti {
         // ---- UI preferences ----
         this.sizeMode = 'normal';   // 'normal' | 'large' | 'xlarge'
 
+        // ---- Complex number constants ----
+        this.complexConstants = [];
+        this.nextConstantId   = 1;
+        this.constantColors   = [
+            '#0057FF', '#00C853', '#B91C1C',
+            '#C026D3', '#1ABC9C', '#00E5FF', '#A855F7',
+            '#FF6B6B', '#4A90E2', '#FFD400', '#84CC16', '#F39C12'
+        ];
+        this.displayMode = 'arrow'; // 'arrow' | 'point'
+
         // ---- Input state ----
         this.input = {
             mouse: { down: false, x: 0, y: 0, velocityX: 0, velocityY: 0, lastMoveTime: 0 },
@@ -147,13 +157,14 @@ class Komplexiti {
     // DOM element references
     // -------------------------------------------------------------------------
     initElements() {
-        this.hamburgerBtn  = document.getElementById('hamburger-menu');
-        this.sidebarPanel  = document.getElementById('sidebar-panel');
-        this.mobileOverlay = document.getElementById('mobile-overlay');
-        this.titleScreen   = document.getElementById('title-screen');
-        this.launchBtn     = document.getElementById('title-launch-button');
-        this.returnBtn     = document.getElementById('return-to-title');
-        this.appContainer  = document.getElementById('app-container');
+        this.hamburgerBtn       = document.getElementById('hamburger-menu');
+        this.sidebarPanel       = document.getElementById('sidebar-panel');
+        this.mobileOverlay      = document.getElementById('mobile-overlay');
+        this.titleScreen        = document.getElementById('title-screen');
+        this.launchBtn          = document.getElementById('title-launch-button');
+        this.returnBtn          = document.getElementById('return-to-title');
+        this.appContainer       = document.getElementById('app-container');
+        this.constantsContainer = document.getElementById('constants-container');
     }
 
     // -------------------------------------------------------------------------
@@ -229,6 +240,11 @@ class Komplexiti {
         if (themeToggle) themeToggle.addEventListener('click', () => this.toggleTheme());
         const sizeModeToggle = document.getElementById('size-mode-toggle');
         if (sizeModeToggle) sizeModeToggle.addEventListener('click', () => this.toggleSizeMode());
+
+        const addConstantBtn = document.getElementById('add-constant-btn');
+        if (addConstantBtn) addConstantBtn.addEventListener('click', () => this.addConstant());
+        const displayModeToggle = document.getElementById('display-mode-toggle');
+        if (displayModeToggle) displayModeToggle.addEventListener('click', () => this.toggleDisplayMode());
     }
 
     isNarrow() {
@@ -334,6 +350,7 @@ class Komplexiti {
         this.drawGrid();
         this.drawAxes();
         this.drawAxisLabels();
+        this.drawComplexConstants();
     }
 
     // -------------------------------------------------------------------------
@@ -759,6 +776,15 @@ class Komplexiti {
     // =========================================================================
 
     handleKeyboard(e) {
+        // Suppress all key handling while a text / math input is focused
+        const active = document.activeElement;
+        if (active && (
+            active.tagName === 'INPUT' ||
+            active.tagName === 'TEXTAREA' ||
+            active.isContentEditable ||
+            active.tagName === 'MATH-FIELD'
+        )) return;
+
         if (e.key === 'Escape') {
             if (e.repeat) return;
             this.returnToTitle();
@@ -770,8 +796,6 @@ class Komplexiti {
             return;
         }
         if (this.currentState !== this.states.APP) return;
-        const active = document.activeElement;
-        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
 
         switch (e.key) {
             case '=': case '+': e.preventDefault(); this.zoomIn();         break;
@@ -947,8 +971,22 @@ class Komplexiti {
             if (darkIcon)  darkIcon.style.opacity  = '0.3';
             localStorage.setItem('komplexiti-theme', 'light');
         }
+        document.querySelectorAll('.expr-card math-field').forEach(f => this.applyMathFieldTheme(f));
         this.updateCanvasBackground();
         if (this.currentState === this.states.APP) this.drawCanvas();
+    }
+
+    applyMathFieldTheme(field) {
+        // Read from sidebar-panel scope: it always overrides --input-bg to dark regardless of app theme
+        const scope     = document.getElementById('sidebar-panel') || document.documentElement;
+        const cs        = getComputedStyle(scope);
+        const inputBg   = cs.getPropertyValue('--input-bg').trim()    || '#3A4F6A';
+        const textColor = cs.getPropertyValue('--text-primary').trim() || '#E8F4FD';
+        field.style.setProperty('background',    inputBg,   'important');
+        field.style.setProperty('--background',  inputBg,   'important');
+        field.style.setProperty('color',         textColor, 'important');
+        field.style.setProperty('--text-color',  textColor, 'important');
+        field.style.setProperty('--caret-color', textColor);
     }
 
     initializeTheme() {
@@ -998,6 +1036,209 @@ class Komplexiti {
         if (s) s.style.opacity = '1';
         if (m) m.style.opacity = '0.3';
         if (l) l.style.opacity = '0.3';
+    }
+
+    // =========================================================================
+    // Complex number constants
+    // =========================================================================
+
+    addConstant() {
+        const id = this.nextConstantId++;
+        let color;
+        if (this.complexConstants.length === 0) {
+            color = this.constantColors[0];
+        } else {
+            const prevColor = this.complexConstants[this.complexConstants.length - 1].color;
+            const prevIdx   = this.constantColors.indexOf(prevColor);
+            color = this.constantColors[(prevIdx + 1) % this.constantColors.length];
+        }
+        const c = { id, color, enabled: true, latex: '', re: null, im: null };
+        this.complexConstants.push(c);
+        this.createConstantUI(c);
+    }
+
+    createConstantUI(c) {
+        const card = document.createElement('div');
+        card.className = 'expr-card';
+        card.style.borderLeftColor = c.color;
+        card.setAttribute('data-const-id', c.id);
+
+        const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
+
+        card.innerHTML = `
+            <div class="expr-card-main-row">
+                <span class="expr-card-label">z${toSub(c.id)}</span>
+                <math-field
+                    default-mode="math"
+                    virtual-keyboard-mode="manual"
+                    color-scheme="dark"
+                ></math-field>
+                <div class="expr-card-controls">
+                    <button class="expr-remove-btn" title="Delete" aria-label="Delete constant">
+                        <svg viewBox="0 0 16 16"><path d="M4 4L12 12M12 4L4 12"/></svg>
+                    </button>
+                    <div class="expr-color-dot" style="background:${c.color};opacity:${c.enabled ? 1 : 0.3}" title="Toggle visibility"></div>
+                </div>
+            </div>`;
+
+        const mathField = card.querySelector('math-field');
+        const dot       = card.querySelector('.expr-color-dot');
+        const removeBtn = card.querySelector('.expr-remove-btn');
+
+        mathField.addEventListener('input', () => {
+            c.latex = mathField.value;
+            const parsed = this.parseComplexFromLatex(c.latex);
+            c.re = parsed !== null ? parsed.re : null;
+            c.im = parsed !== null ? parsed.im : null;
+            const hasError = c.latex.trim().length > 0 && parsed === null;
+            if (hasError) {
+                mathField.classList.add('input-error');
+                mathField.style.setProperty('background', 'rgba(231, 76, 60, 0.1)', 'important');
+            } else {
+                mathField.classList.remove('input-error');
+                const scope  = document.getElementById('sidebar-panel') || document.documentElement;
+                const inputBg = getComputedStyle(scope).getPropertyValue('--input-bg').trim() || '#3A4F6A';
+                mathField.style.setProperty('background', inputBg, 'important');
+            }
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        });
+
+        removeBtn.addEventListener('click', () => this.removeConstant(c.id));
+
+        dot.addEventListener('click', () => {
+            c.enabled = !c.enabled;
+            dot.style.opacity = c.enabled ? '1' : '0.3';
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        });
+
+        if (this.constantsContainer) this.constantsContainer.appendChild(card);
+
+        // Apply theme after DOM insertion so MathLive's connectedCallback fires first
+        requestAnimationFrame(() => {
+            this.applyMathFieldTheme(mathField);
+            try { mathField.focus(); } catch { /* ignore */ }
+        });
+    }
+
+    removeConstant(id) {
+        const idx = this.complexConstants.findIndex(c => c.id === id);
+        if (idx !== -1) this.complexConstants.splice(idx, 1);
+        const card = document.querySelector(`.expr-card[data-const-id="${id}"]`);
+        if (card) card.remove();
+        if (this.currentState === this.states.APP) this.drawCanvas();
+    }
+
+    parseComplexFromLatex(latex) {
+        if (!latex || !latex.trim() || typeof math === 'undefined') return null;
+        try {
+            let e = latex.trim();
+            // Resolve \frac{a}{b} iteratively to handle one level of nesting
+            for (let p = 0; p < 4; p++) {
+                e = e.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '(($1)/($2))');
+            }
+            // \sqrt{a} -> sqrt(a)
+            for (let p = 0; p < 3; p++) {
+                e = e.replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt($1)');
+            }
+            e = e.replace(/\^\s*\{([^{}]+)\}/g, '^($1)');         // ^{a} -> ^(a)
+            e = e.replace(/\{([^{}]*)\}/g, '($1)');               // remaining {} grouping
+            e = e.replace(/\\left\s*[(\[]/g, '(').replace(/\\right\s*[)\]]/g, ')');
+            e = e.replace(/\\cdot|\\times/g, '*');
+            e = e.replace(/\\pi/g, 'pi');
+            e = e.replace(/\\cos/g, 'cos').replace(/\\sin/g, 'sin').replace(/\\tan/g, 'tan');
+            e = e.replace(/\\ln\b/g, 'log').replace(/\\log\b/g, 'log10');
+            e = e.replace(/\\exp\b/g, 'exp').replace(/\\sqrt\b/g, 'sqrt');
+            e = e.replace(/\\imaginaryI|\\imath/g, 'i');
+            e = e.replace(/\\[a-zA-Z]+\s*/g, '');                 // strip remaining LaTeX commands
+            e = e.trim();
+            if (!e) return null;
+            const result = math.evaluate(e);
+            if (typeof result === 'number') return { re: result, im: 0 };
+            if (result && typeof result.re === 'number') return { re: result.re, im: result.im };
+            return null;
+        } catch { return null; }
+    }
+
+    toggleDisplayMode() {
+        this.displayMode = this.displayMode === 'arrow' ? 'point' : 'arrow';
+        const arrowIcon = document.querySelector('.mode-arrow-icon');
+        const pointIcon = document.querySelector('.mode-point-icon');
+        const label     = document.getElementById('display-mode-label');
+        if (arrowIcon) arrowIcon.style.opacity = this.displayMode === 'arrow' ? '1' : '0.35';
+        if (pointIcon) pointIcon.style.opacity = this.displayMode === 'point' ? '1' : '0.35';
+        if (label)     label.textContent = this.displayMode === 'arrow' ? 'Arrow' : 'Point';
+        if (this.currentState === this.states.APP) this.drawCanvas();
+    }
+
+    drawComplexConstants() {
+        if (!this.complexConstants.length) return;
+        const ctx     = this.ctx;
+        const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+        const toSub   = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
+        const fSize   = this.sizeMode === 'xlarge' ? 22 : this.sizeMode === 'large' ? 18 : 15;
+        const dotR    = this.sizeMode === 'xlarge' ? 7  : this.sizeMode === 'large' ? 6  : 5;
+        const headLen = 9;
+
+        for (const c of this.complexConstants) {
+            if (!c.enabled || c.re === null || c.im === null) continue;
+            if (!isFinite(c.re) || !isFinite(c.im)) continue;
+
+            const pt  = this.worldToScreen(c.re, c.im);
+            const org = this.worldToScreen(0, 0);
+
+            if (this.displayMode === 'arrow') {
+                const dx  = pt.x - org.x;
+                const dy  = pt.y - org.y;
+                const len = Math.hypot(dx, dy);
+                if (len > dotR + 2) {
+                    const ang  = Math.atan2(dy, dx);
+                    const tipX = pt.x - dotR * Math.cos(ang);
+                    const tipY = pt.y - dotR * Math.sin(ang);
+                    ctx.save();
+                    ctx.strokeStyle = c.color;
+                    ctx.lineWidth   = 2;
+                    ctx.globalAlpha = 0.9;
+                    ctx.beginPath();
+                    ctx.moveTo(org.x, org.y);
+                    ctx.lineTo(tipX, tipY);
+                    ctx.stroke();
+                    ctx.fillStyle   = c.color;
+                    ctx.beginPath();
+                    ctx.moveTo(tipX, tipY);
+                    ctx.lineTo(tipX - headLen * Math.cos(ang - 0.38), tipY - headLen * Math.sin(ang - 0.38));
+                    ctx.lineTo(tipX - headLen * Math.cos(ang + 0.38), tipY - headLen * Math.sin(ang + 0.38));
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
+
+            // Dot
+            ctx.save();
+            ctx.fillStyle   = c.color;
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, dotR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.55)';
+            ctx.lineWidth   = 1.5;
+            ctx.stroke();
+            ctx.restore();
+
+            // Label
+            const label = `z${toSub(c.id)}`;
+            ctx.save();
+            ctx.font        = `italic ${fSize}px Arial`;
+            ctx.globalAlpha = 1;
+            const tw = ctx.measureText(label).width;
+            const lx = pt.x + dotR + 4;
+            const ly = pt.y - dotR - 2;
+            ctx.fillStyle = isLight ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.5)';
+            ctx.fillRect(lx - 2, ly - fSize + 1, tw + 4, fSize + 3);
+            ctx.fillStyle = c.color;
+            ctx.fillText(label, lx, ly);
+            ctx.restore();
+        }
     }
 }
 

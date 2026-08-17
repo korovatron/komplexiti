@@ -626,7 +626,7 @@
         }
 
         /* ------------------------------------------------------------------ */
-        /* Mobile overlay - darkens canvas when sidebar is open                */
+        /* Mobile overlay - tap-outside-to-close hit target (no dimming)        */
         /* ------------------------------------------------------------------ */
         #mobile-overlay {
             position: fixed;
@@ -634,7 +634,6 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.5);
             z-index: 14;
             display: none;
             pointer-events: none;
@@ -653,6 +652,193 @@
             #sidebar-panel {
                 max-width: 330px !important;
             }
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Complex number expression cards                                      */
+        /* ------------------------------------------------------------------ */
+        .panel-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .panel-section-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(232, 244, 253, 0.5);
+        }
+
+        .add-constant-btn {
+            width: 26px;
+            height: 26px;
+            padding: 0;
+            background: #2A3F5A !important;
+            border: 1px solid #555 !important;
+            border-radius: 5px;
+            color: #E8F4FD !important;
+            font-size: 20px;
+            line-height: 1;
+            box-shadow: none !important;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        @media (hover: hover) {
+            .add-constant-btn:hover {
+                background: rgba(74, 144, 226, 0.3) !important;
+                border-color: #4A90E2 !important;
+            }
+        }
+
+        .add-constant-btn:active {
+            background: rgba(74, 144, 226, 0.3) !important;
+        }
+
+        #constants-container {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .expr-card {
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 10px;
+            padding: 8px;
+            background: rgba(74, 144, 226, 0.1);
+            border-radius: 4px;
+            border-left: 3px solid;
+        }
+
+        .expr-card-main-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .expr-card-label {
+            font-size: 16px;
+            font-style: italic;
+            color: var(--text-primary);
+            flex-shrink: 0;
+            min-width: 22px;
+            line-height: 1;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .expr-card math-field {
+            flex: 1;
+            min-width: 0;
+            font-size: 18px !important;
+            padding: 2px 4px !important;
+            line-height: 1.1 !important;
+            min-height: 26px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            --border-radius: 4px;
+            --border: 1px solid var(--border-color);
+            --background: var(--input-bg) !important;
+            --text-color: var(--text-primary);
+            --caret-color: white;
+            --selection-background-color: var(--accent-color);
+            --selection-color: white;
+            --contains-highlight-background-color: rgba(74, 144, 226, 0.3);
+            --keyboard-zindex: 9999;
+        }
+
+        .expr-card math-field::part(menu-toggle),
+        .expr-card math-field::part(virtual-keyboard-toggle),
+        .expr-card math-field::part(keyboard-toggle) {
+            display: none;
+        }
+
+        .expr-card math-field:focus-within {
+            --border: 1px solid var(--accent-color) !important;
+            border: 1px solid var(--accent-color) !important;
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.35) !important;
+            outline: none;
+        }
+
+        .expr-card math-field.input-error {
+            border: 2px solid #E74C3C !important;
+            border-radius: 4px !important;
+        }
+
+        .expr-card math-field.input-error:focus-within {
+            border: 2px solid #E74C3C !important;
+            box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.3) !important;
+        }
+
+        .expr-card-controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+
+        .expr-remove-btn {
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            background: #2A3F5A !important;
+            border: 1px solid #555 !important;
+            box-shadow: none !important;
+            color: var(--text-primary) !important;
+            cursor: pointer;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0;
+        }
+
+        @media (hover: hover) {
+            .expr-remove-btn:hover {
+                background: rgba(180, 60, 60, 0.7) !important;
+                border-color: #b43c3c !important;
+            }
+        }
+
+        .expr-remove-btn:active {
+            background: rgba(180, 60, 60, 0.7) !important;
+        }
+
+        .expr-remove-btn svg {
+            width: 12px;
+            height: 12px;
+            stroke: currentColor;
+            stroke-width: 2.6;
+            fill: none;
+            stroke-linecap: round;
+        }
+
+        .expr-color-dot {
+            width: 20px;
+            height: 20px;
+            border-radius: 5px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        @media (hover: hover) {
+            .expr-color-dot:hover {
+                border-color: rgba(255, 255, 255, 0.5);
+                transform: scale(1.1);
+            }
+        }
+
+        .expr-color-dot:active {
+            border-color: rgba(255, 255, 255, 0.5);
+            transform: scale(1.1);
         }
     </style>
 </head>
@@ -730,10 +916,33 @@
                         </button>
                     </div>
                 </div>
+
+                <div class="panel-section" id="constants-section">
+                    <div class="panel-section-header">
+                        <span class="panel-section-label">Complex Numbers</span>
+                        <button id="add-constant-btn" class="add-constant-btn" title="Add complex number" aria-label="Add complex number">+</button>
+                    </div>
+                    <div class="panel-control-row" style="margin-bottom: 8px;">
+                        <button id="display-mode-toggle" class="panel-btn" title="Toggle display mode" style="grid-column: 1 / -1;">
+                            <svg class="mode-arrow-icon" width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 1;">
+                                <line x1="1" y1="6" x2="12" y2="6"/>
+                                <polyline points="8,2 12,6 8,10"/>
+                            </svg>
+                            <div class="btn-separator"></div>
+                            <svg class="mode-point-icon" width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style="opacity: 0.35;">
+                                <circle cx="6" cy="6" r="4"/>
+                            </svg>
+                            <span id="display-mode-label" style="font-size: 11px; margin-left: 5px;">Arrow</span>
+                        </button>
+                    </div>
+                    <div id="constants-container"></div>
+                </div>
             </div>
         </div>
     </div>
 
+    <script src="https://unpkg.com/mathlive"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js"></script>
     <script src="./main.js"></script>
 </body>
 </html>
