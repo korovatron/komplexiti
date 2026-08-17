@@ -1029,21 +1029,24 @@ class Komplexiti {
         }, { passive: false });
         this.canvas.addEventListener('touchend', (e) => {
             if (this.currentState !== this.states.APP) return;
-            // Dismiss keyboard when the user taps the canvas on a touch device
+            // Dismiss keyboard when the user taps the canvas on a touch device.
+            // e.preventDefault() is critical on iOS: without it the browser generates
+            // synthetic focus events after touchend that immediately refocus the math
+            // field and reopen the keyboard before the dismiss lock can take effect.
             if (window.mathVirtualKeyboard?.visible) {
+                e.preventDefault();
                 this.keyboardDismissedByCanvas = true;
-                this.virtualKeyboardDismissLockUntil = Date.now() + 350;
+                this.virtualKeyboardDismissLockUntil = Date.now() + 500;
                 this.clearMathLiveFocusState();
                 window.mathVirtualKeyboard.hide();
-                // Retry: MathLive can re-show within the same event cycle
-                [80, 200].forEach(ms => setTimeout(() => {
+                [80, 200, 380].forEach(ms => setTimeout(() => {
                     if (window.mathVirtualKeyboard?.visible && Date.now() <= this.virtualKeyboardDismissLockUntil) {
                         window.mathVirtualKeyboard.hide();
                     }
                 }, ms));
             }
             this.handleTouchEnd(e);
-        }, { passive: true });
+        }, { passive: false }); // non-passive so e.preventDefault() is available
         this.canvas.addEventListener('touchcancel', (e) => {
             if (this.currentState !== this.states.APP) return;
             this.handleTouchEnd(e);
