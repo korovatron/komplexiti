@@ -85,35 +85,6 @@ class Komplexiti {
         this.resizeCanvas();
         this.showLoadedState();
         this.registerServiceWorker();
-        this.startDebugOverlay();
-    }
-
-    startDebugOverlay() {
-        const el = document.getElementById('debug-overlay');
-        if (!el) return;
-        const update = () => {
-            try {
-                const ac = this.appContainer.getBoundingClientRect();
-                const actualVh = getComputedStyle(document.documentElement).getPropertyValue('--actual-vh').trim();
-                const vv = window.visualViewport;
-                const lines = [
-                    'innerW/H : ' + window.innerWidth + ' x ' + window.innerHeight,
-                    'screen   : ' + window.screen.width + ' x ' + window.screen.height,
-                    'dpr      : ' + window.devicePixelRatio,
-                    '--actual-vh: ' + actualVh,
-                    'vvp      : ' + (vv ? vv.width.toFixed(1) + ' x ' + vv.height.toFixed(1) : 'n/a'),
-                    'appCont  : ' + ac.width.toFixed(2) + ' x ' + ac.height.toFixed(2),
-                    'canvas   : ' + this.canvas.width + ' x ' + this.canvas.height,
-                    'isPWA    : ' + (window.matchMedia('(display-mode:standalone)').matches || !!window.navigator.standalone),
-                ];
-                el.innerHTML = lines.join('<br>');
-            } catch(e) {
-                el.innerHTML = 'err: ' + e.message;
-            }
-        };
-        update();
-        window.addEventListener('resize', update);
-        setInterval(update, 1000);
     }
 
     // -------------------------------------------------------------------------
