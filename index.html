@@ -36,7 +36,7 @@
         :root {
             --bg-primary:    #1A2F42;
             --bg-secondary:  #2A3F5A;
-            --canvas-bg:     #000000;
+            --canvas-bg:     blue; /* DEBUG */
             --text-primary:  #E8F4FD;
             --text-secondary: #888;
             --accent-color:  #4A90E2;
@@ -101,7 +101,7 @@
             overflow: hidden;
             overscroll-behavior: none;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--bg-primary);
+            background: red; /* DEBUG */
             color: var(--text-primary);
             touch-action: none;
         }
@@ -153,6 +153,7 @@
             min-height: var(--actual-vh, 100vh);
             display: flex;
             flex-direction: column;
+            background: lime; /* DEBUG */
         }
 
         /* Pin the canvas box to the container so the backing-store size (which is
