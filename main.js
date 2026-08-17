@@ -314,7 +314,61 @@ class Komplexiti {
                             ]
                         };
 
-                        window.mathVirtualKeyboard.layouts = [complexLayout, trigLayout];
+                        const abcLayout = {
+                            label: 'abc',
+                            labelClass: 'MLK__tex-math',
+                            tooltip: 'Variables & Constants',
+                            rows: [
+                                [
+                                    { latex: 'q', label: 'q', shift: { latex: 'Q', label: 'Q' } },
+                                    { latex: 'w', label: 'w', shift: { latex: 'W', label: 'W' } },
+                                    { latex: 'e', label: 'e', shift: { latex: 'E', label: 'E' } },
+                                    { latex: 'r', label: 'r', shift: { latex: 'R', label: 'R' } },
+                                    { latex: 't', label: 't', shift: { latex: 'T', label: 'T' } },
+                                    { latex: 'y', label: 'y', shift: { latex: 'Y', label: 'Y' } },
+                                    { latex: 'u', label: 'u', shift: { latex: 'U', label: 'U' } },
+                                    { latex: 'i', label: 'i', shift: { latex: 'I', label: 'I' } },
+                                    { latex: 'o', label: 'o', shift: { latex: 'O', label: 'O' } },
+                                    { latex: 'p', label: 'p', shift: { latex: 'P', label: 'P' } }
+                                ],
+                                [
+                                    { latex: 'a', label: 'a', shift: { latex: 'A', label: 'A' } },
+                                    { latex: 's', label: 's', shift: { latex: 'S', label: 'S' } },
+                                    { latex: 'd', label: 'd', shift: { latex: 'D', label: 'D' } },
+                                    { latex: 'f', label: 'f', shift: { latex: 'F', label: 'F' } },
+                                    { latex: 'g', label: 'g', shift: { latex: 'G', label: 'G' } },
+                                    { latex: 'h', label: 'h', shift: { latex: 'H', label: 'H' } },
+                                    { latex: 'j', label: 'j', shift: { latex: 'J', label: 'J' } },
+                                    { latex: 'k', label: 'k', shift: { latex: 'K', label: 'K' } },
+                                    { latex: 'l', label: 'l', shift: { latex: 'L', label: 'L' } },
+                                    { label: '[backspace]', width: 1 }
+                                ],
+                                [
+                                    { label: '[shift]', width: 1 },
+                                    { latex: 'z', label: 'z', shift: { latex: 'Z', label: 'Z' } },
+                                    { latex: 'x', label: 'x', shift: { latex: 'X', label: 'X' } },
+                                    { latex: 'c', label: 'c', shift: { latex: 'C', label: 'C' } },
+                                    { latex: 'v', label: 'v', shift: { latex: 'V', label: 'V' } },
+                                    { latex: 'b', label: 'b', shift: { latex: 'B', label: 'B' } },
+                                    { latex: 'n', label: 'n', shift: { latex: 'N', label: 'N' } },
+                                    { latex: 'm', label: 'm', shift: { latex: 'M', label: 'M' } },
+                                    { latex: '=', label: '=' },
+                                    { latex: '+', label: '+' }
+                                ],
+                                [
+                                    '[left]', '[right]',
+                                    { latex: '(', label: '(' },
+                                    { latex: ')', label: ')' },
+                                    '[separator]',
+                                    { latex: 'z', label: 'z', shift: { latex: 'Z', label: 'Z' } },
+                                    { latex: 'w', label: 'w', shift: { latex: 'W', label: 'W' } },
+                                    { latex: '\\theta', label: 'θ', shift: { latex: '\\phi', label: 'φ' } },
+                                    { latex: '-', label: '-' }
+                                ]
+                            ]
+                        };
+
+                        window.mathVirtualKeyboard.layouts = [complexLayout, trigLayout, abcLayout];
 
                         // Mobile-specific setup
                         const isIPadOS = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
