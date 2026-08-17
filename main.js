@@ -769,8 +769,9 @@ class Komplexiti {
     // Canvas
     // -------------------------------------------------------------------------
     resizeCanvas() {
-        const w = this.appContainer.clientWidth;
-        const h = this.appContainer.clientHeight;
+        const rect = this.appContainer.getBoundingClientRect();
+        const w = Math.ceil(rect.width);
+        const h = Math.ceil(rect.height);
         if (this.canvas.width !== w || this.canvas.height !== h) {
             this.canvas.width = w;
             this.canvas.height = h;
