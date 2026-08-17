@@ -814,13 +814,21 @@ class Komplexiti {
     // -------------------------------------------------------------------------
     // Service Worker registration
     // -------------------------------------------------------------------------
-    registerServiceWorker() {
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js').catch((err) => {
-                    console.warn('Service worker registration failed:', err);
+    async registerServiceWorker() {
+        if (!('serviceWorker' in navigator)) return;
+        try {
+            const registration = await navigator.serviceWorker.register('./sw.js');
+            registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        newWorker.postMessage({ type: 'SKIP_WAITING' });
+                        setTimeout(() => window.location.reload(), 1000);
+                    }
                 });
             });
+        } catch (err) {
+            console.warn('Service worker registration failed:', err);
         }
     }
     // =========================================================================

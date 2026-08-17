@@ -1,10 +1,12 @@
-const CACHE_NAME = 'komplexiti-v1.0.18';
+const CACHE_NAME = 'komplexiti-v1.0.19';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
     './main.js',
     './manifest.json',
-    './sw.js'
+    './sw.js',
+    'https://unpkg.com/mathlive',
+    'https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js'
 ];
 
 self.addEventListener('install', (event) => {
@@ -21,9 +23,7 @@ self.addEventListener('activate', (event) => {
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
-                    if (cacheName !== CACHE_NAME) {
-                        return caches.delete(cacheName);
-                    }
+                    if (cacheName !== CACHE_NAME) return caches.delete(cacheName);
                 })
             );
         }).then(() => self.clients.claim())
@@ -37,17 +37,21 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(
             caches.match(event.request).then((cached) => {
                 if (cached) {
-                    fetch(event.request).then((fresh) => {
-                        if (fresh && fresh.status === 200) {
-                            caches.open(CACHE_NAME).then((c) => c.put(event.request, fresh));
-                        }
-                    }).catch(() => {});
+                    fetchWithTimeout(event.request, 2000)
+                        .then((fresh) => {
+                            if (fresh.status === 200)
+                                caches.open(CACHE_NAME).then((c) => c.put(event.request, fresh.clone()));
+                        })
+                        .catch(() => {});
                     return cached;
                 }
-                return fetch(event.request).catch(async () => {
+                return fetchWithTimeout(event.request, 2000).catch(async () => {
                     const fallback = await caches.match('./index.html');
                     return fallback || new Response('Offline', { status: 503, statusText: 'Offline' });
                 });
+            }).catch(async () => {
+                const fallback = await caches.match('./index.html');
+                return fallback || new Response('Offline', { status: 503, statusText: 'Offline' });
             })
         );
         return;
@@ -56,26 +60,49 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
         caches.match(event.request).then((cached) => {
             if (cached) {
-                fetch(event.request).then((fresh) => {
-                    if (fresh && fresh.status === 200) {
-                        caches.open(CACHE_NAME).then((c) => c.put(event.request, fresh.clone()));
-                    }
-                }).catch(() => {});
+                fetchWithTimeout(event.request, 5000)
+                    .then((fresh) => {
+                        if (fresh.status === 200)
+                            caches.open(CACHE_NAME).then((c) => c.put(event.request, fresh.clone()));
+                    })
+                    .catch(() => {});
                 return cached;
             }
-            return fetch(event.request).then((response) => {
-                if (response.status === 200) {
-                    const clone = response.clone();
-                    caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
-                }
-                return response;
-            }).catch(async () => {
-                if (event.request.destination === 'document') {
-                    const fallback = await caches.match('./index.html');
+            return fetchWithTimeout(event.request, 5000)
+                .then((response) => {
+                    if (response.status === 200) {
+                        caches.open(CACHE_NAME).then((c) => c.put(event.request, response.clone()));
+                    }
+                    return response;
+                })
+                .catch(async () => {
+                    if (event.request.destination === 'document') {
+                        const fallback = await caches.match('./index.html');
+                        if (fallback) return fallback;
+                    }
+                    const fallback = await caches.match(event.request, { ignoreSearch: true });
                     if (fallback) return fallback;
-                }
-                return new Response('', { status: 504, statusText: 'Gateway Timeout' });
-            });
+                    return new Response('', { status: 504, statusText: 'Gateway Timeout' });
+                });
+        }).catch(async () => {
+            if (event.request.destination === 'document') {
+                const fallback = await caches.match('./index.html');
+                if (fallback) return fallback;
+            }
+            const fallback = await caches.match(event.request, { ignoreSearch: true });
+            if (fallback) return fallback;
+            return new Response('', { status: 504, statusText: 'Gateway Timeout' });
         })
     );
 });
+
+function fetchWithTimeout(request, timeout) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    return fetch(request, { signal: controller.signal }).finally(() => clearTimeout(id));
+}
+
+self.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
