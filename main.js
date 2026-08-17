@@ -1625,17 +1625,20 @@ class Komplexiti {
     niceAngleHTML(theta) {
         if (!isFinite(theta)) return null;
         if (Math.abs(theta) < 1e-9) return '0';
-        const twentyFourths = theta / Math.PI * 24;
-        if (Math.abs(twentyFourths - Math.round(twentyFourths)) < 0.02) {
-            const num = Math.round(twentyFourths);
-            if (num === 0) return '0';
-            const g   = this._gcd(Math.abs(num), 24);
-            const sn  = num / g;
-            const sd  = 24 / g;
-            const neg = sn < 0 ? '-' : '';
-            const absN = Math.abs(sn);
-            if (sd === 1) return absN === 1 ? `${neg}&pi;` : `${neg}${absN}&pi;`;
-            return absN === 1 ? `${neg}&pi;/${sd}` : `${neg}${absN}&pi;/${sd}`;
+        // Try each denominator in turn; the smallest d that works gives the canonical form.
+        for (let d = 1; d <= 30; d++) {
+            const nd      = theta / Math.PI * d;
+            const rounded = Math.round(nd);
+            if (rounded === 0) continue;
+            if (Math.abs(nd - rounded) < 0.002) {
+                const g    = this._gcd(Math.abs(rounded), d);
+                const sn   = rounded / g;
+                const sd   = d / g;
+                const neg  = sn < 0 ? '-' : '';
+                const absN = Math.abs(sn);
+                if (sd === 1) return absN === 1 ? `${neg}&pi;` : `${neg}${absN}&pi;`;
+                return absN === 1 ? `${neg}&pi;/${sd}` : `${neg}${absN}&pi;/${sd}`;
+            }
         }
         return null;
     }
