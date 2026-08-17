@@ -1932,6 +1932,7 @@ class Komplexiti {
                 const raw = node.evaluate(sc0);
                 const re  = typeof raw === 'number' ? raw : (raw?.re ?? 0);
                 const im  = typeof raw === 'number' ? 0   : (raw?.im ?? 0);
+                if (!isFinite(re) || !isFinite(im)) return null; // singularity at expansion point
                 coeffs.push({ re: re / factorials[k], im: im / factorials[k] });
             }
             // Trim trailing near-zero coefficients
@@ -2021,7 +2022,18 @@ class Komplexiti {
 
             // General polynomial solver via symbolic differentiation
             const hExpr  = `(${lhs}) - (${rhs})`;
-            const coeffs = this._extractPolynomialCoeffs(hExpr, varName, scope);
+            let coeffs = this._extractPolynomialCoeffs(hExpr, varName, scope);
+
+            // Fallback: rationalize to handle rational equations like 1+w^2 = (w-2)/w
+            if (!coeffs || coeffs.length < 2) {
+                try {
+                    const rat = math.rationalize(hExpr, {}, true);
+                    if (rat?.numerator) {
+                        coeffs = this._extractPolynomialCoeffs(rat.numerator.toString(), varName, scope);
+                    }
+                } catch { /* not rationalizable, leave coeffs as-is */ }
+            }
+
             if (!coeffs || coeffs.length < 2) return null;
 
             const deg = coeffs.length - 1;
