@@ -1052,7 +1052,7 @@ class Komplexiti {
             const prevIdx   = this.constantColors.indexOf(prevColor);
             color = this.constantColors[(prevIdx + 1) % this.constantColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', re: null, im: null };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null };
         this.complexConstants.push(c);
         this.createConstantUI(c);
     }
@@ -1063,11 +1063,8 @@ class Komplexiti {
         card.style.borderLeftColor = c.color;
         card.setAttribute('data-const-id', c.id);
 
-        const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
-
         card.innerHTML = `
             <div class="expr-card-main-row">
-                <span class="expr-card-label">z${toSub(c.id)}</span>
                 <math-field
                     default-mode="math"
                     virtual-keyboard-mode="manual"
@@ -1087,19 +1084,42 @@ class Komplexiti {
 
         mathField.addEventListener('input', () => {
             c.latex = mathField.value;
-            const parsed = this.parseComplexFromLatex(c.latex);
-            c.re = parsed !== null ? parsed.re : null;
-            c.im = parsed !== null ? parsed.im : null;
-            const hasError = c.latex.trim().length > 0 && parsed === null;
+            const raw = c.latex.trim();
+            const assignment = raw ? this.parseAssignment(raw) : null;
+            let hasError = false;
+
+            if (assignment) {
+                const nameError = this.validateConstantName(assignment.name, c.id);
+                if (nameError) {
+                    c.name = null;
+                    c.re   = null;
+                    c.im   = null;
+                    hasError = true;
+                } else {
+                    c.name = assignment.name;
+                    const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, this.buildConstantScope(c.id));
+                    c.re = parsed !== null ? parsed.re : null;
+                    c.im = parsed !== null ? parsed.im : null;
+                    hasError = parsed === null;
+                }
+            } else {
+                c.name = null;
+                const parsed = this.parseComplexFromLatex(raw, this.buildConstantScope(c.id));
+                c.re = parsed !== null ? parsed.re : null;
+                c.im = parsed !== null ? parsed.im : null;
+                hasError = raw.length > 0 && parsed === null;
+            }
+
             if (hasError) {
                 mathField.classList.add('input-error');
                 mathField.style.setProperty('background', 'rgba(231, 76, 60, 0.1)', 'important');
             } else {
                 mathField.classList.remove('input-error');
-                const scope  = document.getElementById('sidebar-panel') || document.documentElement;
-                const inputBg = getComputedStyle(scope).getPropertyValue('--input-bg').trim() || '#3A4F6A';
+                const panel  = document.getElementById('sidebar-panel') || document.documentElement;
+                const inputBg = getComputedStyle(panel).getPropertyValue('--input-bg').trim() || '#3A4F6A';
                 mathField.style.setProperty('background', inputBg, 'important');
             }
+            this.cascadeEvaluate(c.id);
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
@@ -1128,7 +1148,59 @@ class Komplexiti {
         if (this.currentState === this.states.APP) this.drawCanvas();
     }
 
-    parseComplexFromLatex(latex) {
+    // Returns { name, valueLaTeX } if the expression is a valid assignment, else null.
+    parseAssignment(latex) {
+        const m = latex.match(/^([a-zA-Z][0-9]*)=(.+)$/);
+        if (!m) return null;
+        return { name: m[1], valueLaTeX: m[2] };
+    }
+
+    // Returns an error string if the name is invalid, or null if it is acceptable.
+    validateConstantName(name, ownId) {
+        if (name === 'i' || name === 'e') return `'${name}' is reserved`;
+        for (const c of this.complexConstants) {
+            if (c.id !== ownId && c.name === name) return `'${name}' is already used`;
+        }
+        return null;
+    }
+
+    // Returns a mathjs scope object containing all valid named constants except the one with excludeId.
+    buildConstantScope(excludeId = null) {
+        if (typeof math === 'undefined') return {};
+        const scope = {};
+        for (const c of this.complexConstants) {
+            if (c.id !== excludeId && c.name && c.re !== null && c.im !== null) {
+                scope[c.name] = math.complex(c.re, c.im);
+            }
+        }
+        return scope;
+    }
+
+    // Re-evaluates every constant (except the one that just changed) using the updated scope.
+    // Multiple passes resolve dependency chains regardless of definition order.
+    cascadeEvaluate(triggererId) {
+        const passes = this.complexConstants.length;
+        for (let pass = 0; pass < passes; pass++) {
+            for (const c of this.complexConstants) {
+                if (c.id === triggererId) continue;
+                const raw = c.latex.trim();
+                if (!raw) continue;
+                const scope      = this.buildConstantScope(c.id);
+                const assignment = this.parseAssignment(raw);
+                if (assignment && !this.validateConstantName(assignment.name, c.id)) {
+                    const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, scope);
+                    c.re = parsed !== null ? parsed.re : null;
+                    c.im = parsed !== null ? parsed.im : null;
+                } else if (!assignment) {
+                    const parsed = this.parseComplexFromLatex(raw, scope);
+                    c.re = parsed !== null ? parsed.re : null;
+                    c.im = parsed !== null ? parsed.im : null;
+                }
+            }
+        }
+    }
+
+    parseComplexFromLatex(latex, scope = {}) {
         if (!latex || !latex.trim() || typeof math === 'undefined') return null;
         try {
             let e = latex.trim();
@@ -1152,7 +1224,7 @@ class Komplexiti {
             e = e.replace(/\\[a-zA-Z]+\s*/g, '');                 // strip remaining LaTeX commands
             e = e.trim();
             if (!e) return null;
-            const result = math.evaluate(e);
+            const result = math.evaluate(e, scope);
             if (typeof result === 'number') return { re: result, im: 0 };
             if (result && typeof result.re === 'number') return { re: result.re, im: result.im };
             return null;
@@ -1174,7 +1246,6 @@ class Komplexiti {
         if (!this.complexConstants.length) return;
         const ctx     = this.ctx;
         const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-        const toSub   = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
         const fSize   = this.sizeMode === 'xlarge' ? 22 : this.sizeMode === 'large' ? 18 : 15;
         const dotR    = this.sizeMode === 'xlarge' ? 7  : this.sizeMode === 'large' ? 6  : 5;
         const headLen = 9;
@@ -1225,19 +1296,20 @@ class Komplexiti {
             ctx.stroke();
             ctx.restore();
 
-            // Label
-            const label = `z${toSub(c.id)}`;
-            ctx.save();
-            ctx.font        = `italic ${fSize}px Arial`;
-            ctx.globalAlpha = 1;
-            const tw = ctx.measureText(label).width;
-            const lx = pt.x + dotR + 4;
-            const ly = pt.y - dotR - 2;
-            ctx.fillStyle = isLight ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.5)';
-            ctx.fillRect(lx - 2, ly - fSize + 1, tw + 4, fSize + 3);
-            ctx.fillStyle = c.color;
-            ctx.fillText(label, lx, ly);
-            ctx.restore();
+            // Label: only draw if the constant has a user-assigned name
+            if (c.name) {
+                ctx.save();
+                ctx.font        = `italic ${fSize}px Arial`;
+                ctx.globalAlpha = 1;
+                const tw = ctx.measureText(c.name).width;
+                const lx = pt.x + dotR + 4;
+                const ly = pt.y - dotR - 2;
+                ctx.fillStyle = isLight ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.5)';
+                ctx.fillRect(lx - 2, ly - fSize + 1, tw + 4, fSize + 3);
+                ctx.fillStyle = c.color;
+                ctx.fillText(c.name, lx, ly);
+                ctx.restore();
+            }
         }
     }
 }
