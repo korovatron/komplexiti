@@ -553,30 +553,6 @@
             color: #4A90E2;
         }
 
-        #return-to-title {
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            border: 1px solid #555;
-            padding: 6px 14px;
-            font-size: 0.8em;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: filter 0.2s, box-shadow 0.2s;
-            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-            white-space: nowrap;
-        }
-
-        @media (hover: hover) {
-            #return-to-title:hover {
-                filter: brightness(1.15);
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-            }
-        }
-
-        #return-to-title:active {
-            filter: brightness(1.1);
-        }
-
         .panel-placeholder {
             display: flex;
             flex-direction: column;
@@ -1137,7 +1113,6 @@
             <div id="sidebar-panel" class="hidden">
                 <div class="panel-header">
                     <span class="panel-wordmark"><span class="wordmark-k">K</span>omplexiti</span>
-                    <button id="return-to-title">&#8592; Title</button>
                 </div>
 
                 <!-- Top toolbar: Add / Reset axes / Display mode -->
@@ -1188,6 +1163,30 @@
                 <!-- Bottom controls -->
                 <div class="panel-section">
                     <div class="panel-control-row" style="grid-template-columns: 1fr 1fr 1fr;">
+
+                        <!-- Col 1: home + keyboard paired -->
+                        <div style="display: flex; gap: 4px;">
+                            <button id="return-to-title" class="panel-btn" style="flex: 1;" title="Return to title screen" aria-label="Return to title screen">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                                    <polyline points="9 22 9 12 15 12 15 22"/>
+                                </svg>
+                            </button>
+                            <button id="virtual-keyboard-toggle" class="panel-btn" style="flex: 1;" title="Toggle virtual keyboard" aria-label="Toggle virtual keyboard">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="2" y="6" width="20" height="12" rx="2"></rect>
+                                    <line x1="6" y1="10" x2="6.01" y2="10"></line>
+                                    <line x1="10" y1="10" x2="10.01" y2="10"></line>
+                                    <line x1="14" y1="10" x2="14.01" y2="10"></line>
+                                    <line x1="18" y1="10" x2="18.01" y2="10"></line>
+                                    <line x1="6" y1="14" x2="6.01" y2="14"></line>
+                                    <line x1="10" y1="14" x2="14" y2="14"></line>
+                                    <line x1="18" y1="14" x2="18.01" y2="14"></line>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <!-- Col 2: label size toggle -->
                         <button id="size-mode-toggle" class="panel-btn" title="Toggle label size">
                             <span id="small-size-icon"  style="font-size: 16px; font-weight: bold; opacity: 1;">A</span>
                             <div class="btn-separator"></div>
@@ -1195,6 +1194,8 @@
                             <div class="btn-separator"></div>
                             <span id="large-size-icon"  style="font-size: 24px; font-weight: bold; opacity: 0.3;">A</span>
                         </button>
+
+                        <!-- Col 3: theme toggle -->
                         <button id="theme-toggle" class="panel-btn" title="Toggle theme">
                             <svg id="light-icon" width="24" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.3;">
                                 <circle cx="12" cy="12" r="5"></circle>
@@ -1212,18 +1213,7 @@
                                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                             </svg>
                         </button>
-                        <button id="virtual-keyboard-toggle" class="panel-btn" title="Toggle virtual keyboard" aria-label="Toggle virtual keyboard">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <rect x="2" y="6" width="20" height="12" rx="2"></rect>
-                                <line x1="6" y1="10" x2="6.01" y2="10"></line>
-                                <line x1="10" y1="10" x2="10.01" y2="10"></line>
-                                <line x1="14" y1="10" x2="14.01" y2="10"></line>
-                                <line x1="18" y1="10" x2="18.01" y2="10"></line>
-                                <line x1="6" y1="14" x2="6.01" y2="14"></line>
-                                <line x1="10" y1="14" x2="14" y2="14"></line>
-                                <line x1="18" y1="14" x2="18.01" y2="14"></line>
-                            </svg>
-                        </button>
+
                     </div>
                 </div>
             </div>
