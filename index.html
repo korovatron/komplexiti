@@ -95,10 +95,13 @@
         html, body {
             width: 100%;
             height: 100%;
+            height: var(--actual-vh, 100vh);
+            min-height: 100vh;
+            min-height: var(--actual-vh, 100vh);
             overflow: hidden;
             overscroll-behavior: none;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            /* Always the dark base so any sub-pixel gap can never contrast with the title screen */
+            /* Always dark base - any sub-pixel gap stays invisible against the title screen */
             background: #1A2F42;
             color: var(--text-primary);
             touch-action: none;
@@ -139,14 +142,15 @@
         /* App shell                                                            */
         /* ------------------------------------------------------------------ */
 
-        /* Pin the app shell to the installed-PWA viewport so a transient short
-           height (share sheet, screenshots, app switching) cannot expose the
-           page background below the app. */
-        /* inset:0 alone fills the viewport unconditionally - explicit height
-           would let a wrong --actual-vh value create a gap at bottom/right. */
+        /* inset:0 stretches to fill the viewport; explicit height lets --actual-vh
+           correct iOS PWA's under-reported innerHeight (~59px short on iPhone). */
         #app-container {
             position: fixed;
             inset: 0;
+            width: 100vw;
+            height: 100vh;
+            height: var(--actual-vh, 100vh);
+            min-height: var(--actual-vh, 100vh);
             display: flex;
             flex-direction: column;
         }
