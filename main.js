@@ -1357,23 +1357,89 @@ class Komplexiti {
         const theta = Math.atan2(c.im, c.re);
 
         if (valEl) valEl.innerHTML = this.formatComplexValue(c.re, c.im, r, theta);
-        if (modEl) modEl.textContent = this.formatNumber(r);
-        if (argEl) argEl.innerHTML = this.formatArgument(theta);
+        if (modEl) modEl.innerHTML   = this.niceRealHTML(r) ?? this.formatNumber(r);
+        if (argEl) argEl.innerHTML   = this.formatArgument(theta);
     }
+
+    // ---- Nice-number helpers (adapted from Graphiti) ----
+
+    _gcd(a, b) { return b === 0 ? a : this._gcd(b, a % b); }
+
+    // Returns an HTML string for value if it has a recognisable nice form, else null.
+    // Recognises: integers, simple fractions (denom ≤ 24), and n/d·√k for k ∈ {2,3,5,6,7}.
+    niceRealHTML(value) {
+        if (!isFinite(value)) return null;
+        const tol = 5e-6;
+        if (Math.abs(value) < tol) return '0';
+        const sign = value < 0 ? -1 : 1;
+        const abs  = Math.abs(value);
+        // Integer
+        const ri = Math.round(abs);
+        if (Math.abs(abs - ri) < tol) return sign < 0 ? `-${ri}` : `${ri}`;
+        // Simple fraction
+        for (let d = 2; d <= 24; d++) {
+            const n = Math.round(abs * d);
+            if (n > 0 && Math.abs(abs - n / d) < tol) {
+                const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                if (sd > 1 && sd <= 24) return (sign < 0 ? '-' : '') + sn + '/' + sd;
+            }
+        }
+        // Rational multiple of √k
+        for (const k of [2, 3, 5, 6, 7]) {
+            const sqK = Math.sqrt(k);
+            const ratio = abs / sqK;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    const rad = `&radic;${k}`;
+                    let part;
+                    if      (sn === 1 && sd === 1) part = rad;
+                    else if (sd === 1)              part = `${sn}${rad}`;
+                    else if (sn === 1)              part = `${rad}/${sd}`;
+                    else                           part = `${sn}${rad}/${sd}`;
+                    return (sign < 0 ? '-' : '') + part;
+                }
+            }
+        }
+        return null;
+    }
+
+    // Returns an HTML string if theta (radians) is a multiple of π/24, else null.
+    niceAngleHTML(theta) {
+        if (!isFinite(theta)) return null;
+        if (Math.abs(theta) < 1e-9) return '0';
+        const twentyFourths = theta / Math.PI * 24;
+        if (Math.abs(twentyFourths - Math.round(twentyFourths)) < 0.02) {
+            const num = Math.round(twentyFourths);
+            if (num === 0) return '0';
+            const g   = this._gcd(Math.abs(num), 24);
+            const sn  = num / g;
+            const sd  = 24 / g;
+            const neg = sn < 0 ? '-' : '';
+            const absN = Math.abs(sn);
+            if (sd === 1) return absN === 1 ? `${neg}&pi;` : `${neg}${absN}&pi;`;
+            return absN === 1 ? `${neg}&pi;/${sd}` : `${neg}${absN}&pi;/${sd}`;
+        }
+        return null;
+    }
+
+    // ---- Info panel format methods ----
 
     formatComplexValue(re, im, r, theta) {
         switch (this.infoFormat) {
             case 'exponential': {
                 if (Math.abs(r) < 1e-10) return '0';
-                const rStr  = this.formatNumber(r);
-                const thStr = this.formatNumber(Math.abs(theta));
+                const rStr  = this.niceRealHTML(r)              ?? this.formatNumber(r);
+                const absθ  = Math.abs(theta);
+                const thStr = this.niceAngleHTML(absθ)          ?? this.formatNumber(absθ);
                 const sign  = theta < -1e-10 ? '-' : '';
                 return `${rStr}&thinsp;e<sup>${sign}i(${thStr})</sup>`;
             }
             case 'trig': {
                 if (Math.abs(r) < 1e-10) return '0';
-                const rStr  = this.formatNumber(r);
-                const thStr = this.formatNumber(theta);
+                const rStr  = this.niceRealHTML(r)              ?? this.formatNumber(r);
+                const thStr = this.niceAngleHTML(theta)         ?? this.formatNumber(theta);
                 return `${rStr}(cos(${thStr}) + i&thinsp;sin(${thStr}))`;
             }
             default:
@@ -1382,8 +1448,8 @@ class Komplexiti {
     }
 
     formatCartesianHTML(re, im) {
-        const aStr = this.formatNumber(re);
-        const bAbs = this.formatNumber(Math.abs(im));
+        const aStr = this.niceRealHTML(re)          ?? this.formatNumber(re);
+        const bAbs = this.niceRealHTML(Math.abs(im)) ?? this.formatNumber(Math.abs(im));
         if (Math.abs(im) < 1e-10) return aStr;
         if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${bAbs}i` : `${bAbs}i`;
         const sign = im < -1e-10 ? ' - ' : ' + ';
@@ -1391,8 +1457,10 @@ class Komplexiti {
     }
 
     formatArgument(theta) {
-        const deg = theta * 180 / Math.PI;
-        return `${this.formatNumber(theta)} rad (${this.formatNumber(deg)}&deg;)`;
+        const deg    = theta * 180 / Math.PI;
+        const niceθ  = this.niceAngleHTML(theta);
+        const radStr = niceθ ? `${niceθ} rad` : `${this.formatNumber(theta)} rad`;
+        return `${radStr} (${this.formatNumber(deg)}&deg;)`;
     }
 
     drawComplexConstants() {
