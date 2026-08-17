@@ -1539,7 +1539,7 @@ class Komplexiti {
             const prevIdx   = this.constantColors.indexOf(prevColor);
             color = this.constantColors[(prevIdx + 1) % this.constantColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'constant', roots: null, equationVar: null };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'constant', roots: null, equationVar: null, hasParseError: false };
         this.complexConstants.push(c);
         this.createConstantUI(c);
         this.saveConstants();
@@ -1565,7 +1565,8 @@ class Komplexiti {
                     <button class="expr-info-btn" title="Show info about this complex number" aria-label="Show complex number info">i</button>
                     <div class="expr-color-dot" style="background:${c.color};opacity:${c.enabled ? 1 : 0.3}" title="Toggle visibility"></div>
                 </div>
-            </div>`;
+            </div>
+            <div class="expr-name-error"></div>`;
 
         const mathField = card.querySelector('math-field');
         const dot       = card.querySelector('.expr-color-dot');
@@ -1584,14 +1585,14 @@ class Komplexiti {
             c.equationVar = null;
 
             if (assignment) {
-                const nameError = this.validateConstantName(assignment.name, c.id);
-                if (nameError) {
+                const reserved = (assignment.name === 'i' || assignment.name === 'e');
+                if (reserved) {
                     c.name = null;
                     c.re   = null;
                     c.im   = null;
                     hasError = true;
                 } else {
-                    c.name = assignment.name;
+                    c.name = assignment.name; // keep name even if duplicate; _refreshDuplicateNameErrors handles it
                     const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, this.buildConstantScope(c.id));
                     c.re = parsed !== null ? parsed.re : null;
                     c.im = parsed !== null ? parsed.im : null;
@@ -1618,16 +1619,9 @@ class Komplexiti {
                 hasError = raw.length > 0 && parsed === null;
             }
 
-            if (hasError) {
-                mathField.classList.add('input-error');
-                mathField.style.setProperty('background', 'rgba(231, 76, 60, 0.1)', 'important');
-            } else {
-                mathField.classList.remove('input-error');
-                const panel  = document.getElementById('sidebar-panel') || document.documentElement;
-                const inputBg = getComputedStyle(panel).getPropertyValue('--input-bg').trim() || '#3A4F6A';
-                mathField.style.setProperty('background', inputBg, 'important');
-            }
+            c.hasParseError = hasError;
             this.cascadeEvaluate(c.id);
+            this._refreshDuplicateNameErrors();
             this.saveConstants();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -1726,6 +1720,8 @@ class Komplexiti {
         if (idx !== -1) this.complexConstants.splice(idx, 1);
         const card = document.querySelector(`.expr-card[data-const-id="${id}"]`);
         if (card) card.remove();
+        this.cascadeEvaluate(null);
+        this._refreshDuplicateNameErrors();
         this.saveConstants();
         if (this.currentState === this.states.APP) this.drawCanvas();
     }
@@ -1750,7 +1746,7 @@ class Komplexiti {
             const data = JSON.parse(raw);
             if (data.nextId) this.nextConstantId = data.nextId;
             for (const saved of (data.constants || [])) {
-                const c = { id: saved.id, color: saved.color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'constant', roots: null, equationVar: null };
+                const c = { id: saved.id, color: saved.color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'constant', roots: null, equationVar: null, hasParseError: false };
                 this.complexConstants.push(c);
                 this.createConstantUI(c, { skipFocus: true });
             }
@@ -1773,12 +1769,50 @@ class Komplexiti {
         return null;
     }
 
+    _refreshDuplicateNameErrors() {
+        const nameCounts = {};
+        for (const c of this.complexConstants) {
+            if (c.name) nameCounts[c.name] = (nameCounts[c.name] || 0) + 1;
+        }
+        const panel   = document.getElementById('sidebar-panel') || document.documentElement;
+        const inputBg = getComputedStyle(panel).getPropertyValue('--input-bg').trim() || '#3A4F6A';
+        for (const c of this.complexConstants) {
+            const card = document.querySelector(`.expr-card[data-const-id="${c.id}"]`);
+            if (!card) continue;
+            const mathField   = card.querySelector('math-field');
+            const errLabel    = card.querySelector('.expr-name-error');
+            const isDuplicate = !!(c.name && nameCounts[c.name] > 1);
+            const showError   = c.hasParseError || isDuplicate;
+            if (errLabel) {
+                if (isDuplicate) {
+                    errLabel.textContent = `'${c.name}' is defined more than once`;
+                    errLabel.style.display = 'block';
+                } else {
+                    errLabel.textContent = '';
+                    errLabel.style.display = 'none';
+                }
+            }
+            if (showError) {
+                mathField.classList.add('input-error');
+                mathField.style.setProperty('background', 'rgba(231, 76, 60, 0.1)', 'important');
+            } else {
+                mathField.classList.remove('input-error');
+                mathField.style.setProperty('background', inputBg, 'important');
+            }
+        }
+    }
+
     // Returns a mathjs scope object containing all valid named constants except the one with excludeId.
     buildConstantScope(excludeId = null) {
         if (typeof math === 'undefined') return {};
+        // Count names to exclude duplicates (ambiguous)
+        const nameCounts = {};
+        for (const c of this.complexConstants) {
+            if (c.id !== excludeId && c.name) nameCounts[c.name] = (nameCounts[c.name] || 0) + 1;
+        }
         const scope = {};
         for (const c of this.complexConstants) {
-            if (c.id !== excludeId && c.name && c.re !== null && c.im !== null) {
+            if (c.id !== excludeId && c.name && nameCounts[c.name] === 1 && c.re !== null && c.im !== null) {
                 scope[c.name] = math.complex(c.re, c.im);
             }
         }
@@ -1796,18 +1830,20 @@ class Komplexiti {
                 if (!raw) continue;
                 const scope      = this.buildConstantScope(c.id);
                 const assignment = this.parseAssignment(raw);
-                if (assignment && !this.validateConstantName(assignment.name, c.id)) {
+                if (assignment && c.name !== null) {
                     const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, scope);
                     c.re = parsed !== null ? parsed.re : null;
                     c.im = parsed !== null ? parsed.im : null;
+                    c.hasParseError = parsed === null;
                 } else if (!assignment && raw.includes('=')) {
                     const eq = this.parseEquation(raw, c.id);
-                    if (eq) { c.type = 'equation'; c.roots = eq.roots; c.equationVar = eq.variable; }
-                    else    { c.roots = null; }
+                    if (eq) { c.type = 'equation'; c.roots = eq.roots; c.equationVar = eq.variable; c.hasParseError = false; }
+                    else    { c.roots = null; c.hasParseError = true; }
                 } else if (!assignment) {
                     const parsed = this.parseComplexFromLatex(raw, scope);
                     c.re = parsed !== null ? parsed.re : null;
                     c.im = parsed !== null ? parsed.im : null;
+                    c.hasParseError = raw.length > 0 && parsed === null;
                 }
             }
         }
@@ -1816,6 +1852,8 @@ class Komplexiti {
     // Normalises a LaTeX expression string into a JS/mathjs-evaluable string.
     latexToExpr(latex) {
         let e = latex.trim();
+        // Insert * where a variable/digit directly precedes a \function command (e.g. w\sqrt → w*\sqrt)
+        e = e.replace(/([a-zA-Z0-9])\\(sqrt|sin|cos|tan|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan|arcsinh|arccosh|arctanh)\b/g, '$1*\\$2');
         for (let p = 0; p < 4; p++) {
             e = e.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '(($1)/($2))');
         }
@@ -1852,6 +1890,8 @@ class Komplexiti {
         if (!e) return '';
         e = e.replace(/\bi\s*(sqrt|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|asinh|acosh|atanh|log|log10|exp|conj)\s*\(/g, 'i*$1(');
         e = e.replace(/\)\s*i\b/g, ')*i');
+        // Insert * before a trailing imaginary i that directly follows a letter or digit (e.g. wi → w*i)
+        e = e.replace(/([a-zA-Z0-9])i(?=[^a-zA-Z0-9]|$)/g, '$1*i');
         return e;
     }
 
