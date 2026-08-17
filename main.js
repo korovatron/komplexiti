@@ -25,6 +25,7 @@ class Komplexiti {
             centerX: 0,
             centerY: 0
         };
+        this.hasInitializedViewport = false;
 
         // ---- UI preferences ----
         this.sizeMode = 'normal';   // 'normal' | 'large' | 'xlarge'
@@ -757,6 +758,12 @@ class Komplexiti {
         if (this.canvas.width !== w || this.canvas.height !== h) {
             this.canvas.width = w;
             this.canvas.height = h;
+        }
+        if ((!this.hasInitializedViewport || this.currentState === this.states.TITLE) && h > 0) {
+            this.viewport.scale = h / 10;
+            this.viewport.centerX = 0;
+            this.viewport.centerY = 0;
+            this.hasInitializedViewport = true;
         }
         this.updateViewport();
         if (this.currentState === this.states.APP) {
