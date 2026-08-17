@@ -5,6 +5,9 @@ class Komplexiti {
         // iOS PWA viewport fix must run first, before anything else
         this.fixIOSViewportBug();
 
+        // Configure MathLive virtual keyboard globally (before any math fields are created)
+        this.configureMathLive();
+
         this.canvas = document.getElementById('canvas');
         this.ctx = this.canvas.getContext('2d');
 
@@ -62,6 +65,14 @@ class Komplexiti {
         this.animationId   = null;
         this.lastFrameTime = 0;
         this.deltaTime     = 0;
+
+        // ---- Virtual keyboard state ----
+        this.virtualKeyboardDismissLockUntil = 0;
+        this.keyboardDismissedByCanvas = false;
+        this.virtualKeyboardShowBypass = false;
+        this.virtualKeyboardShowGuardPatched = false;
+        this.lastEditableMathField = null;
+        this.mathLiveFocusSink = null;
 
         this.initElements();
         this.loadConstants();
@@ -157,6 +168,197 @@ class Komplexiti {
     }
 
     // -------------------------------------------------------------------------
+    // MathLive virtual keyboard configuration
+    // -------------------------------------------------------------------------
+    configureMathLive() {
+        const setupKeyboard = () => {
+            setTimeout(() => {
+                if (window.mathVirtualKeyboard) {
+                    try {
+                        // Complex numbers keyboard layout
+                        const complexLayout = {
+                            label: '123',
+                            labelClass: 'MLK__tex-math',
+                            tooltip: 'Complex Numbers',
+                            rows: [
+                                [
+                                    { latex: 'i', label: 'i' },
+                                    { latex: '\\pi', label: 'π' },
+                                    { latex: '=', label: '=' },
+                                    { label: '[backspace]', width: 1 },
+                                    '[separator]',
+                                    { latex: '7', label: '7' },
+                                    { latex: '8', label: '8' },
+                                    { latex: '9', label: '9' },
+                                    { insert: '\\frac{#@}{#?}', label: '/' }
+                                ],
+                                [
+                                    { latex: '#@^2', label: 'x²' },
+                                    { latex: '\\sqrt{#?}', label: '√' },
+                                    {
+                                        latex: '#@^{#?}',
+                                        label: 'xⁿ',
+                                        shift: { latex: '\\sqrt[#?]{#@}', label: 'ⁿ√' }
+                                    },
+                                    { latex: 'e', label: 'e' },
+                                    '[separator]',
+                                    { latex: '4', label: '4' },
+                                    { latex: '5', label: '5' },
+                                    { latex: '6', label: '6' },
+                                    { latex: '\\cdot', label: '×' }
+                                ],
+                                [
+                                    { latex: '(', label: '(' },
+                                    { latex: ')', label: ')' },
+                                    { latex: '\\left|#?\\right|', label: '|z|' },
+                                    { insert: '!', label: 'n!' },
+                                    '[separator]',
+                                    { latex: '1', label: '1' },
+                                    { latex: '2', label: '2' },
+                                    { latex: '3', label: '3' },
+                                    { latex: '+', label: '+' }
+                                ],
+                                [
+                                    '[left]', '[right]',
+                                    { latex: '(', label: '(' },
+                                    { latex: ')', label: ')' },
+                                    '[separator]',
+                                    { latex: '0', label: '0' },
+                                    {
+                                        latex: '.',
+                                        label: '.',
+                                        shift: { latex: ',', label: ',' }
+                                    },
+                                    { label: '[shift]', width: 1 },
+                                    { latex: '-', label: '-' }
+                                ]
+                            ]
+                        };
+
+                        window.mathVirtualKeyboard.layouts = [complexLayout];
+
+                        // Mobile-specific setup
+                        const isIPadOS = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+                        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || isIPadOS;
+
+                        if (isMobile) {
+                            window.mathVirtualKeyboard.container = document.body;
+
+                            // Close keyboard on orientation change to prevent layout corruption
+                            let lastOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+                            const closeOnOrientationChange = () => {
+                                setTimeout(() => {
+                                    const curr = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+                                    if (curr !== lastOrientation) {
+                                        lastOrientation = curr;
+                                        if (window.mathVirtualKeyboard?.visible) {
+                                            window.mathVirtualKeyboard.hide();
+                                            const focused = document.querySelector('math-field:focus');
+                                            if (focused) focused.blur();
+                                        }
+                                        document.querySelectorAll('.MLK__backdrop').forEach(el => el.parentNode?.removeChild(el));
+                                    }
+                                }, 100);
+                            };
+                            window.addEventListener('orientationchange', closeOnOrientationChange);
+                            window.addEventListener('resize', closeOnOrientationChange);
+                            if (screen.orientation) {
+                                screen.orientation.addEventListener('change', closeOnOrientationChange);
+                            }
+
+                            // iOS shift-latch fix: suppress the synthetic mouseup Safari fires
+                            // after a touch pointerup on the shift key, which would reset MathLive's
+                            // internal shiftPressCount before the latch could register.
+                            let suppressShiftMouseUpUntil = 0;
+                            const isShiftTarget = (e) => {
+                                if (!e || typeof e.composedPath !== 'function') return false;
+                                return e.composedPath().some(n => n?.classList?.contains('shift'));
+                            };
+                            window.addEventListener('pointerdown', (e) => {
+                                if (!window.mathVirtualKeyboard?.visible) return;
+                                if (e.pointerType === 'touch' && isShiftTarget(e)) {
+                                    suppressShiftMouseUpUntil = Date.now() + 700;
+                                }
+                            }, { capture: true });
+                            window.addEventListener('mouseup', (e) => {
+                                if (!window.mathVirtualKeyboard?.visible) return;
+                                if (isShiftTarget(e) || Date.now() <= suppressShiftMouseUpUntil) {
+                                    e.stopImmediatePropagation();
+                                }
+                            }, { capture: true });
+                        }
+
+                        // Apply dark colour scheme and suppress context menus on all current fields
+                        setTimeout(() => {
+                            document.querySelectorAll('math-field').forEach(f => {
+                                f.setAttribute('color-scheme', 'dark');
+                                f.menuItems = [];
+                            });
+                        }, 100);
+
+                    } catch (err) {
+                        console.error('Error configuring virtual keyboard:', err);
+                    }
+                } else {
+                    setTimeout(setupKeyboard, 500);
+                }
+            }, 100);
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupKeyboard);
+        } else {
+            setupKeyboard();
+        }
+
+        // Suppress context menus on every math field as it mounts
+        document.addEventListener('mount', (e) => {
+            if (e.target?.tagName === 'MATH-FIELD') {
+                e.target.menuItems = [];
+            }
+        }, true);
+
+        document.addEventListener('contextmenu', (e) => {
+            if (e.composedPath().some(el => el.tagName === 'MATH-FIELD')) {
+                e.preventDefault();
+            }
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Clear all MathLive focus state (prevents keyboard auto-reopening)
+    // -------------------------------------------------------------------------
+    clearMathLiveFocusState() {
+        document.querySelectorAll('math-field').forEach(mf => {
+            try { mf.blur(); } catch { /* ignore */ }
+        });
+        if (document.activeElement && typeof document.activeElement.blur === 'function') {
+            try { document.activeElement.blur(); } catch { /* ignore */ }
+        }
+        if (window.MathfieldElement?.activeMathfield) {
+            try { window.MathfieldElement.activeMathfield.blur(); } catch { /* ignore */ }
+        }
+        if (window.mathVirtualKeyboard && 'target' in window.mathVirtualKeyboard) {
+            try { window.mathVirtualKeyboard.target = null; } catch { /* ignore */ }
+        }
+        // Transfer focus to an inert sink button so touch browsers do not reopen the keyboard
+        if (!this.mathLiveFocusSink || !document.contains(this.mathLiveFocusSink)) {
+            const sink = document.createElement('button');
+            sink.type = 'button';
+            sink.tabIndex = -1;
+            sink.setAttribute('aria-hidden', 'true');
+            sink.style.cssText = 'position:fixed;opacity:0;pointer-events:none;left:-10000px;top:-10000px;width:1px;height:1px;';
+            document.body.appendChild(sink);
+            this.mathLiveFocusSink = sink;
+        }
+        try { this.mathLiveFocusSink.focus({ preventScroll: true }); } catch { /* ignore */ }
+        try {
+            const sel = window.getSelection();
+            if (sel) sel.removeAllRanges();
+        } catch { /* ignore */ }
+    }
+
+    // -------------------------------------------------------------------------
     // DOM element references
     // -------------------------------------------------------------------------
     initElements() {
@@ -209,6 +411,23 @@ class Komplexiti {
     // Event listeners
     // -------------------------------------------------------------------------
     initEventListeners() {
+        // Monkeypatch mathVirtualKeyboard.show to enforce the dismiss lock.
+        // This prevents MathLive's internal focus recovery from re-opening the
+        // keyboard immediately after a canvas tap closes it.
+        const ensureVirtualKeyboardShowGuard = () => {
+            if (!window.mathVirtualKeyboard || this.virtualKeyboardShowGuardPatched) return;
+            if (typeof window.mathVirtualKeyboard.show !== 'function') return;
+            const originalShow = window.mathVirtualKeyboard.show.bind(window.mathVirtualKeyboard);
+            window.mathVirtualKeyboard.show = (options) => {
+                if (Date.now() <= this.virtualKeyboardDismissLockUntil && !this.virtualKeyboardShowBypass) return;
+                return originalShow(options);
+            };
+            this.virtualKeyboardShowGuardPatched = true;
+        };
+        ensureVirtualKeyboardShowGuard();
+        setTimeout(ensureVirtualKeyboardShowGuard, 200);
+        setTimeout(ensureVirtualKeyboardShowGuard, 800);
+
         this.hamburgerBtn.addEventListener('click', () => this.togglePanel());
 
         // Close panel on overlay click/tap (touchstart for iOS responsiveness)
@@ -218,9 +437,16 @@ class Komplexiti {
             this.closePanel();
         }, { passive: false });
 
-        // Close panel when tapping the canvas on narrow screens
-        this.canvas.addEventListener('pointerdown', () => {
+        // Close panel when tapping the canvas on narrow screens;
+        // also dismiss keyboard for mouse/pen interactions (touch is handled in touchend).
+        this.canvas.addEventListener('pointerdown', (e) => {
             if (this.isNarrow() && this.panelOpen) this.closePanel();
+            if (e.pointerType !== 'touch' && window.mathVirtualKeyboard?.visible) {
+                this.keyboardDismissedByCanvas = true;
+                this.virtualKeyboardDismissLockUntil = Date.now() + 350;
+                this.clearMathLiveFocusState();
+                window.mathVirtualKeyboard.hide();
+            }
         });
 
         this.launchBtn.addEventListener('click', () => this.launchApp());
@@ -243,6 +469,41 @@ class Komplexiti {
         if (themeToggle) themeToggle.addEventListener('click', () => this.toggleTheme());
         const sizeModeToggle = document.getElementById('size-mode-toggle');
         if (sizeModeToggle) sizeModeToggle.addEventListener('click', () => this.toggleSizeMode());
+
+        // Virtual keyboard toggle button
+        const virtualKeyboardToggle = document.getElementById('virtual-keyboard-toggle');
+        if (virtualKeyboardToggle) {
+            virtualKeyboardToggle.addEventListener('click', () => {
+                if (!window.mathVirtualKeyboard) return;
+                if (window.mathVirtualKeyboard.visible) {
+                    window.mathVirtualKeyboard.hide({ animate: true });
+                } else {
+                    // Bypass any residual dismiss lock - this is an explicit user action
+                    this.virtualKeyboardDismissLockUntil = 0;
+                    this.keyboardDismissedByCanvas = false;
+
+                    // Prefer the field the user last typed in; fall back to the first field
+                    const activeMathField = document.activeElement?.matches('math-field')
+                        ? document.activeElement : null;
+                    const lastField = this.lastEditableMathField && document.contains(this.lastEditableMathField)
+                        ? this.lastEditableMathField : null;
+                    const focusedField = activeMathField || lastField || document.querySelector('math-field');
+
+                    if (focusedField) {
+                        focusedField.focus();
+                        if ('target' in window.mathVirtualKeyboard) {
+                            try { window.mathVirtualKeyboard.target = focusedField; } catch { /* ignore */ }
+                        }
+                    }
+                    this.virtualKeyboardShowBypass = true;
+                    try {
+                        window.mathVirtualKeyboard.show({ animate: true });
+                    } finally {
+                        setTimeout(() => { this.virtualKeyboardShowBypass = false; }, 0);
+                    }
+                }
+            });
+        }
 
         const addConstantBtn = document.getElementById('add-constant-btn');
         if (addConstantBtn) addConstantBtn.addEventListener('click', () => this.addConstant());
@@ -297,6 +558,12 @@ class Komplexiti {
         this.sidebarPanel.classList.remove('mobile-open');
         this.hamburgerBtn.classList.remove('active', 'panel-open');
         this.mobileOverlay.classList.remove('active');
+        // Dismiss keyboard and clear focus state when the panel slides away
+        this.clearMathLiveFocusState();
+        if (window.mathVirtualKeyboard?.visible) {
+            window.mathVirtualKeyboard.hide();
+        }
+        this.lastEditableMathField = null;
     }
 
     togglePanel() {
@@ -683,6 +950,19 @@ class Komplexiti {
         }, { passive: false });
         this.canvas.addEventListener('touchend', (e) => {
             if (this.currentState !== this.states.APP) return;
+            // Dismiss keyboard when the user taps the canvas on a touch device
+            if (window.mathVirtualKeyboard?.visible) {
+                this.keyboardDismissedByCanvas = true;
+                this.virtualKeyboardDismissLockUntil = Date.now() + 350;
+                this.clearMathLiveFocusState();
+                window.mathVirtualKeyboard.hide();
+                // Retry: MathLive can re-show within the same event cycle
+                [80, 200].forEach(ms => setTimeout(() => {
+                    if (window.mathVirtualKeyboard?.visible && Date.now() <= this.virtualKeyboardDismissLockUntil) {
+                        window.mathVirtualKeyboard.hide();
+                    }
+                }, ms));
+            }
             this.handleTouchEnd(e);
         }, { passive: true });
         this.canvas.addEventListener('touchcancel', (e) => {
@@ -1186,6 +1466,54 @@ class Komplexiti {
             this.saveConstants();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
+
+        // ------ Touch-device virtual keyboard handling ------
+        // On touch devices, tapping a math field should show the keyboard;
+        // tapping elsewhere (canvas) should hide it and keep it hidden until
+        // the user explicitly taps a field again.
+
+        const markKeyboardReopenAllowed = () => {
+            this.keyboardDismissedByCanvas = false;
+            this.virtualKeyboardDismissLockUntil = 0;
+        };
+
+        const tryShowKeyboardForField = () => {
+            const isTouchLike = navigator.maxTouchPoints > 0 ||
+                window.matchMedia('(hover: none), (pointer: coarse)').matches;
+            if (!isTouchLike) return;
+            if (this.keyboardDismissedByCanvas) return;
+            if (Date.now() <= this.virtualKeyboardDismissLockUntil) return;
+            if (!window.mathVirtualKeyboard || window.mathVirtualKeyboard.visible) return;
+
+            if ('target' in window.mathVirtualKeyboard) {
+                try { window.mathVirtualKeyboard.target = mathField; } catch { /* ignore */ }
+            }
+            setTimeout(() => {
+                if (mathField.hasFocus() && !this.keyboardDismissedByCanvas &&
+                    window.mathVirtualKeyboard && !window.mathVirtualKeyboard.visible) {
+                    this.virtualKeyboardShowBypass = true;
+                    try {
+                        window.mathVirtualKeyboard.show({ animate: true });
+                    } finally {
+                        setTimeout(() => { this.virtualKeyboardShowBypass = false; }, 0);
+                    }
+                }
+            }, 10);
+        };
+
+        // Any direct touch/click on the field clears the canvas-dismiss flag so the
+        // keyboard can re-appear on next focus.
+        mathField.addEventListener('touchstart', markKeyboardReopenAllowed, { passive: true });
+        mathField.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'touch' || e.pointerType === 'pen') markKeyboardReopenAllowed();
+        }, { passive: true });
+        mathField.addEventListener('mousedown', markKeyboardReopenAllowed);
+
+        mathField.addEventListener('focusin', () => {
+            this.lastEditableMathField = mathField;
+            tryShowKeyboardForField();
+        });
+        // ---------------------------------------------------
 
         if (this.constantsContainer) this.constantsContainer.appendChild(card);
 
