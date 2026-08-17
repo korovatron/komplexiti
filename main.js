@@ -30,16 +30,16 @@ class Komplexiti {
         // ---- UI preferences ----
         this.sizeMode = 'normal';   // 'normal' | 'large' | 'xlarge'
 
-        // ---- Complex number constants ----
-        this.complexConstants = [];
-        this.nextConstantId   = 1;
-        this.constantColors   = [
+        // ---- Expressions ----
+        this.expressions = [];
+        this.nextExpressionId   = 1;
+        this.expressionColors   = [
             '#0057FF', '#00C853', '#B91C1C',
             '#C026D3', '#1ABC9C', '#00E5FF', '#A855F7',
             '#FF6B6B', '#4A90E2', '#FFD400', '#84CC16', '#F39C12'
         ];
         this.displayMode = 'arrow'; // 'arrow' | 'point'
-        this.activeInfoConstantId = null;
+        this.activeInfoExpressionId = null;
         this.infoFormat = 'cartesian';
 
         // ---- Input state ----
@@ -76,7 +76,7 @@ class Komplexiti {
         this.mathLiveFocusSink = null;
 
         this.initElements();
-        this.loadConstants();
+        this.loadExpressions();
         this.initializeTheme();
         this.initializeSizeMode();
         this.setupPWALandscapeDetection();
@@ -503,7 +503,7 @@ class Komplexiti {
         this.launchBtn          = document.getElementById('title-launch-button');
         this.returnBtn          = document.getElementById('return-to-title');
         this.appContainer       = document.getElementById('app-container');
-        this.constantsContainer = document.getElementById('constants-container');
+        this.expressionsContainer = document.getElementById('expressions-container');
     }
 
     // -------------------------------------------------------------------------
@@ -648,8 +648,8 @@ class Komplexiti {
             });
         }
 
-        const addConstantBtn = document.getElementById('add-constant-btn');
-        if (addConstantBtn) addConstantBtn.addEventListener('click', () => this.addConstant());
+        const addExpressionBtn = document.getElementById('add-expression-btn');
+        if (addExpressionBtn) addExpressionBtn.addEventListener('click', () => this.addExpression());
 
         const addDropdownToggle = document.getElementById('add-dropdown-toggle');
         if (addDropdownToggle) addDropdownToggle.addEventListener('click', (e) => this.toggleAddDropdown(e));
@@ -664,7 +664,7 @@ class Komplexiti {
         if (closeInfoBtn) closeInfoBtn.addEventListener('click', () => {
             const panel = document.getElementById('complex-info-panel');
             if (panel) panel.style.display = 'none';
-            this.activeInfoConstantId = null;
+            this.activeInfoExpressionId = null;
         });
 
         document.querySelectorAll('.complex-info-fmt-btn').forEach(btn => {
@@ -798,7 +798,7 @@ class Komplexiti {
         this.drawGrid();
         this.drawAxes();
         this.drawAxisLabels();
-        this.drawComplexConstants();
+        this.drawExpressions();
         this.updateComplexInfoPanel();
     }
 
@@ -1526,26 +1526,26 @@ class Komplexiti {
     }
 
     // =========================================================================
-    // Complex number constants
+    // Expressions
     // =========================================================================
 
-    addConstant() {
-        const id = this.nextConstantId++;
+    addExpression() {
+        const id = this.nextExpressionId++;
         let color;
-        if (this.complexConstants.length === 0) {
-            color = this.constantColors[0];
+        if (this.expressions.length === 0) {
+            color = this.expressionColors[0];
         } else {
-            const prevColor = this.complexConstants[this.complexConstants.length - 1].color;
-            const prevIdx   = this.constantColors.indexOf(prevColor);
-            color = this.constantColors[(prevIdx + 1) % this.constantColors.length];
+            const prevColor = this.expressions[this.expressions.length - 1].color;
+            const prevIdx   = this.expressionColors.indexOf(prevColor);
+            color = this.expressionColors[(prevIdx + 1) % this.expressionColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'constant', roots: null, equationVar: null, hasParseError: false };
-        this.complexConstants.push(c);
-        this.createConstantUI(c);
-        this.saveConstants();
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, hasParseError: false };
+        this.expressions.push(c);
+        this.createExpressionUI(c);
+        this.saveExpressions();
     }
 
-    createConstantUI(c, { skipFocus = false } = {}) {
+    createExpressionUI(c, { skipFocus = false } = {}) {
         const card = document.createElement('div');
         card.className = 'expr-card';
         card.style.borderLeftColor = c.color;
@@ -1559,7 +1559,7 @@ class Komplexiti {
                     color-scheme="dark"
                 ></math-field>
                 <div class="expr-card-controls">
-                    <button class="expr-remove-btn" title="Delete" aria-label="Delete constant">
+                    <button class="expr-remove-btn" title="Delete" aria-label="Delete expression">
                         <svg viewBox="0 0 16 16"><path d="M4 4L12 12M12 4L4 12"/></svg>
                     </button>
                     <button class="expr-info-btn" title="Show info about this complex number" aria-label="Show complex number info">i</button>
@@ -1580,7 +1580,7 @@ class Komplexiti {
             let hasError = false;
 
             // Reset any previous equation state before re-evaluating
-            c.type = 'constant';
+            c.type = 'value';
             c.roots = null;
             c.equationVar = null;
 
@@ -1594,7 +1594,7 @@ class Komplexiti {
                     c.errorMessage = `'${assignment.name}' is a reserved name`;
                 } else {
                     c.name = assignment.name; // keep name even if duplicate; _refreshDuplicateNameErrors handles it
-                    const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, this.buildConstantScope(c.id));
+                    const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, this.buildExpressionScope(c.id));
                     c.re = parsed !== null ? parsed.re : null;
                     c.im = parsed !== null ? parsed.im : null;
                     hasError = parsed === null;
@@ -1617,7 +1617,7 @@ class Komplexiti {
                 }
             } else {
                 c.name = null;
-                const parsed = this.parseComplexFromLatex(raw, this.buildConstantScope(c.id));
+                const parsed = this.parseComplexFromLatex(raw, this.buildExpressionScope(c.id));
                 c.re = parsed !== null ? parsed.re : null;
                 c.im = parsed !== null ? parsed.im : null;
                 hasError = raw.length > 0 && parsed === null;
@@ -1627,22 +1627,22 @@ class Komplexiti {
             c.hasParseError = hasError;
             this.cascadeEvaluate(c.id);
             this._refreshDuplicateNameErrors();
-            this.saveConstants();
+            this.saveExpressions();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
-        removeBtn.addEventListener('click', () => this.removeConstant(c.id));
+        removeBtn.addEventListener('click', () => this.removeExpression(c.id));
         infoBtn.addEventListener('click',   () => this.showComplexInfoPanel(c.id));
 
         dot.addEventListener('click', () => {
             c.enabled = !c.enabled;
             dot.style.opacity = c.enabled ? '1' : '0.3';
-            if (!c.enabled && this.activeInfoConstantId === c.id) {
+            if (!c.enabled && this.activeInfoExpressionId === c.id) {
                 const panel = document.getElementById('complex-info-panel');
                 if (panel) panel.style.display = 'none';
-                this.activeInfoConstantId = null;
+                this.activeInfoExpressionId = null;
             }
-            this.saveConstants();
+            this.saveExpressions();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
@@ -1700,7 +1700,7 @@ class Komplexiti {
         });
         // ---------------------------------------------------
 
-        if (this.constantsContainer) this.constantsContainer.appendChild(card);
+        if (this.expressionsContainer) this.expressionsContainer.appendChild(card);
 
         // Apply theme after DOM insertion so MathLive's connectedCallback fires first
         requestAnimationFrame(() => {
@@ -1715,47 +1715,51 @@ class Komplexiti {
         });
     }
 
-    removeConstant(id) {
-        if (this.activeInfoConstantId === id) {
+    removeExpression(id) {
+        if (this.activeInfoExpressionId === id) {
             const panel = document.getElementById('complex-info-panel');
             if (panel) panel.style.display = 'none';
-            this.activeInfoConstantId = null;
+            this.activeInfoExpressionId = null;
         }
-        const idx = this.complexConstants.findIndex(c => c.id === id);
-        if (idx !== -1) this.complexConstants.splice(idx, 1);
+        const idx = this.expressions.findIndex(c => c.id === id);
+        if (idx !== -1) this.expressions.splice(idx, 1);
         const card = document.querySelector(`.expr-card[data-const-id="${id}"]`);
         if (card) card.remove();
         this.cascadeEvaluate(null);
         this._refreshDuplicateNameErrors();
-        this.saveConstants();
+        this.saveExpressions();
         if (this.currentState === this.states.APP) this.drawCanvas();
     }
 
-    saveConstants() {
+    saveExpressions() {
         const data = {
-            nextId:    this.nextConstantId,
-            constants: this.complexConstants.map(c => ({
-                id:      c.id,
-                color:   c.color,
-                enabled: c.enabled,
-                latex:   c.latex
-            }))
+            nextId:    this.nextExpressionId,
+            expressions: this.expressions
+                .filter(c => c.latex && c.latex.trim() !== '')
+                .map(c => ({
+                    id:      c.id,
+                    color:   c.color,
+                    enabled: c.enabled,
+                    latex:   c.latex
+                }))
         };
         localStorage.setItem('komplexiti-constants', JSON.stringify(data));
     }
 
-    loadConstants() {
+    loadExpressions() {
         try {
             const raw = localStorage.getItem('komplexiti-constants');
             if (!raw) return;
             const data = JSON.parse(raw);
-            if (data.nextId) this.nextConstantId = data.nextId;
-            for (const saved of (data.constants || [])) {
-                const c = { id: saved.id, color: saved.color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'constant', roots: null, equationVar: null, hasParseError: false };
-                this.complexConstants.push(c);
-                this.createConstantUI(c, { skipFocus: true });
+            if (data.nextId) this.nextExpressionId = data.nextId;
+            for (const saved of (data.expressions || data.constants || [])) {
+                const c = { id: saved.id, color: saved.color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, hasParseError: false };
+                this.expressions.push(c);
+                this.createExpressionUI(c, { skipFocus: true });
             }
         } catch { /* ignore corrupt data */ }
+        // Always keep one blank tile at the bottom
+        if (!this.expressions.some(c => !c.latex || c.latex.trim() === '')) this.addExpression();
     }
 
     // Returns { name, valueLaTeX } if the expression is a valid assignment, else null.
@@ -1766,9 +1770,9 @@ class Komplexiti {
     }
 
     // Returns an error string if the name is invalid, or null if it is acceptable.
-    validateConstantName(name, ownId) {
+    validateExpressionName(name, ownId) {
         if (name === 'i' || name === 'e') return `'${name}' is reserved`;
-        for (const c of this.complexConstants) {
+        for (const c of this.expressions) {
             if (c.id !== ownId && c.name === name) return `'${name}' is already used`;
         }
         return null;
@@ -1776,12 +1780,12 @@ class Komplexiti {
 
     _refreshDuplicateNameErrors() {
         const nameCounts = {};
-        for (const c of this.complexConstants) {
+        for (const c of this.expressions) {
             if (c.name) nameCounts[c.name] = (nameCounts[c.name] || 0) + 1;
         }
         const panel   = document.getElementById('sidebar-panel') || document.documentElement;
         const inputBg = getComputedStyle(panel).getPropertyValue('--input-bg').trim() || '#3A4F6A';
-        for (const c of this.complexConstants) {
+        for (const c of this.expressions) {
             const card = document.querySelector(`.expr-card[data-const-id="${c.id}"]`);
             if (!card) continue;
             const mathField   = card.querySelector('math-field');
@@ -1810,16 +1814,16 @@ class Komplexiti {
         }
     }
 
-    // Returns a mathjs scope object containing all valid named constants except the one with excludeId.
-    buildConstantScope(excludeId = null) {
+    // Returns a mathjs scope object containing all valid named expressions except the one with excludeId.
+    buildExpressionScope(excludeId = null) {
         if (typeof math === 'undefined') return {};
         // Count names to exclude duplicates (ambiguous)
         const nameCounts = {};
-        for (const c of this.complexConstants) {
+        for (const c of this.expressions) {
             if (c.id !== excludeId && c.name) nameCounts[c.name] = (nameCounts[c.name] || 0) + 1;
         }
         const scope = {};
-        for (const c of this.complexConstants) {
+        for (const c of this.expressions) {
             if (c.id !== excludeId && c.name && nameCounts[c.name] === 1 && c.re !== null && c.im !== null) {
                 scope[c.name] = math.complex(c.re, c.im);
             }
@@ -1827,16 +1831,16 @@ class Komplexiti {
         return scope;
     }
 
-    // Re-evaluates every constant (except the one that just changed) using the updated scope.
+    // Re-evaluates every expression (except the one that just changed) using the updated scope.
     // Multiple passes resolve dependency chains regardless of definition order.
     cascadeEvaluate(triggererId) {
-        const passes = this.complexConstants.length;
+        const passes = this.expressions.length;
         for (let pass = 0; pass < passes; pass++) {
-            for (const c of this.complexConstants) {
+            for (const c of this.expressions) {
                 if (c.id === triggererId) continue;
                 const raw = c.latex.trim();
                 if (!raw) continue;
-                const scope      = this.buildConstantScope(c.id);
+                const scope      = this.buildExpressionScope(c.id);
                 const assignment = this.parseAssignment(raw);
                 if (assignment && c.name !== null) {
                     const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, scope);
@@ -2045,7 +2049,7 @@ class Komplexiti {
     parseEquation(rawLatex, ownId) {
         if (typeof math === 'undefined') return null;
         try {
-            const scope = this.buildConstantScope(ownId);
+            const scope = this.buildExpressionScope(ownId);
             const expr  = this.latexToExpr(rawLatex);
             if (!expr) return null;
 
@@ -2137,7 +2141,7 @@ class Komplexiti {
     // =========================================================================
 
     showComplexInfoPanel(id) {
-        this.activeInfoConstantId = id;
+        this.activeInfoExpressionId = id;
         const panel = document.getElementById('complex-info-panel');
         if (panel) panel.style.display = '';
         this.updateComplexInfoPanel();
@@ -2146,7 +2150,7 @@ class Komplexiti {
     updateComplexInfoPanel() {
         const panel    = document.getElementById('complex-info-panel');
         if (!panel || panel.style.display === 'none') return;
-        const c = this.complexConstants.find(x => x.id === this.activeInfoConstantId);
+        const c = this.expressions.find(x => x.id === this.activeInfoExpressionId);
         if (!c) { panel.style.display = 'none'; return; }
 
         panel.style.borderLeftColor = c.color;
@@ -2300,8 +2304,8 @@ class Komplexiti {
         return `${radStr} (${this.formatNumber(deg)}&deg;)`;
     }
 
-    drawComplexConstants() {
-        if (!this.complexConstants.length) return;
+    drawExpressions() {
+        if (!this.expressions.length) return;
         const ctx     = this.ctx;
         const isLight = document.documentElement.getAttribute('data-theme') === 'light';
         const fSize       = this.sizeMode === 'xlarge' ? 26 : this.sizeMode === 'large' ? 22 : 18;
@@ -2309,7 +2313,7 @@ class Komplexiti {
         const strokeWidth = this.sizeMode === 'xlarge' ? 5  : this.sizeMode === 'large' ? 4  : 3;
         const headLen     = this.sizeMode === 'xlarge' ? 15 : this.sizeMode === 'large' ? 13 : 11;
 
-        for (const c of this.complexConstants) {
+        for (const c of this.expressions) {
             if (!c.enabled) continue;
 
             // --- Equation: draw each root using the global display mode ---
@@ -2420,7 +2424,7 @@ class Komplexiti {
             ctx.stroke();
             ctx.restore();
 
-            // Label: only draw if the constant has a user-assigned name
+            // Label: only draw if the expression has a user-assigned name
             if (c.name) {
                 ctx.save();
                 ctx.font        = `italic ${fSize}px Arial`;

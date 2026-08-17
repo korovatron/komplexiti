@@ -756,7 +756,7 @@
             color: rgba(232, 244, 253, 0.5);
         }
 
-        .add-constant-btn {
+        .add-expression-btn {
             width: 26px;
             height: 26px;
             padding: 0;
@@ -774,17 +774,17 @@
         }
 
         @media (hover: hover) {
-            .add-constant-btn:hover {
+            .add-expression-btn:hover {
                 background: rgba(74, 144, 226, 0.3) !important;
                 border-color: #4A90E2 !important;
             }
         }
 
-        .add-constant-btn:active {
+        .add-expression-btn:active {
             background: rgba(74, 144, 226, 0.3) !important;
         }
 
-        #constants-container {
+        #expressions-container {
             display: flex;
             flex-direction: column;
         }
@@ -857,11 +857,15 @@
         }
 
         .expr-name-error {
-            font-size: 11px;
-            color: #E74C3C;
-            margin-top: 4px;
-            padding: 0 2px;
             display: none;
+            margin-top: 5px;
+            padding: 2px 7px;
+            background: #C0392B;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 4px;
+            align-self: flex-start;
         }
 
         .expr-remove-btn {
@@ -922,7 +926,7 @@
             transform: scale(1.1);
         }
 
-        /* Info button on constant cards */
+        /* Info button on expression cards */
         .expr-info-btn {
             width: 20px;
             height: 20px;
@@ -1139,7 +1143,7 @@
 
                         <!-- 1. Split ADD button -->
                         <div class="split-button-container">
-                            <button id="add-constant-btn" class="split-button-main panel-btn" title="Add complex number" aria-label="Add complex number">
+                            <button id="add-expression-btn" class="split-button-main panel-btn" title="Add complex number" aria-label="Add complex number">
                                 <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
                                     <line x1="6.5" y1="1" x2="6.5" y2="12"/>
                                     <line x1="1" y1="6.5" x2="12" y2="6.5"/>
@@ -1174,8 +1178,8 @@
                 </div>
 
                 <!-- Complex numbers and equations -->
-                <div class="panel-section" id="constants-section">
-                    <div id="constants-container"></div>
+                <div class="panel-section" id="expressions-section">
+                    <div id="expressions-container"></div>
                 </div>
 
                 <!-- Bottom controls -->
