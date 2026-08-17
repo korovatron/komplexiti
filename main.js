@@ -1079,7 +1079,7 @@ class Komplexiti {
             const prevIdx   = this.constantColors.indexOf(prevColor);
             color = this.constantColors[(prevIdx + 1) % this.constantColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'constant', roots: null, equationVar: null };
         this.complexConstants.push(c);
         this.createConstantUI(c);
         this.saveConstants();
@@ -1118,6 +1118,11 @@ class Komplexiti {
             const assignment = raw ? this.parseAssignment(raw) : null;
             let hasError = false;
 
+            // Reset any previous equation state before re-evaluating
+            c.type = 'constant';
+            c.roots = null;
+            c.equationVar = null;
+
             if (assignment) {
                 const nameError = this.validateConstantName(assignment.name, c.id);
                 if (nameError) {
@@ -1132,6 +1137,19 @@ class Komplexiti {
                     c.im = parsed !== null ? parsed.im : null;
                     hasError = parsed === null;
                 }
+            } else if (raw.includes('=')) {
+                // Not a simple name=value assignment — try to solve as an equation
+                c.name = null;
+                c.re   = null;
+                c.im   = null;
+                const eq = this.parseEquation(raw, c.id);
+                if (eq) {
+                    c.type = 'equation';
+                    c.roots = eq.roots;
+                    c.equationVar = eq.variable;
+                } else {
+                    hasError = true;
+                }
             } else {
                 c.name = null;
                 const parsed = this.parseComplexFromLatex(raw, this.buildConstantScope(c.id));
@@ -1139,6 +1157,9 @@ class Komplexiti {
                 c.im = parsed !== null ? parsed.im : null;
                 hasError = raw.length > 0 && parsed === null;
             }
+
+            // Info button only makes sense for a single complex constant
+            if (infoBtn) infoBtn.style.display = c.type === 'equation' ? 'none' : '';
 
             if (hasError) {
                 mathField.classList.add('input-error');
@@ -1213,7 +1234,7 @@ class Komplexiti {
             const data = JSON.parse(raw);
             if (data.nextId) this.nextConstantId = data.nextId;
             for (const saved of (data.constants || [])) {
-                const c = { id: saved.id, color: saved.color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null };
+                const c = { id: saved.id, color: saved.color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'constant', roots: null, equationVar: null };
                 this.complexConstants.push(c);
                 this.createConstantUI(c, { skipFocus: true });
             }
@@ -1263,6 +1284,10 @@ class Komplexiti {
                     const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, scope);
                     c.re = parsed !== null ? parsed.re : null;
                     c.im = parsed !== null ? parsed.im : null;
+                } else if (!assignment && raw.includes('=')) {
+                    const eq = this.parseEquation(raw, c.id);
+                    if (eq) { c.type = 'equation'; c.roots = eq.roots; c.equationVar = eq.variable; }
+                    else    { c.roots = null; }
                 } else if (!assignment) {
                     const parsed = this.parseComplexFromLatex(raw, scope);
                     c.re = parsed !== null ? parsed.re : null;
@@ -1272,40 +1297,212 @@ class Komplexiti {
         }
     }
 
+    // Normalises a LaTeX expression string into a JS/mathjs-evaluable string.
+    latexToExpr(latex) {
+        let e = latex.trim();
+        for (let p = 0; p < 4; p++) {
+            e = e.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '(($1)/($2))');
+        }
+        for (let p = 0; p < 3; p++) {
+            e = e.replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt($1)');
+        }
+        e = e.replace(/\^\s*\{([^{}]+)\}/g, '^($1)');
+        e = e.replace(/\{([^{}]*)\}/g, '($1)');
+        e = e.replace(/\\left\s*[(\[]/g, '(').replace(/\\right\s*[)\]]/g, ')');
+        e = e.replace(/\\cdot|\\times/g, '*');
+        e = e.replace(/\\pi/g, 'pi');
+        e = e.replace(/\\cos/g, 'cos').replace(/\\sin/g, 'sin').replace(/\\tan/g, 'tan');
+        e = e.replace(/\\ln\b/g, 'log').replace(/\\log\b/g, 'log10');
+        e = e.replace(/\\exp\b/g, 'exp');
+        e = e.replace(/\\sqrt\s*([0-9])/g, 'sqrt($1)');
+        e = e.replace(/\\sqrt\b/g, 'sqrt');
+        e = e.replace(/\\imaginaryI|\\imath/g, 'i');
+        e = e.replace(/\\[a-zA-Z]+\s*/g, '');
+        e = e.trim();
+        if (!e) return '';
+        e = e.replace(/\bi\s*(sqrt|sin|cos|tan|log|log10|exp)\s*\(/g, 'i*$1(');
+        e = e.replace(/\)\s*i\b/g, ')*i');
+        return e;
+    }
+
     parseComplexFromLatex(latex, scope = {}) {
         if (!latex || !latex.trim() || typeof math === 'undefined') return null;
         try {
-            let e = latex.trim();
-            // Resolve \frac{a}{b} iteratively to handle one level of nesting
-            for (let p = 0; p < 4; p++) {
-                e = e.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '(($1)/($2))');
-            }
-            // \sqrt{a} -> sqrt(a)
-            for (let p = 0; p < 3; p++) {
-                e = e.replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt($1)');
-            }
-            e = e.replace(/\^\s*\{([^{}]+)\}/g, '^($1)');         // ^{a} -> ^(a)
-            e = e.replace(/\{([^{}]*)\}/g, '($1)');               // remaining {} grouping
-            e = e.replace(/\\left\s*[(\[]/g, '(').replace(/\\right\s*[)\]]/g, ')');
-            e = e.replace(/\\cdot|\\times/g, '*');
-            e = e.replace(/\\pi/g, 'pi');
-            e = e.replace(/\\cos/g, 'cos').replace(/\\sin/g, 'sin').replace(/\\tan/g, 'tan');
-            e = e.replace(/\\ln\b/g, 'log').replace(/\\log\b/g, 'log10');
-            e = e.replace(/\\exp\b/g, 'exp');
-            e = e.replace(/\\sqrt\s*([0-9])/g, 'sqrt($1)');       // \sqrt2 → sqrt(2)
-            e = e.replace(/\\sqrt\b/g, 'sqrt');
-            e = e.replace(/\\imaginaryI|\\imath/g, 'i');
-            e = e.replace(/\\[a-zA-Z]+\s*/g, '');                 // strip remaining LaTeX commands
-            e = e.trim();
+            const e = this.latexToExpr(latex);
             if (!e) return null;
-            // implicit multiply: 'i' immediately before a function (e.g. isqrt → i*sqrt)
-            e = e.replace(/\bi\s*(sqrt|sin|cos|tan|log|log10|exp)\s*\(/g, 'i*$1(');
-            // implicit multiply: closing paren before 'i' (e.g. sqrt(2)i → sqrt(2)*i)
-            e = e.replace(/\)\s*i\b/g, ')*i');
             const result = math.evaluate(e, scope);
             if (typeof result === 'number') return { re: result, im: 0 };
             if (result && typeof result.re === 'number') return { re: result.re, im: result.im };
             return null;
+        } catch { return null; }
+    }
+
+    // =========================================================================
+    // Equation solving
+    // =========================================================================
+
+    // Returns the single free variable name in expr, or null if there are 0 or >1.
+    _findEquationVariable(expr, scope) {
+        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'Infinity', 'NaN']);
+        const known    = new Set(Object.keys(scope));
+        const free     = new Set();
+        for (const [, id] of expr.matchAll(/\b([a-zA-Z][a-zA-Z0-9]*)\b/g)) {
+            if (!reserved.has(id) && !known.has(id)) free.add(id);
+        }
+        return free.size === 1 ? [...free][0] : null;
+    }
+
+    // Fast path for z^n = c: returns n evenly-spaced roots on the nth-root circle.
+    _solveNthRootsOfC(n, cVal) {
+        const cRe = typeof cVal === 'number' ? cVal : (cVal?.re ?? 0);
+        const cIm = typeof cVal === 'number' ? 0    : (cVal?.im ?? 0);
+        if (!isFinite(cRe) || !isFinite(cIm)) return null;
+        const r      = Math.pow(Math.hypot(cRe, cIm), 1 / n);
+        const theta0 = Math.atan2(cIm, cRe);
+        return Array.from({ length: n }, (_, k) => {
+            const angle = (theta0 + 2 * Math.PI * k) / n;
+            return { re: r * Math.cos(angle), im: r * Math.sin(angle) };
+        });
+    }
+
+    // Inline complex arithmetic helpers used by the solvers.
+    _cAdd(a, b) { return { re: a.re + b.re, im: a.im + b.im }; }
+    _cSub(a, b) { return { re: a.re - b.re, im: a.im - b.im }; }
+    _cMul(a, b) { return { re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re }; }
+    _cDiv(a, b) {
+        const d = b.re * b.re + b.im * b.im;
+        if (d === 0) return { re: NaN, im: NaN };
+        return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d };
+    }
+    _cSqrt(a) {
+        const r = Math.sqrt(Math.hypot(a.re, a.im));
+        const t = Math.atan2(a.im, a.re) / 2;
+        return { re: r * Math.cos(t), im: r * Math.sin(t) };
+    }
+    // Horner evaluation: coeffs = [a0, a1, ..., an], returns a0 + a1*z + ... + an*z^n
+    _cPolyEval(coeffs, z) {
+        let acc = { re: 0, im: 0 };
+        for (let k = coeffs.length - 1; k >= 0; k--) acc = this._cAdd(this._cMul(acc, z), coeffs[k]);
+        return acc;
+    }
+
+    // Extract polynomial coefficients [a0..an] of h(varName) via symbolic differentiation.
+    // Returns null if h is not a polynomial of degree ≤ maxDeg.
+    _extractPolynomialCoeffs(hExpr, varName, scope, maxDeg = 6) {
+        try {
+            const factorials = [1];
+            for (let k = 1; k <= maxDeg; k++) factorials.push(factorials[k - 1] * k);
+
+            let node   = math.parse(hExpr);
+            const sc0  = { ...scope, [varName]: math.complex(0, 0) };
+            const coeffs = [];
+
+            for (let k = 0; k <= maxDeg; k++) {
+                if (k > 0) node = math.derivative(node, varName);
+                const raw = node.evaluate(sc0);
+                const re  = typeof raw === 'number' ? raw : (raw?.re ?? 0);
+                const im  = typeof raw === 'number' ? 0   : (raw?.im ?? 0);
+                coeffs.push({ re: re / factorials[k], im: im / factorials[k] });
+            }
+            // Trim trailing near-zero coefficients
+            while (coeffs.length > 1 && Math.hypot(coeffs[coeffs.length - 1].re, coeffs[coeffs.length - 1].im) < 1e-9) {
+                coeffs.pop();
+            }
+            return coeffs;
+        } catch { return null; }
+    }
+
+    _solveLinear(coeffs) {
+        return [ this._cDiv({ re: -coeffs[0].re, im: -coeffs[0].im }, coeffs[1]) ];
+    }
+
+    _solveQuadratic(coeffs) {
+        const [a0, a1, a2] = coeffs;
+        const disc  = this._cSub(this._cMul(a1, a1), this._cMul({ re: 4, im: 0 }, this._cMul(a0, a2)));
+        const sqrtD = this._cSqrt(disc);
+        const negA1 = { re: -a1.re, im: -a1.im };
+        const two2  = { re: 2 * a2.re, im: 2 * a2.im };
+        return [
+            this._cDiv(this._cAdd(negA1, sqrtD), two2),
+            this._cDiv(this._cSub(negA1, sqrtD), two2)
+        ];
+    }
+
+    // Durand-Kerner (Weierstrass) simultaneous root-finder for degree >= 3.
+    _solveDurandKerner(coeffs) {
+        const n = coeffs.length - 1;
+        if (n < 1) return [];
+        const lead  = coeffs[n];
+        const monic = coeffs.map(c => this._cDiv(c, lead));
+        // Cauchy bound for initial circle radius
+        const bound = 1 + Math.max(...monic.slice(0, n).map(c => Math.hypot(c.re, c.im)));
+        const r0    = Math.pow(bound, 1 / n);
+        // Start slightly off-axis to avoid symmetry collisions with roots of unity
+        let zs = Array.from({ length: n }, (_, k) => {
+            const angle = 0.4 + 2 * Math.PI * k / n;
+            return { re: r0 * Math.cos(angle), im: r0 * Math.sin(angle) };
+        });
+        for (let iter = 0; iter < 80; iter++) {
+            let maxStep = 0;
+            const next = zs.map((zk, k) => {
+                const pz  = this._cPolyEval(monic, zk);
+                let denom = { re: 1, im: 0 };
+                for (let j = 0; j < n; j++) {
+                    if (j !== k) denom = this._cMul(denom, this._cSub(zk, zs[j]));
+                }
+                const step = this._cDiv(pz, denom);
+                maxStep = Math.max(maxStep, Math.hypot(step.re, step.im));
+                return this._cSub(zk, step);
+            });
+            zs = next;
+            if (maxStep < 1e-12) break;
+        }
+        return zs;
+    }
+
+    // Main equation parser. Returns { variable, roots } or null.
+    parseEquation(rawLatex, ownId) {
+        if (typeof math === 'undefined') return null;
+        try {
+            const scope = this.buildConstantScope(ownId);
+            const expr  = this.latexToExpr(rawLatex);
+            if (!expr) return null;
+
+            const eqIdx = expr.indexOf('=');
+            if (eqIdx < 1 || eqIdx >= expr.length - 1) return null;
+            if ('!<>'.includes(expr[eqIdx - 1])) return null;   // reject !=, <=, >=
+
+            const lhs     = expr.slice(0, eqIdx).trim();
+            const rhs     = expr.slice(eqIdx + 1).trim();
+            const varName = this._findEquationVariable(lhs + ' ' + rhs, scope);
+            if (!varName) return null;
+
+            // Fast path: varName^n = const_expr  (nth roots, including roots of unity)
+            const stripped  = lhs.replace(/\s/g, '');
+            const nthMatch  = /^([a-zA-Z]\w*)\^[(]?(\d+)[)]?$/.exec(stripped);
+            if (nthMatch && nthMatch[1] === varName) {
+                const n = parseInt(nthMatch[2]);
+                if (n >= 1 && n <= 16) {
+                    const cVal = math.evaluate(rhs, scope);
+                    const roots = this._solveNthRootsOfC(n, cVal);
+                    if (roots) return { variable: varName, roots };
+                }
+            }
+
+            // General polynomial solver via symbolic differentiation
+            const hExpr  = `(${lhs}) - (${rhs})`;
+            const coeffs = this._extractPolynomialCoeffs(hExpr, varName, scope);
+            if (!coeffs || coeffs.length < 2) return null;
+
+            const deg = coeffs.length - 1;
+            let roots;
+            if      (deg === 1) roots = this._solveLinear(coeffs);
+            else if (deg === 2) roots = this._solveQuadratic(coeffs);
+            else                roots = this._solveDurandKerner(coeffs);
+
+            if (!roots?.length) return null;
+            const valid = roots.filter(r => isFinite(r.re) && isFinite(r.im));
+            return valid.length ? { variable: varName, roots: valid } : null;
         } catch { return null; }
     }
 
@@ -1473,7 +1670,45 @@ class Komplexiti {
         const headLen     = this.sizeMode === 'xlarge' ? 13 : this.sizeMode === 'large' ? 11 : 9;
 
         for (const c of this.complexConstants) {
-            if (!c.enabled || c.re === null || c.im === null) continue;
+            if (!c.enabled) continue;
+
+            // --- Equation: draw each root as a labelled point ---
+            if (c.type === 'equation' && c.roots?.length) {
+                const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
+                for (let k = 0; k < c.roots.length; k++) {
+                    const root = c.roots[k];
+                    if (!isFinite(root.re) || !isFinite(root.im)) continue;
+                    const pt = this.worldToScreen(root.re, root.im);
+                    ctx.save();
+                    ctx.fillStyle   = c.color;
+                    ctx.globalAlpha = 1;
+                    ctx.beginPath();
+                    ctx.arc(pt.x, pt.y, dotR, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.55)';
+                    ctx.lineWidth   = 1.5;
+                    ctx.stroke();
+                    ctx.restore();
+                    if (c.equationVar) {
+                        const label = c.equationVar + toSub(k + 1);
+                        ctx.save();
+                        ctx.font        = `italic ${fSize}px Arial`;
+                        ctx.globalAlpha = 1;
+                        const tw = ctx.measureText(label).width;
+                        const lx = pt.x + dotR + 4;
+                        const ly = pt.y - dotR - 2;
+                        ctx.fillStyle = isLight ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.5)';
+                        ctx.fillRect(lx - 2, ly - fSize + 1, tw + 4, fSize + 3);
+                        ctx.fillStyle = c.color;
+                        ctx.fillText(label, lx, ly);
+                        ctx.restore();
+                    }
+                }
+                continue;
+            }
+
+            // --- Constant: existing drawing logic ---
+            if (c.re === null || c.im === null) continue;
             if (!isFinite(c.re) || !isFinite(c.im)) continue;
 
             const pt  = this.worldToScreen(c.re, c.im);
