@@ -170,6 +170,16 @@ class Komplexiti {
         this.launchBtn.addEventListener('click', () => this.launchApp());
         this.returnBtn.addEventListener('click', () => this.returnToTitle());
         window.addEventListener('resize', () => this.handleResize());
+
+        const reopenPanelIfClosed = () => {
+            if (this.currentState === this.states.APP && !this.panelOpen) {
+                this.openPanel();
+            }
+        };
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) reopenPanelIfClosed();
+        });
+        window.addEventListener('focus', reopenPanelIfClosed);
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') this.returnToTitle();
             if (e.key === ' ' && this.currentState === this.states.TITLE) {
