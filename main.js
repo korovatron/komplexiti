@@ -598,6 +598,15 @@ class Komplexiti {
         window.addEventListener('focus', reopenPanelIfClosed);
         document.addEventListener('keydown', (e) => this.handleKeyboard(e));
 
+        // Dismiss add-dropdown when clicking outside it
+        document.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('add-dropdown');
+            if (!dropdown || !dropdown.classList.contains('show')) return;
+            if (!dropdown.contains(e.target) && e.target.id !== 'add-dropdown-toggle') {
+                dropdown.classList.remove('show');
+            }
+        });
+
         // Panel control buttons
         const themeToggle = document.getElementById('theme-toggle');
         if (themeToggle) themeToggle.addEventListener('click', () => this.toggleTheme());
@@ -641,6 +650,13 @@ class Komplexiti {
 
         const addConstantBtn = document.getElementById('add-constant-btn');
         if (addConstantBtn) addConstantBtn.addEventListener('click', () => this.addConstant());
+
+        const addDropdownToggle = document.getElementById('add-dropdown-toggle');
+        if (addDropdownToggle) addDropdownToggle.addEventListener('click', (e) => this.toggleAddDropdown(e));
+
+        const resetAxesBtn = document.getElementById('reset-axes');
+        if (resetAxesBtn) resetAxesBtn.addEventListener('click', () => this.resetAxes());
+
         const displayModeToggle = document.getElementById('display-mode-toggle');
         if (displayModeToggle) displayModeToggle.addEventListener('click', () => this.toggleDisplayMode());
 
@@ -2011,14 +2027,37 @@ class Komplexiti {
         } catch { return null; }
     }
 
+    resetAxes() {
+        const h = this.viewport.height;
+        if (h > 0) this.viewport.scale = h / 10;
+        this.viewport.centerX = 0;
+        this.viewport.centerY = 0;
+        this.updateViewport();
+        this.drawCanvas();
+    }
+
+    toggleAddDropdown(e) {
+        const dropdown = document.getElementById('add-dropdown');
+        if (!dropdown) return;
+        const isOpen = dropdown.classList.contains('show');
+        if (isOpen) {
+            dropdown.classList.remove('show');
+            return;
+        }
+        // Position below the toggle button
+        const btn = e.currentTarget;
+        const rect = btn.getBoundingClientRect();
+        dropdown.style.top  = (rect.bottom + 4) + 'px';
+        dropdown.style.left = rect.left + 'px';
+        dropdown.classList.add('show');
+    }
+
     toggleDisplayMode() {
         this.displayMode = this.displayMode === 'arrow' ? 'point' : 'arrow';
         const arrowIcon = document.querySelector('.mode-arrow-icon');
         const pointIcon = document.querySelector('.mode-point-icon');
-        const label     = document.getElementById('display-mode-label');
         if (arrowIcon) arrowIcon.style.opacity = this.displayMode === 'arrow' ? '1' : '0.35';
         if (pointIcon) pointIcon.style.opacity = this.displayMode === 'point' ? '1' : '0.35';
-        if (label)     label.textContent = this.displayMode === 'arrow' ? 'Arrow' : 'Point';
         if (this.currentState === this.states.APP) this.drawCanvas();
     }
 

@@ -80,7 +80,7 @@
         /* Side panel - always dark, independent of app theme                   */
         /* ------------------------------------------------------------------ */
         #sidebar-panel {
-            --panel-bg:       rgba(42, 63, 90, 0.95);
+            --panel-bg:       rgba(26, 47, 66, 0.95);
             --bg-secondary:   #2A3F5A;
             --border-color:   #555;
             --text-primary:   #E8F4FD;
@@ -652,6 +652,77 @@
             flex-shrink: 0;
         }
 
+        /* Split-button (top toolbar ADD button) */
+        .split-button-container {
+            position: relative;
+            display: flex;
+            flex: 1 1 0;
+            min-width: 0;
+        }
+
+        .split-button-main {
+            flex: 1 1 0 !important;
+            border-radius: 5px 0 0 5px !important;
+            border-right: none !important;
+            min-width: 0 !important;
+            gap: 5px;
+        }
+
+        .split-button-dropdown {
+            width: 24px !important;
+            flex-shrink: 0 !important;
+            padding: 0 !important;
+            border-radius: 0 5px 5px 0 !important;
+            border-left: 1px solid var(--border-color) !important;
+        }
+
+        @media (hover: hover) {
+            .split-button-dropdown:hover {
+                background: #3A4F6A !important;
+            }
+        }
+
+        .split-button-dropdown:active {
+            background: #3A4F6A !important;
+        }
+
+        /* Top toolbar: three equal columns */
+        .top-toolbar-row {
+            grid-template-columns: 1fr 1fr 1fr !important;
+        }
+
+        /* Add dropdown (populated later) */
+        .add-dropdown {
+            position: fixed;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            max-height: 400px;
+            overflow-y: auto;
+            opacity: 0;
+            transform: translateY(-8px) scaleY(0.95);
+            transform-origin: top left;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            -webkit-user-select: none;
+            user-select: none;
+            min-width: 200px;
+        }
+
+        .add-dropdown::-webkit-scrollbar {
+            display: none;
+        }
+
+        .add-dropdown.show {
+            opacity: 1;
+            transform: translateY(0) scaleY(1);
+            pointer-events: auto;
+        }
+
         /* ------------------------------------------------------------------ */
         /* Mobile overlay - tap-outside-to-close hit target (no dimming)        */
         /* ------------------------------------------------------------------ */
@@ -1069,6 +1140,52 @@
                     <button id="return-to-title">&#8592; Title</button>
                 </div>
 
+                <!-- Top toolbar: Add / Reset axes / Display mode -->
+                <div class="panel-section">
+                    <div class="panel-control-row top-toolbar-row">
+
+                        <!-- 1. Split ADD button -->
+                        <div class="split-button-container">
+                            <button id="add-constant-btn" class="split-button-main panel-btn" title="Add complex number" aria-label="Add complex number">
+                                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                                    <line x1="6.5" y1="1" x2="6.5" y2="12"/>
+                                    <line x1="1" y1="6.5" x2="12" y2="6.5"/>
+                                </svg>
+                                Add
+                            </button>
+                            <button id="add-dropdown-toggle" class="split-button-dropdown panel-btn" title="More options" aria-label="More add options">
+                                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                                    <polyline points="2,4 6,8 10,4"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <!-- 2. Reset axes to initial view -->
+                        <button id="reset-axes" class="panel-btn" title="Reset axes to initial view" aria-label="Reset axes" style="font-size: 10px; line-height: 1.2;">RESET<br>AXES</button>
+
+                        <!-- 3. Arrow / dot display toggle (icons only) -->
+                        <button id="display-mode-toggle" class="panel-btn" title="Toggle between arrow and dot display" aria-label="Toggle display mode">
+                            <svg class="mode-arrow-icon" width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 1;" aria-hidden="true">
+                                <line x1="1" y1="6" x2="12" y2="6"/>
+                                <polyline points="8,2 12,6 8,10"/>
+                            </svg>
+                            <div class="btn-separator"></div>
+                            <svg class="mode-point-icon" width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style="opacity: 0.35;" aria-hidden="true">
+                                <circle cx="6" cy="6" r="4"/>
+                            </svg>
+                        </button>
+
+                    </div>
+                    <!-- Add dropdown (to be populated later) -->
+                    <div id="add-dropdown" class="add-dropdown"></div>
+                </div>
+
+                <!-- Complex numbers and equations -->
+                <div class="panel-section" id="constants-section">
+                    <div id="constants-container"></div>
+                </div>
+
+                <!-- Bottom controls -->
                 <div class="panel-section">
                     <div class="panel-control-row" style="grid-template-columns: 1fr 1fr 1fr;">
                         <button id="size-mode-toggle" class="panel-btn" title="Toggle label size">
@@ -1108,27 +1225,6 @@
                             </svg>
                         </button>
                     </div>
-                </div>
-
-                <div class="panel-section" id="constants-section">
-                    <div class="panel-section-header">
-                        <span class="panel-section-label">Complex Numbers</span>
-                        <button id="add-constant-btn" class="add-constant-btn" title="Add complex number" aria-label="Add complex number">+</button>
-                    </div>
-                    <div class="panel-control-row" style="margin-bottom: 8px;">
-                        <button id="display-mode-toggle" class="panel-btn" title="Toggle display mode" style="grid-column: 1 / -1;">
-                            <svg class="mode-arrow-icon" width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 1;">
-                                <line x1="1" y1="6" x2="12" y2="6"/>
-                                <polyline points="8,2 12,6 8,10"/>
-                            </svg>
-                            <div class="btn-separator"></div>
-                            <svg class="mode-point-icon" width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style="opacity: 0.35;">
-                                <circle cx="6" cy="6" r="4"/>
-                            </svg>
-                            <span id="display-mode-label" style="font-size: 11px; margin-left: 5px;">Arrow</span>
-                        </button>
-                    </div>
-                    <div id="constants-container"></div>
                 </div>
             </div>
 
