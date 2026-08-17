@@ -1726,6 +1726,9 @@ class Komplexiti {
         e = e.replace(/\barcsinh\b/g, 'asinh').replace(/\barccosh\b/g, 'acosh').replace(/\barctanh\b/g, 'atanh');
         e = e.replace(/\^\s*\{([^{}]+)\}/g, '^($1)');
         e = e.replace(/\{([^{}]*)\}/g, '($1)');
+        // |expr| absolute value - both \left|...\right| (keyboard) and bare |...|
+        e = e.replace(/\\left\s*\|(.+?)\\right\s*\|/g, 'abs($1)');
+        e = e.replace(/\|([^|]+)\|/g, 'abs($1)');
         e = e.replace(/\\left\s*[(\[]/g, '(').replace(/\\right\s*[)\]]/g, ')');
         e = e.replace(/\\cdot|\\times/g, '*');
         e = e.replace(/\\pi/g, 'pi');
