@@ -36,7 +36,7 @@
         :root {
             --bg-primary:    #1A2F42;
             --bg-secondary:  #2A3F5A;
-            --canvas-bg:     blue; /* DEBUG */
+            --canvas-bg:     #000000;
             --text-primary:  #E8F4FD;
             --text-secondary: #888;
             --accent-color:  #4A90E2;
@@ -101,7 +101,7 @@
             overflow: hidden;
             overscroll-behavior: none;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: red; /* DEBUG */
+            background: var(--bg-primary);
             color: var(--text-primary);
             touch-action: none;
         }
@@ -144,16 +144,13 @@
         /* Pin the app shell to the installed-PWA viewport so a transient short
            height (share sheet, screenshots, app switching) cannot expose the
            page background below the app. */
+        /* inset:0 alone fills the viewport unconditionally - explicit height
+           would let a wrong --actual-vh value create a gap at bottom/right. */
         #app-container {
             position: fixed;
             inset: 0;
-            width: 100vw;
-            height: 100vh;
-            height: var(--actual-vh, 100vh);
-            min-height: var(--actual-vh, 100vh);
             display: flex;
             flex-direction: column;
-            background: lime; /* DEBUG */
         }
 
         /* Pin the canvas box to the container so the backing-store size (which is
