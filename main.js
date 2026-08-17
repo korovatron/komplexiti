@@ -211,7 +211,7 @@ class Komplexiti {
                                     { latex: '(', label: '(' },
                                     { latex: ')', label: ')' },
                                     { latex: '\\left|#?\\right|', label: '|z|' },
-                                    { insert: '!', label: 'n!' },
+                                    { latex: '\\overline{#?}', label: 'z̅' },
                                     '[separator]',
                                     { latex: '1', label: '1' },
                                     { latex: '2', label: '2' },
@@ -235,7 +235,86 @@ class Komplexiti {
                             ]
                         };
 
-                        window.mathVirtualKeyboard.layouts = [complexLayout];
+                        const trigLayout = {
+                            label: 'f(x)',
+                            labelClass: 'MLK__tex-math',
+                            tooltip: 'Trigonometric & Hyperbolic Functions',
+                            rows: [
+                                [
+                                    { latex: 'i', label: 'i' },
+                                    { latex: '\\pi', label: 'π' },
+                                    { latex: '=', label: '=' },
+                                    { label: '[backspace]', width: 1 },
+                                    '[separator]',
+                                    { latex: '7', label: '7' },
+                                    { latex: '8', label: '8' },
+                                    { latex: '9', label: '9' },
+                                    { insert: '\\frac{#@}{#?}', label: '/' }
+                                ],
+                                [
+                                    {
+                                        insert: '\\sin(#?)', label: 'sin',
+                                        shift: { insert: '\\arcsin(#?)', label: 'sin⁻¹', class: 'small' }
+                                    },
+                                    {
+                                        insert: '\\cos(#?)', label: 'cos',
+                                        shift: { insert: '\\arccos(#?)', label: 'cos⁻¹', class: 'small' }
+                                    },
+                                    {
+                                        insert: '\\tan(#?)', label: 'tan',
+                                        shift: { insert: '\\arctan(#?)', label: 'tan⁻¹', class: 'small' }
+                                    },
+                                    {
+                                        insert: '\\ln(#?)', label: 'ln',
+                                        shift: { insert: 'e^{#?}', label: 'eˣ' }
+                                    },
+                                    '[separator]',
+                                    { latex: '4', label: '4' },
+                                    { latex: '5', label: '5' },
+                                    { latex: '6', label: '6' },
+                                    { latex: '\\cdot', label: '×' }
+                                ],
+                                [
+                                    {
+                                        insert: '\\sinh(#?)', label: 'sinh', class: 'small',
+                                        shift: { insert: '\\operatorname{arcsinh}(#?)', label: 'sinh⁻¹', class: 'small' }
+                                    },
+                                    {
+                                        insert: '\\cosh(#?)', label: 'cosh', class: 'small',
+                                        shift: { insert: '\\operatorname{arccosh}(#?)', label: 'cosh⁻¹', class: 'small' }
+                                    },
+                                    {
+                                        insert: '\\tanh(#?)', label: 'tanh', class: 'small',
+                                        shift: { insert: '\\operatorname{arctanh}(#?)', label: 'tanh⁻¹', class: 'small' }
+                                    },
+                                    {
+                                        insert: '\\log(#?)', label: 'log',
+                                        shift: { insert: '10^{#?}', label: '10ˣ' }
+                                    },
+                                    '[separator]',
+                                    { latex: '1', label: '1' },
+                                    { latex: '2', label: '2' },
+                                    { latex: '3', label: '3' },
+                                    { latex: '+', label: '+' }
+                                ],
+                                [
+                                    '[left]', '[right]',
+                                    { latex: '(', label: '(' },
+                                    { latex: ')', label: ')' },
+                                    '[separator]',
+                                    { latex: '0', label: '0' },
+                                    {
+                                        latex: '.',
+                                        label: '.',
+                                        shift: { latex: ',', label: ',' }
+                                    },
+                                    { label: '[shift]', width: 1 },
+                                    { latex: '-', label: '-' }
+                                ]
+                            ]
+                        };
+
+                        window.mathVirtualKeyboard.layouts = [complexLayout, trigLayout];
 
                         // Mobile-specific setup
                         const isIPadOS = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
@@ -1636,12 +1715,23 @@ class Komplexiti {
         for (let p = 0; p < 3; p++) {
             e = e.replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt($1)');
         }
+        // Conjugate: \overline{expr} → conj(expr); must run before generic {} → () stripping
+        for (let p = 0; p < 3; p++) {
+            e = e.replace(/\\overline\s*\{([^{}]*)\}/g, 'conj($1)');
+        }
+        // \operatorname{fn} → fn (used by the keyboard for named functions)
+        e = e.replace(/\\operatorname\{([^{}]+)\}/g, '$1');
+        // arc* names produced by the above → mathjs equivalents
+        e = e.replace(/\barcsin\b/g, 'asin').replace(/\barccos\b/g, 'acos').replace(/\barctan\b/g, 'atan');
+        e = e.replace(/\barcsinh\b/g, 'asinh').replace(/\barccosh\b/g, 'acosh').replace(/\barctanh\b/g, 'atanh');
         e = e.replace(/\^\s*\{([^{}]+)\}/g, '^($1)');
         e = e.replace(/\{([^{}]*)\}/g, '($1)');
         e = e.replace(/\\left\s*[(\[]/g, '(').replace(/\\right\s*[)\]]/g, ')');
         e = e.replace(/\\cdot|\\times/g, '*');
         e = e.replace(/\\pi/g, 'pi');
         e = e.replace(/\\cos/g, 'cos').replace(/\\sin/g, 'sin').replace(/\\tan/g, 'tan');
+        e = e.replace(/\\arcsin\b/g, 'asin').replace(/\\arccos\b/g, 'acos').replace(/\\arctan\b/g, 'atan');
+        e = e.replace(/\\sinh\b/g, 'sinh').replace(/\\cosh\b/g, 'cosh').replace(/\\tanh\b/g, 'tanh');
         e = e.replace(/\\ln\b/g, 'log').replace(/\\log\b/g, 'log10');
         e = e.replace(/\\exp\b/g, 'exp');
         e = e.replace(/\\sqrt\s*([0-9])/g, 'sqrt($1)');
@@ -1650,7 +1740,7 @@ class Komplexiti {
         e = e.replace(/\\[a-zA-Z]+\s*/g, '');
         e = e.trim();
         if (!e) return '';
-        e = e.replace(/\bi\s*(sqrt|sin|cos|tan|log|log10|exp)\s*\(/g, 'i*$1(');
+        e = e.replace(/\bi\s*(sqrt|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|asinh|acosh|atanh|log|log10|exp|conj)\s*\(/g, 'i*$1(');
         e = e.replace(/\)\s*i\b/g, ')*i');
         return e;
     }
@@ -1673,7 +1763,7 @@ class Komplexiti {
 
     // Returns the single free variable name in expr, or null if there are 0 or >1.
     _findEquationVariable(expr, scope) {
-        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'Infinity', 'NaN']);
+        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'Infinity', 'NaN']);
         const known    = new Set(Object.keys(scope));
         const free     = new Set();
         for (const [, id] of expr.matchAll(/\b([a-zA-Z][a-zA-Z0-9]*)\b/g)) {
