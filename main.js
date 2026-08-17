@@ -1917,6 +1917,8 @@ class Komplexiti {
         e = e.replace(/\\cdot|\\times/g, '*');
         e = e.replace(/\\pi/g, 'pi');
         e = e.replace(/\\cos/g, 'cos').replace(/\\sin/g, 'sin').replace(/\\tan/g, 'tan');
+        e = e.replace(/\\arg\b/g, 'arg');
+        e = e.replace(/\\Re\b/g, 're').replace(/\\Im\b/g, 'im');
         e = e.replace(/\\arcsin\b/g, 'asin').replace(/\\arccos\b/g, 'acos').replace(/\\arctan\b/g, 'atan');
         e = e.replace(/\\sinh\b/g, 'sinh').replace(/\\cosh\b/g, 'cosh').replace(/\\tanh\b/g, 'tanh');
         e = e.replace(/\\ln\b/g, 'log').replace(/\\log\b/g, 'log10');
@@ -1934,7 +1936,7 @@ class Komplexiti {
         e = e.replace(/\bi\s*(sqrt|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|asinh|acosh|atanh|log|log10|exp|conj)\s*\(/g, 'i*$1(');
         e = e.replace(/\)\s*i\b/g, ')*i');
         // Insert * before a trailing imaginary i that directly follows a letter or digit (e.g. wi → w*i)
-        e = e.replace(/([a-zA-Z0-9])i(?=[^a-zA-Z0-9]|$)/g, '$1*i');
+        e = e.replace(/([a-zA-Z0-9])i(?=[^a-zA-Z0-9]|$)/g, (match, prefix) => prefix === 'p' ? match : `${prefix}*i`);
         return e;
     }
 
@@ -2029,7 +2031,163 @@ class Komplexiti {
         return left.re - right.re;
     }
 
+    _normaliseLinearTerm(expr, varName) {
+        const trimmed = expr.replace(/\s+/g, '');
+        if (trimmed === varName) return `(${varName})`;
+        if (trimmed.startsWith(`${varName}+`) || trimmed.startsWith(`${varName}-`)) return `(${trimmed})`;
+        return trimmed;
+    }
+
+    _matchFunctionTerm(expr, fnName, varName) {
+        const normalized = this._normaliseLinearTerm(expr, varName);
+        const pattern = new RegExp(`^${fnName}\\((${varName}|${varName}[+-].+)\\)$`);
+        const match = normalized.match(pattern);
+        if (!match) return null;
+        return match[1];
+    }
+
+    _parseLinearVarOffset(expr, varName, scope) {
+        const normalized = this._normaliseLinearTerm(expr, varName);
+        if (!normalized.startsWith('(') || !normalized.endsWith(')')) return null;
+        const inner = normalized.slice(1, -1).trim();
+        if (inner === varName) return { offset: { re: 0, im: 0 } };
+        if (!inner.startsWith(varName)) return null;
+
+        const rest = inner.slice(varName.length).trim();
+        if (!rest) return { offset: { re: 0, im: 0 } };
+        const sign = rest[0];
+        if (sign !== '+' && sign !== '-') return null;
+        const constExpr = rest.slice(1).trim();
+        if (!constExpr) return null;
+        const parsed = this.parseComplexFromLatex(sign === '+' ? constExpr : `-(${constExpr})`, scope);
+        if (!parsed) return null;
+        return { offset: parsed };
+    }
+
+    _evaluateRealExpr(expr, scope) {
+        try {
+            const value = math.evaluate(expr, scope);
+            if (typeof value === 'number') return isFinite(value) ? value : null;
+            if (value && typeof value.re === 'number' && Math.abs(value.im ?? 0) < 1e-9 && isFinite(value.re)) return value.re;
+            return null;
+        } catch {
+            return null;
+        }
+    }
+
+    _tryBuildFastLocus(lhs, rhs, varName, scope) {
+        const circleSides = [
+            { absExpr: lhs, otherExpr: rhs },
+            { absExpr: rhs, otherExpr: lhs }
+        ];
+        for (const { absExpr, otherExpr } of circleSides) {
+            const absInner = this._matchFunctionTerm(absExpr, 'abs', varName);
+            if (!absInner) continue;
+
+            const linear = this._parseLinearVarOffset(absInner, varName, scope);
+            if (!linear) continue;
+
+            const radius = this._evaluateRealExpr(otherExpr, scope);
+            if (radius !== null && radius >= 0) {
+                return {
+                    lhs,
+                    rhs,
+                    angular: false,
+                    scalar: true,
+                    fastPath: {
+                        kind: 'circle',
+                        center: { re: -linear.offset.re, im: -linear.offset.im },
+                        radius
+                    }
+                };
+            }
+
+            const otherAbs = this._matchFunctionTerm(otherExpr, 'abs', varName);
+            if (!otherAbs) continue;
+            const otherLinear = this._parseLinearVarOffset(otherAbs, varName, scope);
+            if (!otherLinear) continue;
+
+            const a = { re: -linear.offset.re, im: -linear.offset.im };
+            const b = { re: -otherLinear.offset.re, im: -otherLinear.offset.im };
+            const dx = b.re - a.re;
+            const dy = b.im - a.im;
+            if (Math.hypot(dx, dy) < 1e-9) return null;
+            return {
+                lhs,
+                rhs,
+                angular: false,
+                scalar: true,
+                fastPath: {
+                    kind: 'line',
+                    point: { re: (a.re + b.re) / 2, im: (a.im + b.im) / 2 },
+                    direction: { re: -dy, im: dx }
+                }
+            };
+        }
+
+        const scalarForms = [
+            { fn: 're', axis: 'vertical' },
+            { fn: 'im', axis: 'horizontal' }
+        ];
+        for (const { fn, axis } of scalarForms) {
+            const pairs = [
+                { fnExpr: lhs, otherExpr: rhs },
+                { fnExpr: rhs, otherExpr: lhs }
+            ];
+            for (const { fnExpr, otherExpr } of pairs) {
+                const inner = this._matchFunctionTerm(fnExpr, fn, varName);
+                if (!inner) continue;
+                const linear = this._parseLinearVarOffset(inner, varName, scope);
+                if (!linear) continue;
+                const constant = this._evaluateRealExpr(otherExpr, scope);
+                if (constant === null) continue;
+                return {
+                    lhs,
+                    rhs,
+                    angular: false,
+                    scalar: true,
+                    fastPath: {
+                        kind: 'line',
+                        point: axis === 'vertical'
+                            ? { re: constant - linear.offset.re, im: 0 }
+                            : { re: 0, im: constant - linear.offset.im },
+                        direction: axis === 'vertical' ? { re: 0, im: 1 } : { re: 1, im: 0 }
+                    }
+                };
+            }
+        }
+
+        const argPairs = [
+            { argExpr: lhs, otherExpr: rhs },
+            { argExpr: rhs, otherExpr: lhs }
+        ];
+        for (const { argExpr, otherExpr } of argPairs) {
+            const inner = this._matchFunctionTerm(argExpr, 'arg', varName);
+            if (!inner) continue;
+            const linear = this._parseLinearVarOffset(inner, varName, scope);
+            if (!linear) continue;
+            const theta = this._evaluateRealExpr(otherExpr, scope);
+            if (theta === null) continue;
+            return {
+                lhs,
+                rhs,
+                angular: true,
+                scalar: true,
+                fastPath: {
+                    kind: 'ray',
+                    origin: { re: -linear.offset.re, im: -linear.offset.im },
+                    angle: theta
+                }
+            };
+        }
+
+        return null;
+    }
+
     _buildLocus(lhs, rhs, varName, scope) {
+        const fastPath = this._tryBuildFastLocus(lhs, rhs, varName, scope);
+        if (fastPath) return fastPath;
+
         const lhsNode = math.parse(lhs);
         const rhsNode = math.parse(rhs);
         const angular = /\barg\s*\(/.test(lhs) || /\barg\s*\(/.test(rhs);
@@ -2053,6 +2211,71 @@ class Komplexiti {
             return null;
         }
         return { lhs, rhs, angular, scalar };
+    }
+
+    _clipInfiniteLine(point, direction) {
+        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
+        const hits = [];
+        const pushHit = (t, x, y) => {
+            if (!isFinite(t) || !isFinite(x) || !isFinite(y)) return;
+            if (x < minX - 1e-9 || x > maxX + 1e-9 || y < minY - 1e-9 || y > maxY + 1e-9) return;
+            if (hits.some(h => Math.hypot(h.x - x, h.y - y) < 1e-7)) return;
+            hits.push({ t, x, y });
+        };
+
+        if (Math.abs(direction.re) > 1e-9) {
+            let t = (minX - point.re) / direction.re;
+            pushHit(t, minX, point.im + t * direction.im);
+            t = (maxX - point.re) / direction.re;
+            pushHit(t, maxX, point.im + t * direction.im);
+        }
+        if (Math.abs(direction.im) > 1e-9) {
+            let t = (minY - point.im) / direction.im;
+            pushHit(t, point.re + t * direction.re, minY);
+            t = (maxY - point.im) / direction.im;
+            pushHit(t, point.re + t * direction.re, maxY);
+        }
+
+        if (hits.length < 2) return null;
+        hits.sort((a, b) => a.t - b.t);
+        return [hits[0], hits[hits.length - 1]];
+    }
+
+    _traceFastLocusSegments(locus) {
+        const fp = locus?.fastPath;
+        if (!fp) return null;
+
+        if (fp.kind === 'circle') {
+            const steps = 160;
+            const segments = [];
+            for (let k = 0; k < steps; k++) {
+                const a0 = 2 * Math.PI * k / steps;
+                const a1 = 2 * Math.PI * (k + 1) / steps;
+                segments.push([
+                    { x: fp.center.re + fp.radius * Math.cos(a0), y: fp.center.im + fp.radius * Math.sin(a0) },
+                    { x: fp.center.re + fp.radius * Math.cos(a1), y: fp.center.im + fp.radius * Math.sin(a1) }
+                ]);
+            }
+            return segments;
+        }
+
+        if (fp.kind === 'line') {
+            const clipped = this._clipInfiniteLine({ re: fp.point.re, im: fp.point.im }, fp.direction);
+            if (!clipped) return [];
+            return [[{ x: clipped[0].x, y: clipped[0].y }, { x: clipped[1].x, y: clipped[1].y }]];
+        }
+
+        if (fp.kind === 'ray') {
+            const direction = { re: Math.cos(fp.angle), im: Math.sin(fp.angle) };
+            const clipped = this._clipInfiniteLine({ re: fp.origin.re, im: fp.origin.im }, direction);
+            if (!clipped) return [];
+            const forward = clipped.filter(p => p.t >= -1e-9);
+            if (!forward.length) return [];
+            const end = forward[forward.length - 1];
+            return [[{ x: fp.origin.re, y: fp.origin.im }, { x: end.x, y: end.y }]];
+        }
+
+        return null;
     }
 
     _traceLocusSegments(locus, varName, ownId) {
@@ -2591,7 +2814,7 @@ class Komplexiti {
             }
 
             if (c.type === 'locus' && c.locus && c.equationVar) {
-                const segments = this._traceLocusSegments(c.locus, c.equationVar, c.id);
+                const segments = this._traceFastLocusSegments(c.locus) ?? this._traceLocusSegments(c.locus, c.equationVar, c.id);
                 if (!segments.length) continue;
                 ctx.save();
                 ctx.strokeStyle = c.color;
