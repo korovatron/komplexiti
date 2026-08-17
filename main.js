@@ -1178,6 +1178,11 @@ class Komplexiti {
         dot.addEventListener('click', () => {
             c.enabled = !c.enabled;
             dot.style.opacity = c.enabled ? '1' : '0.3';
+            if (!c.enabled && this.activeInfoConstantId === c.id) {
+                const panel = document.getElementById('complex-info-panel');
+                if (panel) panel.style.display = 'none';
+                this.activeInfoConstantId = null;
+            }
             this.saveConstants();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
