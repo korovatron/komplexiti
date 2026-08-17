@@ -875,6 +875,15 @@ class Komplexiti {
         };
     }
 
+    getVisibleWorldBounds() {
+        return {
+            minX: this.viewport.minX,
+            maxX: this.viewport.maxX,
+            minY: this.viewport.minY,
+            maxY: this.viewport.maxY
+        };
+    }
+
     // =========================================================================
     // Grid spacing
     // =========================================================================
@@ -1539,7 +1548,7 @@ class Komplexiti {
             const prevIdx   = this.expressionColors.indexOf(prevColor);
             color = this.expressionColors[(prevIdx + 1) % this.expressionColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, hasParseError: false };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, locus: null, hasParseError: false };
         this.expressions.push(c);
         this.createExpressionUI(c, { skipFocus });
         this.saveExpressions();
@@ -1583,6 +1592,7 @@ class Komplexiti {
             c.type = 'value';
             c.roots = null;
             c.equationVar = null;
+            c.locus = null;
 
             if (assignment) {
                 const reserved = (assignment.name === 'i' || assignment.name === 'e');
@@ -1607,9 +1617,10 @@ class Komplexiti {
                 c.im   = null;
                 const eq = this.parseEquation(raw, c.id);
                 if (eq) {
-                    c.type = 'equation';
-                    c.roots = eq.roots;
+                    c.type = eq.type;
+                    c.roots = eq.roots ?? null;
                     c.equationVar = eq.variable;
+                    c.locus = eq.locus ?? null;
                     c.errorMessage = '';
                 } else {
                     hasError = true;
@@ -1754,7 +1765,7 @@ class Komplexiti {
             if (data.nextId) this.nextExpressionId = data.nextId;
             for (const [idx, saved] of (data.expressions || data.constants || []).entries()) {
                 const color = this.expressionColors[idx % this.expressionColors.length];
-                const c = { id: saved.id, color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, hasParseError: false };
+                const c = { id: saved.id, color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, locus: null, hasParseError: false };
                 this.expressions.push(c);
                 this.createExpressionUI(c, { skipFocus: true });
             }
@@ -1851,8 +1862,21 @@ class Komplexiti {
                     c.errorMessage  = parsed === null ? 'Cannot evaluate expression' : '';
                 } else if (!assignment && raw.includes('=')) {
                     const eq = this.parseEquation(raw, c.id);
-                    if (eq) { c.type = 'equation'; c.roots = eq.roots; c.equationVar = eq.variable; c.hasParseError = false; c.errorMessage = ''; }
-                    else    { c.roots = null; c.hasParseError = true; c.errorMessage = 'Needs exactly one undefined variable'; }
+                    if (eq) {
+                        c.type = eq.type;
+                        c.roots = eq.roots ?? null;
+                        c.equationVar = eq.variable;
+                        c.locus = eq.locus ?? null;
+                        c.hasParseError = false;
+                        c.errorMessage = '';
+                    } else {
+                        c.type = 'value';
+                        c.roots = null;
+                        c.equationVar = null;
+                        c.locus = null;
+                        c.hasParseError = true;
+                        c.errorMessage = 'Needs exactly one undefined variable';
+                    }
                 } else if (!assignment) {
                     const parsed = this.parseComplexFromLatex(raw, scope);
                     c.re = parsed !== null ? parsed.re : null;
@@ -1975,6 +1999,142 @@ class Komplexiti {
         return acc;
     }
 
+    _mathValueToComplex(value) {
+        if (typeof value === 'number') return { re: value, im: 0 };
+        if (value && typeof value.re === 'number' && typeof value.im === 'number') return { re: value.re, im: value.im };
+        return null;
+    }
+
+    _equationDifferenceMagnitude(lhsValue, rhsValue, { angular = false } = {}) {
+        const left  = this._mathValueToComplex(lhsValue);
+        const right = this._mathValueToComplex(rhsValue);
+        if (!left || !right) return Infinity;
+        if (angular && Math.abs(left.im) < 1e-9 && Math.abs(right.im) < 1e-9) {
+            const diff = left.re - right.re;
+            return Math.abs(Math.atan2(Math.sin(diff), Math.cos(diff)));
+        }
+        return Math.hypot(left.re - right.re, left.im - right.im);
+    }
+
+    _equationSignedDifference(lhsValue, rhsValue, { angular = false } = {}) {
+        const left  = this._mathValueToComplex(lhsValue);
+        const right = this._mathValueToComplex(rhsValue);
+        if (!left || !right) return null;
+        if (angular) {
+            if (Math.abs(left.im) >= 1e-9 || Math.abs(right.im) >= 1e-9) return null;
+            const diff = left.re - right.re;
+            return Math.atan2(Math.sin(diff), Math.cos(diff));
+        }
+        if (Math.abs(left.im) >= 1e-9 || Math.abs(right.im) >= 1e-9) return null;
+        return left.re - right.re;
+    }
+
+    _buildLocus(lhs, rhs, varName, scope) {
+        const lhsNode = math.parse(lhs);
+        const rhsNode = math.parse(rhs);
+        const angular = /\barg\s*\(/.test(lhs) || /\barg\s*\(/.test(rhs);
+        let scalar = true;
+        const testPoints = [
+            math.complex(0, 0),
+            math.complex(1, 0),
+            math.complex(0, 1),
+            math.complex(-1.5, 0.75)
+        ];
+        try {
+            for (const z of testPoints) {
+                const evalScope = { ...scope, [varName]: z };
+                const lhsValue = lhsNode.evaluate(evalScope);
+                const rhsValue = rhsNode.evaluate(evalScope);
+                if (scalar && this._equationSignedDifference(lhsValue, rhsValue, { angular }) === null) scalar = false;
+                const diff = this._equationDifferenceMagnitude(lhsValue, rhsValue, { angular });
+                if (!isFinite(diff)) return null;
+            }
+        } catch {
+            return null;
+        }
+        return { lhs, rhs, angular, scalar };
+    }
+
+    _traceLocusSegments(locus, varName, ownId) {
+        if (!locus || typeof math === 'undefined') return [];
+        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
+        const spanX = maxX - minX;
+        const spanY = maxY - minY;
+        if (!(spanX > 0) || !(spanY > 0)) return [];
+
+        const cols = Math.max(48, Math.min(140, Math.round(this.canvas.width / 14)));
+        const rows = Math.max(48, Math.min(140, Math.round(this.canvas.height / 14)));
+        const dx = spanX / cols;
+        const dy = spanY / rows;
+        const eps = Math.max(spanX, spanY) / Math.max(cols, rows) * 0.3;
+        const scope = this.buildExpressionScope(ownId);
+        const lhsNode = math.parse(locus.lhs);
+        const rhsNode = math.parse(locus.rhs);
+        const values = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(Infinity));
+
+        for (let iy = 0; iy <= rows; iy++) {
+            const y = minY + iy * dy;
+            for (let ix = 0; ix <= cols; ix++) {
+                const x = minX + ix * dx;
+                try {
+                    const evalScope = { ...scope, [varName]: math.complex(x, y) };
+                    const lhsValue = lhsNode.evaluate(evalScope);
+                    const rhsValue = rhsNode.evaluate(evalScope);
+                    if (locus.scalar) {
+                        const signed = this._equationSignedDifference(lhsValue, rhsValue, { angular: locus.angular });
+                        values[iy][ix] = signed === null ? Infinity : signed;
+                    } else {
+                        values[iy][ix] = this._equationDifferenceMagnitude(lhsValue, rhsValue, { angular: locus.angular });
+                    }
+                } catch {
+                    values[iy][ix] = Infinity;
+                }
+            }
+        }
+
+        const interpolate = (x1, y1, v1, x2, y2, v2) => {
+            const denom = locus.scalar ? (v1 - v2) : ((v1 - eps) - (v2 - eps));
+            const numer = locus.scalar ? v1 : (v1 - eps);
+            const t = Math.abs(denom) < 1e-9 ? 0.5 : Math.max(0, Math.min(1, numer / denom));
+            return { x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t };
+        };
+
+        const segments = [];
+        for (let iy = 0; iy < rows; iy++) {
+            const y0 = minY + iy * dy;
+            const y1 = y0 + dy;
+            for (let ix = 0; ix < cols; ix++) {
+                const x0 = minX + ix * dx;
+                const x1 = x0 + dx;
+                const v00 = values[iy][ix];
+                const v10 = values[iy][ix + 1];
+                const v11 = values[iy + 1][ix + 1];
+                const v01 = values[iy + 1][ix];
+                if (![v00, v10, v11, v01].every(Number.isFinite)) continue;
+
+                const crosses = (a, b) => {
+                    if (locus.scalar) {
+                        return (a === 0) || (b === 0) || ((a < 0) !== (b < 0));
+                    }
+                    return (a <= eps) !== (b <= eps);
+                };
+
+                const hits = [];
+                if (crosses(v00, v10)) hits.push(interpolate(x0, y0, v00, x1, y0, v10));
+                if (crosses(v10, v11)) hits.push(interpolate(x1, y0, v10, x1, y1, v11));
+                if (crosses(v11, v01)) hits.push(interpolate(x1, y1, v11, x0, y1, v01));
+                if (crosses(v01, v00)) hits.push(interpolate(x0, y1, v01, x0, y0, v00));
+
+                if (hits.length === 2) {
+                    segments.push([hits[0], hits[1]]);
+                } else if (hits.length === 4) {
+                    segments.push([hits[0], hits[1]], [hits[2], hits[3]]);
+                }
+            }
+        }
+        return segments;
+    }
+
     // Extract polynomial coefficients [a0..an] of h(varName) via symbolic differentiation.
     // Returns null if h is not a polynomial of degree ≤ maxDeg.
     _extractPolynomialCoeffs(hExpr, varName, scope, maxDeg = 6) {
@@ -2000,6 +2160,32 @@ class Komplexiti {
             }
             return coeffs;
         } catch { return null; }
+    }
+
+    _matchesPolynomialApproximation(hExpr, coeffs, varName, scope) {
+        if (!coeffs?.length) return false;
+        try {
+            const node = math.parse(hExpr);
+            const samplePoints = [
+                math.complex(0, 0),
+                math.complex(1, 0),
+                math.complex(0, 1),
+                math.complex(-1.25, 0.5)
+            ];
+
+            for (const z of samplePoints) {
+                const evalScope = { ...scope, [varName]: z };
+                const exprValue = this._mathValueToComplex(node.evaluate(evalScope));
+                const polyValue = this._cPolyEval(coeffs, { re: z.re, im: z.im });
+                if (!exprValue) return false;
+                const diff = Math.hypot(exprValue.re - polyValue.re, exprValue.im - polyValue.im);
+                if (!isFinite(diff) || diff > 1e-6) return false;
+            }
+
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     _solveLinear(coeffs) {
@@ -2050,7 +2236,7 @@ class Komplexiti {
         return zs;
     }
 
-    // Main equation parser. Returns { variable, roots } or null.
+    // Main equation parser. Returns either finite roots or a drawable complex locus.
     parseEquation(rawLatex, ownId) {
         if (typeof math === 'undefined') return null;
         try {
@@ -2075,7 +2261,7 @@ class Komplexiti {
                 if (n >= 1 && n <= 16) {
                     const cVal = math.evaluate(rhs, scope);
                     const roots = this._solveNthRootsOfC(n, cVal);
-                    if (roots) return { variable: varName, roots };
+                    if (roots) return { type: 'equation', variable: varName, roots };
                 }
             }
 
@@ -2093,7 +2279,14 @@ class Komplexiti {
                 } catch { /* not rationalizable, leave coeffs as-is */ }
             }
 
-            if (!coeffs || coeffs.length < 2) return null;
+            if (coeffs && coeffs.length >= 2 && !this._matchesPolynomialApproximation(hExpr, coeffs, varName, scope)) {
+                coeffs = null;
+            }
+
+            if (!coeffs || coeffs.length < 2) {
+                const locus = this._buildLocus(lhs, rhs, varName, scope);
+                return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
+            }
 
             const deg = coeffs.length - 1;
             let roots;
@@ -2101,9 +2294,13 @@ class Komplexiti {
             else if (deg === 2) roots = this._solveQuadratic(coeffs);
             else                roots = this._solveDurandKerner(coeffs);
 
-            if (!roots?.length) return null;
-            const valid = roots.filter(r => isFinite(r.re) && isFinite(r.im));
-            return valid.length ? { variable: varName, roots: valid } : null;
+            if (roots?.length) {
+                const valid = roots.filter(r => isFinite(r.re) && isFinite(r.im));
+                if (valid.length) return { type: 'equation', variable: varName, roots: valid };
+            }
+
+            const locus = this._buildLocus(lhs, rhs, varName, scope);
+            return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
         } catch { return null; }
     }
 
@@ -2177,6 +2374,16 @@ class Komplexiti {
                     const val   = this.formatComplexValue(root.re, root.im, r, theta);
                     return `<div class="complex-info-row"><span class="complex-info-label">${label}</span><span class="complex-info-val">${val}</span></div>`;
                 }).join('');
+            }
+            return;
+        }
+
+        if (c.type === 'locus' && c.locus) {
+            if (title) title.textContent = c.equationVar ? `${c.equationVar} locus` : 'Locus';
+            if (single) single.style.display = 'none';
+            if (rootsEl) {
+                rootsEl.style.display = '';
+                rootsEl.innerHTML = '<div class="complex-info-row"><span class="complex-info-label">Equation</span><span class="complex-info-val">Infinite solution set</span></div>';
             }
             return;
         }
@@ -2380,6 +2587,25 @@ class Komplexiti {
                         ctx.restore();
                     }
                 }
+                continue;
+            }
+
+            if (c.type === 'locus' && c.locus && c.equationVar) {
+                const segments = this._traceLocusSegments(c.locus, c.equationVar, c.id);
+                if (!segments.length) continue;
+                ctx.save();
+                ctx.strokeStyle = c.color;
+                ctx.lineWidth = Math.max(2, strokeWidth - 0.5);
+                ctx.globalAlpha = 0.95;
+                ctx.beginPath();
+                for (const [start, end] of segments) {
+                    const p0 = this.worldToScreen(start.x, start.y);
+                    const p1 = this.worldToScreen(end.x, end.y);
+                    ctx.moveTo(p0.x, p0.y);
+                    ctx.lineTo(p1.x, p1.y);
+                }
+                ctx.stroke();
+                ctx.restore();
                 continue;
             }
 
