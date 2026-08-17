@@ -982,9 +982,9 @@ class Komplexiti {
         this.ctx.save();
         this.ctx.fillStyle = labelColor;
 
-        const font = this.sizeMode === 'xlarge' ? 'bold 20px Arial'
-                   : this.sizeMode === 'large'  ? 'bold 16px Arial'
-                   : '12px Arial';
+        const font = this.sizeMode === 'xlarge' ? 'bold 24px Arial'
+                   : this.sizeMode === 'large'  ? 'bold 20px Arial'
+                   : 'bold 16px Arial';
         this.ctx.font = font;
 
         const labelSpacing = this.getLabelSpacing();
@@ -1034,9 +1034,9 @@ class Komplexiti {
 
         // Axis title labels (Re / Im)
         const titleColor = isLight ? '#1566c0' : '#4A90E2';
-        const titleFont  = this.sizeMode === 'xlarge' ? 'bold 18px Arial'
-                         : this.sizeMode === 'large'  ? 'bold 14px Arial'
-                         : 'bold 11px Arial';
+        const titleFont  = this.sizeMode === 'xlarge' ? 'bold 22px Arial'
+                         : this.sizeMode === 'large'  ? 'bold 18px Arial'
+                         : 'bold 14px Arial';
         this.ctx.fillStyle = titleColor;
         this.ctx.font      = titleFont;
 
@@ -2187,10 +2187,10 @@ class Komplexiti {
         if (!this.complexConstants.length) return;
         const ctx     = this.ctx;
         const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-        const fSize       = this.sizeMode === 'xlarge' ? 22 : this.sizeMode === 'large' ? 18 : 15;
-        const dotR        = this.sizeMode === 'xlarge' ? 7  : this.sizeMode === 'large' ? 6  : 5;
-        const strokeWidth = this.sizeMode === 'xlarge' ? 4  : this.sizeMode === 'large' ? 3  : 2;
-        const headLen     = this.sizeMode === 'xlarge' ? 13 : this.sizeMode === 'large' ? 11 : 9;
+        const fSize       = this.sizeMode === 'xlarge' ? 26 : this.sizeMode === 'large' ? 22 : 18;
+        const dotR        = this.sizeMode === 'xlarge' ? 8.5 : this.sizeMode === 'large' ? 7 : 6;
+        const strokeWidth = this.sizeMode === 'xlarge' ? 5  : this.sizeMode === 'large' ? 4  : 3;
+        const headLen     = this.sizeMode === 'xlarge' ? 15 : this.sizeMode === 'large' ? 13 : 11;
 
         for (const c of this.complexConstants) {
             if (!c.enabled) continue;
