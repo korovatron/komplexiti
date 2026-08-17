@@ -95,13 +95,13 @@
         html, body {
             width: 100%;
             height: 100%;
-            height: var(--actual-vh, 100vh);
             min-height: 100vh;
             min-height: var(--actual-vh, 100vh);
             overflow: hidden;
             overscroll-behavior: none;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--bg-primary);
+            /* Always the dark base so any sub-pixel gap can never contrast with the title screen */
+            background: #1A2F42;
             color: var(--text-primary);
             touch-action: none;
         }
