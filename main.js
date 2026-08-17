@@ -1529,7 +1529,7 @@ class Komplexiti {
     // Expressions
     // =========================================================================
 
-    addExpression() {
+    addExpression({ skipFocus = false } = {}) {
         const id = this.nextExpressionId++;
         let color;
         if (this.expressions.length === 0) {
@@ -1541,7 +1541,7 @@ class Komplexiti {
         }
         const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, hasParseError: false };
         this.expressions.push(c);
-        this.createExpressionUI(c);
+        this.createExpressionUI(c, { skipFocus });
         this.saveExpressions();
     }
 
@@ -1752,14 +1752,15 @@ class Komplexiti {
             if (!raw) return;
             const data = JSON.parse(raw);
             if (data.nextId) this.nextExpressionId = data.nextId;
-            for (const saved of (data.expressions || data.constants || [])) {
-                const c = { id: saved.id, color: saved.color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, hasParseError: false };
+            for (const [idx, saved] of (data.expressions || data.constants || []).entries()) {
+                const color = this.expressionColors[idx % this.expressionColors.length];
+                const c = { id: saved.id, color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, hasParseError: false };
                 this.expressions.push(c);
                 this.createExpressionUI(c, { skipFocus: true });
             }
         } catch { /* ignore corrupt data */ }
         // Always keep one blank tile at the bottom
-        if (!this.expressions.some(c => !c.latex || c.latex.trim() === '')) this.addExpression();
+        if (!this.expressions.some(c => !c.latex || c.latex.trim() === '')) this.addExpression({ skipFocus: true });
     }
 
     // Returns { name, valueLaTeX } if the expression is a valid assignment, else null.
@@ -1902,6 +1903,10 @@ class Komplexiti {
         e = e.replace(/\\[a-zA-Z]+\s*/g, '');
         e = e.trim();
         if (!e) return '';
+        // Split consecutive letters that aren't a known name into implicit products (user vars are single-letter only)
+        e = e.replace(/[a-zA-Z]{2,}/g, m =>
+            /^(sqrt|log10|log|exp|abs|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|sinh|cosh|tanh|re|im|pi|Infinity|NaN)$/.test(m)
+                ? m : m.split('').join('*'));
         e = e.replace(/\bi\s*(sqrt|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|asinh|acosh|atanh|log|log10|exp|conj)\s*\(/g, 'i*$1(');
         e = e.replace(/\)\s*i\b/g, ')*i');
         // Insert * before a trailing imaginary i that directly follows a letter or digit (e.g. wi → w*i)
