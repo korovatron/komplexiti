@@ -1158,9 +1158,6 @@ class Komplexiti {
                 hasError = raw.length > 0 && parsed === null;
             }
 
-            // Info button only makes sense for a single complex constant
-            if (infoBtn) infoBtn.style.display = c.type === 'equation' ? 'none' : '';
-
             if (hasError) {
                 mathField.classList.add('input-error');
                 mathField.style.setProperty('background', 'rgba(231, 76, 60, 0.1)', 'important');
@@ -1529,19 +1526,41 @@ class Komplexiti {
     }
 
     updateComplexInfoPanel() {
-        const panel = document.getElementById('complex-info-panel');
+        const panel    = document.getElementById('complex-info-panel');
         if (!panel || panel.style.display === 'none') return;
         const c = this.complexConstants.find(x => x.id === this.activeInfoConstantId);
         if (!c) { panel.style.display = 'none'; return; }
 
         panel.style.borderLeftColor = c.color;
+        const title   = document.getElementById('complex-info-title');
+        const single  = document.getElementById('complex-info-single');
+        const rootsEl = document.getElementById('complex-info-roots');
 
-        const title = document.getElementById('complex-info-title');
+        if (c.type === 'equation' && c.roots?.length) {
+            if (title)   title.textContent  = c.equationVar ? `${c.equationVar}:` : 'Roots';
+            if (single)  single.style.display  = 'none';
+            if (rootsEl) {
+                rootsEl.style.display = '';
+                const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
+                rootsEl.innerHTML = c.roots.map((root, k) => {
+                    if (!isFinite(root.re) || !isFinite(root.im)) return '';
+                    const r     = Math.hypot(root.re, root.im);
+                    const theta = Math.atan2(root.im, root.re);
+                    const label = (c.equationVar || 'z') + toSub(k + 1);
+                    const val   = this.formatComplexValue(root.re, root.im, r, theta);
+                    return `<div class="complex-info-row"><span class="complex-info-label">${label}</span><span class="complex-info-val">${val}</span></div>`;
+                }).join('');
+            }
+            return;
+        }
+
+        if (single)  single.style.display  = '';
+        if (rootsEl) rootsEl.style.display = 'none';
+        if (title) title.textContent = c.name || 'z';
+
         const valEl = document.getElementById('complex-info-value');
         const modEl = document.getElementById('complex-info-modulus');
         const argEl = document.getElementById('complex-info-argument');
-
-        if (title) title.textContent = c.name || 'z';
 
         if (c.re === null || c.im === null) {
             if (valEl) valEl.innerHTML = '<em>undefined</em>';
@@ -1672,13 +1691,42 @@ class Komplexiti {
         for (const c of this.complexConstants) {
             if (!c.enabled) continue;
 
-            // --- Equation: draw each root as a labelled point ---
+            // --- Equation: draw each root using the global display mode ---
             if (c.type === 'equation' && c.roots?.length) {
                 const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
+                const org   = this.worldToScreen(0, 0);
                 for (let k = 0; k < c.roots.length; k++) {
                     const root = c.roots[k];
                     if (!isFinite(root.re) || !isFinite(root.im)) continue;
                     const pt = this.worldToScreen(root.re, root.im);
+
+                    if (this.displayMode === 'arrow') {
+                        const dx  = pt.x - org.x;
+                        const dy  = pt.y - org.y;
+                        const len = Math.hypot(dx, dy);
+                        if (len > dotR + 2) {
+                            const ang  = Math.atan2(dy, dx);
+                            const tipX = pt.x - dotR * Math.cos(ang);
+                            const tipY = pt.y - dotR * Math.sin(ang);
+                            ctx.save();
+                            ctx.strokeStyle = c.color;
+                            ctx.lineWidth   = strokeWidth;
+                            ctx.globalAlpha = 0.9;
+                            ctx.beginPath();
+                            ctx.moveTo(org.x, org.y);
+                            ctx.lineTo(tipX, tipY);
+                            ctx.stroke();
+                            ctx.fillStyle = c.color;
+                            ctx.beginPath();
+                            ctx.moveTo(tipX, tipY);
+                            ctx.lineTo(tipX - headLen * Math.cos(ang - 0.38), tipY - headLen * Math.sin(ang - 0.38));
+                            ctx.lineTo(tipX - headLen * Math.cos(ang + 0.38), tipY - headLen * Math.sin(ang + 0.38));
+                            ctx.closePath();
+                            ctx.fill();
+                            ctx.restore();
+                        }
+                    }
+
                     ctx.save();
                     ctx.fillStyle   = c.color;
                     ctx.globalAlpha = 1;
@@ -1689,6 +1737,7 @@ class Komplexiti {
                     ctx.lineWidth   = 1.5;
                     ctx.stroke();
                     ctx.restore();
+
                     if (c.equationVar) {
                         const label = c.equationVar + toSub(k + 1);
                         ctx.save();

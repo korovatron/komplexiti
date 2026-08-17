@@ -996,6 +996,10 @@
                 color: rgba(255, 255, 255, 0.9);
             }
         }
+        #complex-info-roots .complex-info-row + .complex-info-row {
+            border-top: 1px solid rgba(255,255,255,0.08);
+            padding-top: 4px;
+        }
     </style>
 </head>
 <body>
@@ -1107,18 +1111,21 @@
                         <button class="complex-info-fmt-btn" data-fmt="exponential">re<sup>i&#x03B8;</sup></button>
                         <button class="complex-info-fmt-btn" data-fmt="trig">trig</button>
                     </div>
-                    <div class="complex-info-row">
-                        <span class="complex-info-label">Value</span>
-                        <span id="complex-info-value" class="complex-info-val"></span>
+                    <div id="complex-info-single">
+                        <div class="complex-info-row">
+                            <span class="complex-info-label">Value</span>
+                            <span id="complex-info-value" class="complex-info-val"></span>
+                        </div>
+                        <div class="complex-info-row">
+                            <span class="complex-info-label">Modulus</span>
+                            <span id="complex-info-modulus" class="complex-info-val"></span>
+                        </div>
+                        <div class="complex-info-row">
+                            <span class="complex-info-label">Argument</span>
+                            <span id="complex-info-argument" class="complex-info-val"></span>
+                        </div>
                     </div>
-                    <div class="complex-info-row">
-                        <span class="complex-info-label">Modulus</span>
-                        <span id="complex-info-modulus" class="complex-info-val"></span>
-                    </div>
-                    <div class="complex-info-row">
-                        <span class="complex-info-label">Argument</span>
-                        <span id="complex-info-argument" class="complex-info-val"></span>
-                    </div>
+                    <div id="complex-info-roots"></div>
                 </div>
             </div>
         </div>
