@@ -62,6 +62,7 @@ class Komplexiti {
         this.deltaTime     = 0;
 
         this.initElements();
+        this.loadConstants();
         this.initializeTheme();
         this.initializeSizeMode();
         this.setupPWALandscapeDetection();
@@ -1055,9 +1056,10 @@ class Komplexiti {
         const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null };
         this.complexConstants.push(c);
         this.createConstantUI(c);
+        this.saveConstants();
     }
 
-    createConstantUI(c) {
+    createConstantUI(c, { skipFocus = false } = {}) {
         const card = document.createElement('div');
         card.className = 'expr-card';
         card.style.borderLeftColor = c.color;
@@ -1120,6 +1122,7 @@ class Komplexiti {
                 mathField.style.setProperty('background', inputBg, 'important');
             }
             this.cascadeEvaluate(c.id);
+            this.saveConstants();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
@@ -1128,6 +1131,7 @@ class Komplexiti {
         dot.addEventListener('click', () => {
             c.enabled = !c.enabled;
             dot.style.opacity = c.enabled ? '1' : '0.3';
+            this.saveConstants();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
@@ -1136,7 +1140,13 @@ class Komplexiti {
         // Apply theme after DOM insertion so MathLive's connectedCallback fires first
         requestAnimationFrame(() => {
             this.applyMathFieldTheme(mathField);
-            try { mathField.focus(); } catch { /* ignore */ }
+            if (c.latex) {
+                mathField.value = c.latex;
+                mathField.dispatchEvent(new Event('input'));
+            }
+            if (!skipFocus) {
+                try { mathField.focus(); } catch { /* ignore */ }
+            }
         });
     }
 
@@ -1145,7 +1155,35 @@ class Komplexiti {
         if (idx !== -1) this.complexConstants.splice(idx, 1);
         const card = document.querySelector(`.expr-card[data-const-id="${id}"]`);
         if (card) card.remove();
+        this.saveConstants();
         if (this.currentState === this.states.APP) this.drawCanvas();
+    }
+
+    saveConstants() {
+        const data = {
+            nextId:    this.nextConstantId,
+            constants: this.complexConstants.map(c => ({
+                id:      c.id,
+                color:   c.color,
+                enabled: c.enabled,
+                latex:   c.latex
+            }))
+        };
+        localStorage.setItem('komplexiti-constants', JSON.stringify(data));
+    }
+
+    loadConstants() {
+        try {
+            const raw = localStorage.getItem('komplexiti-constants');
+            if (!raw) return;
+            const data = JSON.parse(raw);
+            if (data.nextId) this.nextConstantId = data.nextId;
+            for (const saved of (data.constants || [])) {
+                const c = { id: saved.id, color: saved.color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null };
+                this.complexConstants.push(c);
+                this.createConstantUI(c, { skipFocus: true });
+            }
+        } catch { /* ignore corrupt data */ }
     }
 
     // Returns { name, valueLaTeX } if the expression is a valid assignment, else null.
@@ -1219,11 +1257,17 @@ class Komplexiti {
             e = e.replace(/\\pi/g, 'pi');
             e = e.replace(/\\cos/g, 'cos').replace(/\\sin/g, 'sin').replace(/\\tan/g, 'tan');
             e = e.replace(/\\ln\b/g, 'log').replace(/\\log\b/g, 'log10');
-            e = e.replace(/\\exp\b/g, 'exp').replace(/\\sqrt\b/g, 'sqrt');
+            e = e.replace(/\\exp\b/g, 'exp');
+            e = e.replace(/\\sqrt\s*([0-9])/g, 'sqrt($1)');       // \sqrt2 → sqrt(2)
+            e = e.replace(/\\sqrt\b/g, 'sqrt');
             e = e.replace(/\\imaginaryI|\\imath/g, 'i');
             e = e.replace(/\\[a-zA-Z]+\s*/g, '');                 // strip remaining LaTeX commands
             e = e.trim();
             if (!e) return null;
+            // implicit multiply: 'i' immediately before a function (e.g. isqrt → i*sqrt)
+            e = e.replace(/\bi\s*(sqrt|sin|cos|tan|log|log10|exp)\s*\(/g, 'i*$1(');
+            // implicit multiply: closing paren before 'i' (e.g. sqrt(2)i → sqrt(2)*i)
+            e = e.replace(/\)\s*i\b/g, ')*i');
             const result = math.evaluate(e, scope);
             if (typeof result === 'number') return { re: result, im: 0 };
             if (result && typeof result.re === 'number') return { re: result.re, im: result.im };
@@ -1246,9 +1290,10 @@ class Komplexiti {
         if (!this.complexConstants.length) return;
         const ctx     = this.ctx;
         const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-        const fSize   = this.sizeMode === 'xlarge' ? 22 : this.sizeMode === 'large' ? 18 : 15;
-        const dotR    = this.sizeMode === 'xlarge' ? 7  : this.sizeMode === 'large' ? 6  : 5;
-        const headLen = 9;
+        const fSize       = this.sizeMode === 'xlarge' ? 22 : this.sizeMode === 'large' ? 18 : 15;
+        const dotR        = this.sizeMode === 'xlarge' ? 7  : this.sizeMode === 'large' ? 6  : 5;
+        const strokeWidth = this.sizeMode === 'xlarge' ? 4  : this.sizeMode === 'large' ? 3  : 2;
+        const headLen     = this.sizeMode === 'xlarge' ? 13 : this.sizeMode === 'large' ? 11 : 9;
 
         for (const c of this.complexConstants) {
             if (!c.enabled || c.re === null || c.im === null) continue;
@@ -1267,7 +1312,7 @@ class Komplexiti {
                     const tipY = pt.y - dotR * Math.sin(ang);
                     ctx.save();
                     ctx.strokeStyle = c.color;
-                    ctx.lineWidth   = 2;
+                    ctx.lineWidth   = strokeWidth;
                     ctx.globalAlpha = 0.9;
                     ctx.beginPath();
                     ctx.moveTo(org.x, org.y);
