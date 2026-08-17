@@ -835,6 +835,167 @@
             border-color: rgba(255, 255, 255, 0.5);
             transform: scale(1.1);
         }
+
+        /* Info button on constant cards */
+        .expr-info-btn {
+            width: 20px;
+            height: 20px;
+            background: #2A3F5A;
+            border: 1px solid #555;
+            color: #64B5F6;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+            font-size: 11px;
+            font-weight: bold;
+            font-style: italic;
+        }
+
+        @media (hover: hover) {
+            .expr-info-btn:hover {
+                filter: brightness(1.15);
+                box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+            }
+        }
+
+        .expr-info-btn:active {
+            background: #64B5F6;
+            color: white;
+        }
+
+        /* Close button inside info panel */
+        .info-panel-close-btn {
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            font-size: 15px;
+            line-height: 1;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            flex-shrink: 0;
+            transition: background 0.2s ease, border-color 0.2s ease;
+        }
+
+        @media (hover: hover) {
+            .info-panel-close-btn:hover {
+                background: rgba(255, 255, 255, 0.18);
+                border-color: rgba(255, 255, 255, 0.4);
+            }
+        }
+
+        /* Complex number info panel (bottom-right) */
+        .complex-info-panel {
+            position: fixed;
+            bottom: max(20px, calc(env(safe-area-inset-bottom, 0px) + 20px));
+            right: max(20px, calc(env(safe-area-inset-right, 0px) + 20px));
+            background: rgba(58, 79, 106, 0.95);
+            border: 1px solid #555;
+            border-radius: 4px;
+            border-left: 8px solid #4A90E2;
+            padding: 12px 16px;
+            min-width: 240px;
+            max-width: 320px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            font-size: 14px;
+            color: #E8F4FD;
+            z-index: 100;
+            pointer-events: auto;
+            user-select: none;
+            max-height: calc(100dvh - 32px);
+            overflow-y: auto;
+        }
+
+        @supports not (height: 100dvh) {
+            .complex-info-panel {
+                max-height: calc(100vh - 32px);
+            }
+        }
+
+        .complex-info-panel.size-large {
+            transform: scale(1.2);
+            transform-origin: bottom right;
+        }
+
+        .complex-info-panel.size-xlarge {
+            transform: scale(1.4);
+            transform-origin: bottom right;
+        }
+
+        .complex-info-content {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .complex-info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            line-height: 1.4;
+        }
+
+        .complex-info-header {
+            font-weight: bold;
+            font-size: 15px;
+            color: #fff;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            padding-bottom: 6px;
+        }
+
+        .complex-info-label {
+            color: rgba(255, 255, 255, 0.55);
+            font-size: 12px;
+            flex-shrink: 0;
+            margin-right: 8px;
+        }
+
+        .complex-info-val {
+            font-size: 13px;
+            text-align: right;
+            color: #E8F4FD;
+        }
+
+        .complex-info-format-row {
+            display: flex;
+            gap: 4px;
+        }
+
+        .complex-info-fmt-btn {
+            flex: 1;
+            padding: 3px 5px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: rgba(255, 255, 255, 0.55);
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+
+        .complex-info-fmt-btn.active {
+            background: rgba(74, 144, 226, 0.25);
+            border-color: #4A90E2;
+            color: #fff;
+        }
+
+        @media (hover: hover) {
+            .complex-info-fmt-btn:not(.active):hover {
+                background: rgba(255, 255, 255, 0.1);
+                color: rgba(255, 255, 255, 0.9);
+            }
+        }
     </style>
 </head>
 <body>
@@ -931,6 +1092,33 @@
                         </button>
                     </div>
                     <div id="constants-container"></div>
+                </div>
+            </div>
+
+            <!-- Complex number info panel (bottom-right) -->
+            <div id="complex-info-panel" class="complex-info-panel" style="display:none;">
+                <div class="complex-info-content">
+                    <div class="complex-info-row complex-info-header">
+                        <span id="complex-info-title">z</span>
+                        <button id="close-complex-info-btn" class="info-panel-close-btn" aria-label="Close info panel">&#x00D7;</button>
+                    </div>
+                    <div class="complex-info-format-row">
+                        <button class="complex-info-fmt-btn active" data-fmt="cartesian">a + bi</button>
+                        <button class="complex-info-fmt-btn" data-fmt="exponential">re<sup>i&#x03B8;</sup></button>
+                        <button class="complex-info-fmt-btn" data-fmt="trig">trig</button>
+                    </div>
+                    <div class="complex-info-row">
+                        <span class="complex-info-label">Value</span>
+                        <span id="complex-info-value" class="complex-info-val"></span>
+                    </div>
+                    <div class="complex-info-row">
+                        <span class="complex-info-label">Modulus</span>
+                        <span id="complex-info-modulus" class="complex-info-val"></span>
+                    </div>
+                    <div class="complex-info-row">
+                        <span class="complex-info-label">Argument</span>
+                        <span id="complex-info-argument" class="complex-info-val"></span>
+                    </div>
                 </div>
             </div>
         </div>

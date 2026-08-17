@@ -35,6 +35,8 @@ class Komplexiti {
             '#FF6B6B', '#4A90E2', '#FFD400', '#84CC16', '#F39C12'
         ];
         this.displayMode = 'arrow'; // 'arrow' | 'point'
+        this.activeInfoConstantId = null;
+        this.infoFormat = 'cartesian';
 
         // ---- Input state ----
         this.input = {
@@ -246,6 +248,23 @@ class Komplexiti {
         if (addConstantBtn) addConstantBtn.addEventListener('click', () => this.addConstant());
         const displayModeToggle = document.getElementById('display-mode-toggle');
         if (displayModeToggle) displayModeToggle.addEventListener('click', () => this.toggleDisplayMode());
+
+        const closeInfoBtn = document.getElementById('close-complex-info-btn');
+        if (closeInfoBtn) closeInfoBtn.addEventListener('click', () => {
+            const panel = document.getElementById('complex-info-panel');
+            if (panel) panel.style.display = 'none';
+            this.activeInfoConstantId = null;
+        });
+
+        document.querySelectorAll('.complex-info-fmt-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.infoFormat = btn.dataset.fmt;
+                document.querySelectorAll('.complex-info-fmt-btn').forEach(b =>
+                    b.classList.toggle('active', b.dataset.fmt === this.infoFormat)
+                );
+                this.updateComplexInfoPanel();
+            });
+        });
     }
 
     isNarrow() {
@@ -352,6 +371,7 @@ class Komplexiti {
         this.drawAxes();
         this.drawAxisLabels();
         this.drawComplexConstants();
+        this.updateComplexInfoPanel();
     }
 
     // -------------------------------------------------------------------------
@@ -1026,6 +1046,12 @@ class Komplexiti {
         if (s) s.style.opacity = this.sizeMode === 'normal' ? '1' : '0.3';
         if (m) m.style.opacity = this.sizeMode === 'large'  ? '1' : '0.3';
         if (l) l.style.opacity = this.sizeMode === 'xlarge' ? '1' : '0.3';
+        const infoPanel = document.getElementById('complex-info-panel');
+        if (infoPanel) {
+            infoPanel.classList.remove('size-large', 'size-xlarge');
+            if (this.sizeMode === 'large')  infoPanel.classList.add('size-large');
+            if (this.sizeMode === 'xlarge') infoPanel.classList.add('size-xlarge');
+        }
         if (this.currentState === this.states.APP) this.drawCanvas();
     }
 
@@ -1076,6 +1102,7 @@ class Komplexiti {
                     <button class="expr-remove-btn" title="Delete" aria-label="Delete constant">
                         <svg viewBox="0 0 16 16"><path d="M4 4L12 12M12 4L4 12"/></svg>
                     </button>
+                    <button class="expr-info-btn" title="Show info about this complex number" aria-label="Show complex number info">i</button>
                     <div class="expr-color-dot" style="background:${c.color};opacity:${c.enabled ? 1 : 0.3}" title="Toggle visibility"></div>
                 </div>
             </div>`;
@@ -1083,6 +1110,7 @@ class Komplexiti {
         const mathField = card.querySelector('math-field');
         const dot       = card.querySelector('.expr-color-dot');
         const removeBtn = card.querySelector('.expr-remove-btn');
+        const infoBtn   = card.querySelector('.expr-info-btn');
 
         mathField.addEventListener('input', () => {
             c.latex = mathField.value;
@@ -1127,6 +1155,7 @@ class Komplexiti {
         });
 
         removeBtn.addEventListener('click', () => this.removeConstant(c.id));
+        infoBtn.addEventListener('click',   () => this.showComplexInfoPanel(c.id));
 
         dot.addEventListener('click', () => {
             c.enabled = !c.enabled;
@@ -1151,6 +1180,11 @@ class Komplexiti {
     }
 
     removeConstant(id) {
+        if (this.activeInfoConstantId === id) {
+            const panel = document.getElementById('complex-info-panel');
+            if (panel) panel.style.display = 'none';
+            this.activeInfoConstantId = null;
+        }
         const idx = this.complexConstants.findIndex(c => c.id === id);
         if (idx !== -1) this.complexConstants.splice(idx, 1);
         const card = document.querySelector(`.expr-card[data-const-id="${id}"]`);
@@ -1284,6 +1318,81 @@ class Komplexiti {
         if (pointIcon) pointIcon.style.opacity = this.displayMode === 'point' ? '1' : '0.35';
         if (label)     label.textContent = this.displayMode === 'arrow' ? 'Arrow' : 'Point';
         if (this.currentState === this.states.APP) this.drawCanvas();
+    }
+
+    // =========================================================================
+    // Complex number info panel
+    // =========================================================================
+
+    showComplexInfoPanel(id) {
+        this.activeInfoConstantId = id;
+        const panel = document.getElementById('complex-info-panel');
+        if (panel) panel.style.display = '';
+        this.updateComplexInfoPanel();
+    }
+
+    updateComplexInfoPanel() {
+        const panel = document.getElementById('complex-info-panel');
+        if (!panel || panel.style.display === 'none') return;
+        const c = this.complexConstants.find(x => x.id === this.activeInfoConstantId);
+        if (!c) { panel.style.display = 'none'; return; }
+
+        panel.style.borderLeftColor = c.color;
+
+        const title = document.getElementById('complex-info-title');
+        const valEl = document.getElementById('complex-info-value');
+        const modEl = document.getElementById('complex-info-modulus');
+        const argEl = document.getElementById('complex-info-argument');
+
+        if (title) title.textContent = c.name || 'z';
+
+        if (c.re === null || c.im === null) {
+            if (valEl) valEl.innerHTML = '<em>undefined</em>';
+            if (modEl) modEl.textContent = '-';
+            if (argEl) argEl.textContent = '-';
+            return;
+        }
+
+        const r     = Math.sqrt(c.re * c.re + c.im * c.im);
+        const theta = Math.atan2(c.im, c.re);
+
+        if (valEl) valEl.innerHTML = this.formatComplexValue(c.re, c.im, r, theta);
+        if (modEl) modEl.textContent = this.formatNumber(r);
+        if (argEl) argEl.innerHTML = this.formatArgument(theta);
+    }
+
+    formatComplexValue(re, im, r, theta) {
+        switch (this.infoFormat) {
+            case 'exponential': {
+                if (Math.abs(r) < 1e-10) return '0';
+                const rStr  = this.formatNumber(r);
+                const thStr = this.formatNumber(Math.abs(theta));
+                const sign  = theta < -1e-10 ? '-' : '';
+                return `${rStr}&thinsp;e<sup>${sign}i(${thStr})</sup>`;
+            }
+            case 'trig': {
+                if (Math.abs(r) < 1e-10) return '0';
+                const rStr  = this.formatNumber(r);
+                const thStr = this.formatNumber(theta);
+                return `${rStr}(cos(${thStr}) + i&thinsp;sin(${thStr}))`;
+            }
+            default:
+                return this.formatCartesianHTML(re, im);
+        }
+    }
+
+    formatCartesianHTML(re, im) {
+        const aStr = this.formatNumber(re);
+        const bAbs = this.formatNumber(Math.abs(im));
+        if (Math.abs(im) < 1e-10) return aStr;
+        if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${bAbs}i` : `${bAbs}i`;
+        const sign = im < -1e-10 ? ' - ' : ' + ';
+        return `${aStr}${sign}${bAbs}i`;
+    }
+
+    formatArgument(theta) {
+        const deg = theta * 180 / Math.PI;
+        return `${this.formatNumber(theta)} rad (${this.formatNumber(deg)}&deg;)`;
     }
 
     drawComplexConstants() {
