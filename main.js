@@ -2247,11 +2247,8 @@ class Komplexiti {
                         ctx.save();
                         ctx.font        = `italic ${fSize}px Arial`;
                         ctx.globalAlpha = 1;
-                        const tw = ctx.measureText(label).width;
                         const lx = pt.x + dotR + 4;
                         const ly = pt.y - dotR - 2;
-                        ctx.fillStyle = isLight ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.5)';
-                        ctx.fillRect(lx - 2, ly - fSize + 1, tw + 4, fSize + 3);
                         ctx.fillStyle = c.color;
                         ctx.fillText(label, lx, ly);
                         ctx.restore();
@@ -2311,11 +2308,8 @@ class Komplexiti {
                 ctx.save();
                 ctx.font        = `italic ${fSize}px Arial`;
                 ctx.globalAlpha = 1;
-                const tw = ctx.measureText(c.name).width;
                 const lx = pt.x + dotR + 4;
                 const ly = pt.y - dotR - 2;
-                ctx.fillStyle = isLight ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.5)';
-                ctx.fillRect(lx - 2, ly - fSize + 1, tw + 4, fSize + 3);
                 ctx.fillStyle = c.color;
                 ctx.fillText(c.name, lx, ly);
                 ctx.restore();
