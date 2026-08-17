@@ -637,12 +637,16 @@ class Komplexiti {
         this.sidebarPanel.classList.remove('mobile-open');
         this.hamburgerBtn.classList.remove('active', 'panel-open');
         this.mobileOverlay.classList.remove('active');
-        // Dismiss keyboard and clear focus state when the panel slides away
+        // Protect fields and clear focus state; remove protection after slide animation
+        document.querySelectorAll('math-field').forEach(mf => mf.setAttribute('data-blur-protected', 'true'));
         this.clearMathLiveFocusState();
         if (window.mathVirtualKeyboard?.visible) {
             window.mathVirtualKeyboard.hide();
         }
         this.lastEditableMathField = null;
+        setTimeout(() => {
+            document.querySelectorAll('math-field').forEach(mf => mf.removeAttribute('data-blur-protected'));
+        }, 500);
     }
 
     togglePanel() {
@@ -1029,14 +1033,17 @@ class Komplexiti {
         }, { passive: false });
         this.canvas.addEventListener('touchend', (e) => {
             if (this.currentState !== this.states.APP) return;
-            // Dismiss keyboard when the user taps the canvas on a touch device.
-            // e.preventDefault() is critical on iOS: without it the browser generates
-            // synthetic focus events after touchend that immediately refocus the math
-            // field and reopen the keyboard before the dismiss lock can take effect.
             if (window.mathVirtualKeyboard?.visible) {
+                // preventDefault stops iOS generating synthetic focus/click events.
+                // stopPropagation prevents any MathLive global touchend listener.
                 e.preventDefault();
+                e.stopPropagation();
                 this.keyboardDismissedByCanvas = true;
-                this.virtualKeyboardDismissLockUntil = Date.now() + 500;
+                this.virtualKeyboardDismissLockUntil = Date.now() + 700;
+                // Protect every field: if iOS asynchronously restores focus after this
+                // handler returns, focusin will immediately re-blur it.
+                document.querySelectorAll('math-field').forEach(mf =>
+                    mf.setAttribute('data-blur-protected', 'true'));
                 this.clearMathLiveFocusState();
                 window.mathVirtualKeyboard.hide();
                 [80, 200, 380].forEach(ms => setTimeout(() => {
@@ -1044,6 +1051,11 @@ class Komplexiti {
                         window.mathVirtualKeyboard.hide();
                     }
                 }, ms));
+                // Remove protection after the iOS focus-restoration window has closed
+                setTimeout(() => {
+                    document.querySelectorAll('math-field').forEach(mf =>
+                        mf.removeAttribute('data-blur-protected'));
+                }, 750);
             }
             this.handleTouchEnd(e);
         }, { passive: false }); // non-passive so e.preventDefault() is available
@@ -1557,6 +1569,7 @@ class Komplexiti {
         const markKeyboardReopenAllowed = () => {
             this.keyboardDismissedByCanvas = false;
             this.virtualKeyboardDismissLockUntil = 0;
+            mathField.removeAttribute('data-blur-protected');
         };
 
         const tryShowKeyboardForField = () => {
@@ -1592,6 +1605,11 @@ class Komplexiti {
         mathField.addEventListener('mousedown', markKeyboardReopenAllowed);
 
         mathField.addEventListener('focusin', () => {
+            // If iOS asynchronously restores focus after a canvas tap, reject it
+            if (mathField.getAttribute('data-blur-protected') === 'true') {
+                mathField.blur();
+                return;
+            }
             this.lastEditableMathField = mathField;
             tryShowKeyboardForField();
         });
