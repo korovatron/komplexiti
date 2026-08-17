@@ -1087,9 +1087,6 @@
     <div id="app-container">
         <canvas id="canvas"></canvas>
 
-        <!-- DEBUG overlay - remove before release -->
-        <div id="debug-overlay" style="position:fixed;top:0;left:0;z-index:9999;background:rgba(0,0,0,0.85);color:#0f0;font-size:11px;font-family:monospace;line-height:1.5;padding:6px 8px;pointer-events:none;">loading…</div>
-
         <div id="ui-overlay">
             <!-- Hamburger menu button -->
             <button id="hamburger-menu" class="hidden" aria-label="Toggle sidebar">
@@ -1264,37 +1261,5 @@
     <script src="https://unpkg.com/mathlive"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js"></script>
     <script src="./main.js"></script>
-    <!-- DEBUG script - remove before release -->
-    <script>
-    (function(){
-        function updateDebug(){
-            var el=document.getElementById('debug-overlay');
-            if(!el)return;
-            var ac=document.getElementById('app-container');
-            var cv=document.getElementById('canvas');
-            try{
-                var r=ac?ac.getBoundingClientRect():null;
-                var vh=getComputedStyle(document.documentElement).getPropertyValue('--actual-vh').trim();
-                var vv=window.visualViewport;
-                var pwa=!!(window.matchMedia('(display-mode:standalone)').matches||window.navigator.standalone);
-                el.innerHTML=[
-                    'innerW/H: '+window.innerWidth+'x'+window.innerHeight,
-                    'screen: '+screen.width+'x'+screen.height,
-                    'dpr: '+devicePixelRatio,
-                    'actual-vh: '+(vh||'unset'),
-                    'vvp: '+(vv?Math.round(vv.width)+'x'+Math.round(vv.height):'n/a'),
-                    'appCont: '+(r?r.width.toFixed(1)+'x'+r.height.toFixed(1):'n/a'),
-                    'canvas: '+(cv?cv.width+'x'+cv.height:'n/a'),
-                    'PWA: '+pwa
-                ].join('<br>');
-            }catch(e){
-                el.innerHTML='ERR:'+(e&&e.message?e.message:String(e));
-            }
-        }
-        [100,500,1500,3000].forEach(function(d){setTimeout(updateDebug,d);});
-        window.addEventListener('resize',updateDebug);
-        setInterval(updateDebug,2000);
-    })();
-    </script>
 </body>
 </html>
