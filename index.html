@@ -46,12 +46,47 @@
             --input-bg:      #3A4F6A;
             --button-bg:     #4A90E2;
             --primary-color: #4A90E2;
+            --grid-color:    rgba(255, 255, 255, 0.2);
+            --label-color:   rgba(255, 255, 255, 0.8);
 
             /* Safe area support for iOS notch / home-bar devices */
             --safe-area-top:    env(safe-area-inset-top);
             --safe-area-bottom: env(safe-area-inset-bottom);
             --safe-area-left:   env(safe-area-inset-left);
             --safe-area-right:  env(safe-area-inset-right);
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Light theme overrides                                                */
+        /* ------------------------------------------------------------------ */
+        html[data-theme="light"] {
+            --bg-primary:    #EEF5FD;
+            --bg-secondary:  #DCE9F7;
+            --canvas-bg:     #FDFDFD;
+            --text-primary:  #1A2F42;
+            --text-secondary: #555;
+            --accent-color:  #1566c0;
+            --accent-hover:  #1d7ae8;
+            --panel-bg:      rgba(238, 245, 253, 0.97);
+            --border-color:  #BCC8D8;
+            --input-bg:      #D8E5F2;
+            --button-bg:     #1566c0;
+            --primary-color: #1566c0;
+            --grid-color:    rgba(0, 0, 0, 0.08);
+            --label-color:   rgba(0, 0, 0, 0.55);
+        }
+
+        /* ------------------------------------------------------------------ */
+        /* Side panel - always dark, independent of app theme                   */
+        /* ------------------------------------------------------------------ */
+        #sidebar-panel {
+            --panel-bg:       rgba(42, 63, 90, 0.95);
+            --bg-secondary:   #2A3F5A;
+            --border-color:   #555;
+            --text-primary:   #E8F4FD;
+            --text-secondary: #888;
+            --input-bg:       #3A4F6A;
+            --button-bg:      #4A90E2;
         }
 
         /* ------------------------------------------------------------------ */
@@ -468,7 +503,7 @@
             padding-top:    max(20px, calc(var(--safe-area-top, 0px)    + 20px)) !important;
             padding-bottom: max(20px, calc(var(--safe-area-bottom, 0px) + 20px)) !important;
             backdrop-filter: blur(10px);
-            background: rgba(26, 47, 66, 0.95) !important;
+            background: var(--panel-bg) !important;
             pointer-events: auto;
             /* Hide scrollbar on desktop */
             scrollbar-width: none;
@@ -555,6 +590,42 @@
         }
 
         /* ------------------------------------------------------------------ */
+        /* Panel section controls                                              */
+        /* ------------------------------------------------------------------ */
+        .panel-section {
+            margin-top: 16px;
+        }
+
+        .panel-control-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .panel-btn {
+            padding: 8px 12px;
+            height: 40px;
+            background: var(--bg-secondary) !important;
+            border: 1px solid var(--border-color) !important;
+            color: var(--text-primary) !important;
+            box-shadow: none !important;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 12px;
+        }
+
+        .btn-separator {
+            width: 1px;
+            height: 12px;
+            background: var(--border-color);
+            flex-shrink: 0;
+        }
+
+        /* ------------------------------------------------------------------ */
         /* Mobile overlay - darkens canvas when sidebar is open                */
         /* ------------------------------------------------------------------ */
         #mobile-overlay {
@@ -631,8 +702,33 @@
                     <button id="return-to-title">&#8592; Title</button>
                 </div>
 
-                <div class="panel-placeholder">
-                    <p>Complex number tools will appear here.</p>
+                <div class="panel-section">
+                    <div class="panel-control-row">
+                        <button id="size-mode-toggle" class="panel-btn" title="Toggle label size">
+                            <span id="small-size-icon"  style="font-size: 12px; font-weight: bold; opacity: 1;">A</span>
+                            <div class="btn-separator"></div>
+                            <span id="medium-size-icon" style="font-size: 16px; font-weight: bold; opacity: 0.3;">A</span>
+                            <div class="btn-separator"></div>
+                            <span id="large-size-icon"  style="font-size: 20px; font-weight: bold; opacity: 0.3;">A</span>
+                        </button>
+                        <button id="theme-toggle" class="panel-btn" title="Toggle theme">
+                            <svg id="light-icon" width="24" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.3;">
+                                <circle cx="12" cy="12" r="5"></circle>
+                                <line x1="12" y1="1" x2="12" y2="3"></line>
+                                <line x1="12" y1="21" x2="12" y2="23"></line>
+                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                                <line x1="1" y1="12" x2="3" y2="12"></line>
+                                <line x1="21" y1="12" x2="23" y2="12"></line>
+                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                            </svg>
+                            <div class="btn-separator"></div>
+                            <svg id="dark-icon" width="24" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 1;">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
