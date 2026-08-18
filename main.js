@@ -1923,8 +1923,8 @@ class Komplexiti {
                     hasError = parsed === null;
                     c.errorMessage = hasError ? 'Cannot evaluate expression' : '';
                 }
-            } else if (raw.includes('=')) {
-                // Not a simple name=value assignment — try to solve as an equation
+            } else if (raw.includes('=') || /[<>]/.test(raw) || /\\le|\\ge|\\lt|\\gt/.test(raw)) {
+                // Not a simple name=value assignment — try to solve as an equation or inequality
                 c.name = null;
                 c.re   = null;
                 c.im   = null;
@@ -2190,7 +2190,7 @@ class Komplexiti {
                     c.im = parsed !== null ? parsed.im : null;
                     c.hasParseError = parsed === null;
                     c.errorMessage  = parsed === null ? 'Cannot evaluate expression' : '';
-                } else if (!assignment && raw.includes('=')) {
+                } else if (!assignment && (raw.includes('=') || /[<>]/.test(raw) || /\\le|\\ge|\\lt|\\gt/.test(raw))) {
                     const eq = this.parseEquation(raw, c.id);
                     if (eq) {
                         c.type = eq.type;
@@ -2267,6 +2267,12 @@ class Komplexiti {
         e = e.replace(/\\sqrt\s*([0-9])/g, 'sqrt($1)');
         e = e.replace(/\\sqrt\b/g, 'sqrt');
         e = e.replace(/\\imaginaryI|\\imath/g, 'i');
+        e = e.replace(/\\leq(?![a-zA-Z])/g, '<=');
+        e = e.replace(/\\geq(?![a-zA-Z])/g, '>=');
+        e = e.replace(/\\le(?![a-zA-Z])/g, '<=');
+        e = e.replace(/\\ge(?![a-zA-Z])/g, '>=');
+        e = e.replace(/\\lt(?![a-zA-Z])/g, '<');
+        e = e.replace(/\\gt(?![a-zA-Z])/g, '>');
         e = e.replace(/\\[a-zA-Z]+\s*/g, '');
         e = e.trim();
         if (!e) return '';
@@ -3088,14 +3094,29 @@ class Komplexiti {
             let retraced = false;
             const vp = this.viewport;
             for (const c of this.expressions) {
-                if (c.type !== 'locus' || !c.locus || !c.equationVar || c.locus.fastPath) continue;
+                if (c.type !== 'locus' || !c.locus || !c.equationVar) continue;
                 const cached = c._locusCache;
                 if (cached && cached.minX === vp.minX && cached.maxX === vp.maxX &&
                     cached.minY === vp.minY && cached.maxY === vp.maxY) continue;
-                c._locusCache = {
-                    segments: this._traceLocusSegments(c.locus, c.equationVar, c.id),
-                    minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
-                };
+                if (c.locus.fastPath) {
+                    // Fast-path loci need a shade grid rebuild only (segments come from geometry)
+                    if (!c.locus.inequality) continue;
+                    const fpKind = c.locus.fastPath.kind;
+                    if (fpKind === 'circle' || fpKind === 'apollonius') continue;
+                    c._locusCache = {
+                        segments: null,
+                        shadeGrid: this._buildLocusShadeGrid(c.locus, c.equationVar, c.id),
+                        minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
+                    };
+                } else {
+                    c._locusCache = {
+                        segments: this._traceLocusSegments(c.locus, c.equationVar, c.id),
+                        shadeGrid: c.locus.inequality
+                            ? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id)
+                            : null,
+                        minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
+                    };
+                }
                 retraced = true;
             }
             if (retraced && this.currentState === this.states.APP) this.drawCanvas();
@@ -3290,6 +3311,98 @@ class Komplexiti {
         return segments;
     }
 
+    // Compute a boolean grid (in world coordinates) flagging cells that fall inside the shaded
+    // region of an inequality locus. Uses the same resolution as _traceLocusSegments.
+    _buildLocusShadeGrid(locus, varName, ownId) {
+        if (!locus.scalar || !locus.inequality) return null;
+        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
+        const spanX = maxX - minX;
+        const spanY = maxY - minY;
+        if (!(spanX > 0) || !(spanY > 0)) return null;
+
+        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width / 6)));
+        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6)));
+        const dx = spanX / cols;
+        const dy = spanY / rows;
+        const scope = this.buildExpressionScope(ownId);
+        const { dir } = locus.inequality;
+        let lhsNode, rhsNode;
+        try {
+            lhsNode = math.parse(locus.lhs);
+            rhsNode = math.parse(locus.rhs);
+        } catch { return null; }
+
+        const grid = Array.from({ length: rows }, () => new Uint8Array(cols));
+        for (let iy = 0; iy < rows; iy++) {
+            const y = minY + (iy + 0.5) * dy;
+            for (let ix = 0; ix < cols; ix++) {
+                const x = minX + (ix + 0.5) * dx;
+                try {
+                    const evalScope = { ...scope, [varName]: math.complex(x, y) };
+                    const lv = lhsNode.evaluate(evalScope);
+                    const rv = rhsNode.evaluate(evalScope);
+                    const signed = this._equationSignedDifference(lv, rv, { angular: locus.angular });
+                    if (signed !== null && isFinite(signed) && signed * dir > 0) grid[iy][ix] = 1;
+                } catch { /* skip */ }
+            }
+        }
+        return { grid, cols, rows, dx, dy, originX: minX, originY: minY };
+    }
+
+    // Draw the shaded region for an inequality locus. Call before drawing the boundary curve.
+    _drawLocusShade(c, ctx) {
+        const ineq = c.locus.inequality;
+        if (!ineq) return;
+        const fp = c.locus.fastPath;
+        const SHADE_ALPHA = 0.18;
+
+        // Geometric fill for circle / Apollonius circle (interior or exterior)
+        if (fp?.kind === 'circle' || fp?.kind === 'apollonius') {
+            const sc = this.worldToScreen(fp.center.re, fp.center.im);
+            const se = this.worldToScreen(fp.center.re + fp.radius, fp.center.im);
+            const sr = Math.abs(se.x - sc.x);
+            const cw = this.canvas.width;
+            const ch = this.canvas.height;
+            ctx.save();
+            ctx.fillStyle = c.color;
+            ctx.globalAlpha = SHADE_ALPHA;
+            ctx.beginPath();
+            if (ineq.dir < 0) {
+                ctx.arc(sc.x, sc.y, sr, 0, Math.PI * 2);
+            } else {
+                // Exterior: canvas rect (clockwise) + circle (anticlockwise) → non-zero fill leaves interior unfilled
+                ctx.moveTo(0, 0);
+                ctx.lineTo(cw, 0);
+                ctx.lineTo(cw, ch);
+                ctx.lineTo(0, ch);
+                ctx.closePath();
+                ctx.arc(sc.x, sc.y, sr, 0, Math.PI * 2, true);
+            }
+            ctx.fill();
+            ctx.restore();
+            return;
+        }
+
+        // Grid-based fill for all other loci
+        const sg = c._locusCache?.shadeGrid;
+        if (!sg) return;
+        ctx.save();
+        ctx.fillStyle = c.color;
+        ctx.globalAlpha = SHADE_ALPHA;
+        for (let iy = 0; iy < sg.rows; iy++) {
+            for (let ix = 0; ix < sg.cols; ix++) {
+                if (!sg.grid[iy][ix]) continue;
+                const wx = sg.originX + ix * sg.dx;
+                const wy = sg.originY + iy * sg.dy;
+                // worldToScreen flips y (higher world-y → lower screen-y)
+                const topLeft  = this.worldToScreen(wx,          wy + sg.dy);
+                const botRight = this.worldToScreen(wx + sg.dx,  wy);
+                ctx.fillRect(topLeft.x, topLeft.y, botRight.x - topLeft.x, botRight.y - topLeft.y);
+            }
+        }
+        ctx.restore();
+    }
+
     // Extract polynomial coefficients [a0..an] of h(varName) via symbolic differentiation.
     // Returns null if h is not a polynomial of degree ≤ maxDeg.
     _extractPolynomialCoeffs(hExpr, varName, scope, maxDeg = 6) {
@@ -3399,14 +3512,35 @@ class Komplexiti {
             const expr  = this.latexToExpr(rawLatex);
             if (!expr) return null;
 
-            const eqIdx = expr.indexOf('=');
-            if (eqIdx < 1 || eqIdx >= expr.length - 1) return null;
-            if ('!<>'.includes(expr[eqIdx - 1])) return null;   // reject !=, <=, >=
-
-            const lhs     = expr.slice(0, eqIdx).trim();
-            const rhs     = expr.slice(eqIdx + 1).trim();
+            // Detect operator: inequality or equality
+            let lhs, rhs, inequalityDir = 0, inequalityStrict = false;
+            {
+                const ineqMatch = /^([\s\S]*?)(<=|>=|<(?!=)|>(?!=))([\s\S]*)$/.exec(expr);
+                if (ineqMatch) {
+                    lhs = ineqMatch[1].trim();
+                    const op = ineqMatch[2];
+                    rhs = ineqMatch[3].trim();
+                    inequalityDir = (op === '<' || op === '<=') ? -1 : 1;
+                    inequalityStrict = (op === '<' || op === '>');
+                } else {
+                    const eqIdx = expr.indexOf('=');
+                    if (eqIdx < 1 || eqIdx >= expr.length - 1) return null;
+                    if (expr[eqIdx - 1] === '!') return null;   // reject !=
+                    lhs = expr.slice(0, eqIdx).trim();
+                    rhs = expr.slice(eqIdx + 1).trim();
+                }
+            }
+            if (!lhs || !rhs) return null;
             const varName = this._findEquationVariable(lhs + ' ' + rhs, scope);
             if (!varName) return null;
+
+            // Inequalities go directly to the locus builder - a region, not discrete roots
+            if (inequalityDir !== 0) {
+                const locus = this._buildLocus(lhs, rhs, varName, scope);
+                if (!locus || !locus.scalar) return null;
+                locus.inequality = { dir: inequalityDir, strict: inequalityStrict };
+                return { type: 'locus', variable: varName, roots: null, locus };
+            }
 
             // Fast path: varName^n = const_expr  (nth roots, including roots of unity)
             const stripped  = lhs.replace(/\s/g, '');
@@ -3712,7 +3846,7 @@ class Komplexiti {
 
         } else if (c.type === 'locus' && c.locus) {
             container.classList.remove('is-equation');
-            badge.textContent      = 'Locus';
+            badge.textContent      = c.locus.inequality ? 'Inequality' : 'Locus';
             valueEl.style.display  = '';
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
@@ -4157,6 +4291,24 @@ class Komplexiti {
                 let segments;
                 if (fastSegments !== null) {
                     segments = fastSegments;
+                    // For fast-path inequality loci, build/cache shade grid where needed
+                    if (c.locus.inequality) {
+                        const fpKind = fp?.kind;
+                        if (fpKind !== 'circle' && fpKind !== 'apollonius') {
+                            const vp = this.viewport;
+                            const cached = c._locusCache;
+                            const fresh = cached && cached.minX === vp.minX && cached.maxX === vp.maxX &&
+                                cached.minY === vp.minY && cached.maxY === vp.maxY;
+                            if (!fresh) {
+                                if (!cached) {
+                                    const shadeGrid = this._buildLocusShadeGrid(c.locus, c.equationVar, c.id);
+                                    c._locusCache = { segments: null, shadeGrid, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                                } else {
+                                    this._scheduleLocusRetrace();
+                                }
+                            }
+                        }
+                    }
                 } else {
                     const vp = this.viewport;
                     const cached = c._locusCache;
@@ -4170,14 +4322,20 @@ class Komplexiti {
                         this._scheduleLocusRetrace();
                     } else {
                         segments = this._traceLocusSegments(c.locus, c.equationVar, c.id);
-                        c._locusCache = { segments, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                        const shadeGrid = c.locus.inequality
+                            ? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id)
+                            : null;
+                        c._locusCache = { segments, shadeGrid, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
                     }
                 }
+                // Draw shading before the boundary so the curve renders on top
+                if (c.locus.inequality) this._drawLocusShade(c, ctx);
                 if (!segments?.length) continue;
                 ctx.save();
                 ctx.strokeStyle = c.color;
                 ctx.lineWidth = Math.max(2, strokeWidth - 0.5);
                 ctx.globalAlpha = 0.95;
+                if (c.locus.inequality?.strict) ctx.setLineDash([8, 5]);
                 ctx.beginPath();
                 for (const [start, end] of segments) {
                     const p0 = this.worldToScreen(start.x, start.y);
