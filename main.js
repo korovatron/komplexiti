@@ -3425,6 +3425,11 @@ class Komplexiti {
                 'b=-4e^{\\frac{\\pi}{3}i}',
                 'c=3\\left(\\cos\\left(\\frac{\\pi}{6}\\right)+i\\sin\\left(\\frac{\\pi}{6}\\right)\\right)',
                 'z=\\frac{a}{b}'
+            ],
+            'complex-equations': [
+                'z+\\frac{1}{z}=1',
+                { latex: 'w^3=-27',   cardRootFmt: 'exponential' },
+                { latex: 'z^3=8i',    cardRootFmt: 'exponential' }
             ]
         };
 
@@ -3436,10 +3441,13 @@ class Komplexiti {
             this.expressionsContainer.innerHTML = '';
         }
 
-        for (const latex of list) {
+        for (const item of list) {
+            const latex  = typeof item === 'string' ? item : item.latex;
+            const fmt    = typeof item === 'string' ? null  : (item.cardRootFmt ?? null);
             this.addExpression({ skipFocus: true });
             const expr = this.expressions[this.expressions.length - 1];
             expr.latex = latex;
+            if (fmt) expr.cardRootFmt = fmt;
             const card = document.querySelector(`.expr-card[data-const-id="${expr.id}"]`);
             if (card) {
                 const mathField = card.querySelector('math-field');
@@ -3453,6 +3461,8 @@ class Komplexiti {
         // Add a blank tile at bottom
         this.addExpression({ skipFocus: true });
         this.cascadeEvaluate(null);
+        // Re-render metadata now that roots are resolved, so cardRootFmt takes effect
+        this.updateAllCardMetadata();
         this.saveExpressions();
         this.resetAxes();
         if (this.currentState === this.states.APP) this.drawCanvas();
@@ -3608,7 +3618,7 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             const fp = c.locus.fastPath;
-            const kinds = { circle: 'circle', line: 'line', ray: 'half-line', spiral: 'spiral', 'spiral-shifted': 'spiral' };
+            const kinds = { circle: 'circle', line: 'line', ray: 'half-line', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski' };
             valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
             container.classList.add('visible');
 
