@@ -287,10 +287,28 @@
         }
 
         .title-subtitle {
-            font-size: 1em;
+            font-size: 1.25em;
             color: #fff;
             letter-spacing: 0.06em;
-            margin-bottom: 20px;
+            margin-bottom: 22px;
+        }
+
+        .title-subtitle em {
+            font-family: Georgia, 'Times New Roman', serif;
+            font-style: italic;
+            font-size: 1.1em;
+            padding: 0 0.05em;
+            animation: iColorCycle 6s linear infinite;
+        }
+
+        @keyframes iColorCycle {
+            0%   { color: #ff3b30; } /* Red */
+            17%  { color: #ff9500; } /* Orange */
+            33%  { color: #ffd60a; } /* Yellow */
+            50%  { color: #34c759; } /* Green */
+            67%  { color: #00c7be; } /* Cyan/Blue */
+            83%  { color: #af52de; } /* Indigo/Violet */
+            100% { color: #ff3b30; } /* Red */
         }
 
         .title-screen .title-button {
