@@ -3031,6 +3031,24 @@ class Komplexiti {
         card.style.setProperty('--function-badge-bg', c.color);
         card.style.setProperty('--function-badge-fg', this.getContrastingTextColor(c.color));
 
+        // Shared factory for read-only math-fields used by equation and constant branches
+        const makeMF = (latex, fontSize = 18) => {
+            const mf = document.createElement('math-field');
+            mf.className = 'asymptote-equation-field asymptote-equation-item-wide';
+            mf.setAttribute('read-only', 'true');
+            mf.setAttribute('default-mode', 'math');
+            mf.setAttribute('virtual-keyboard-mode', 'off');
+            mf.setAttribute('tabindex', '-1');
+            mf.setAttribute('color-scheme', 'dark');
+            mf.style.setProperty('color', '#E8F4FD', 'important');
+            mf.style.setProperty('--text-color', '#E8F4FD');
+            mf.style.setProperty('--mf-font-size', `${fontSize}px`);
+            mf.addEventListener('focus', () => mf.blur());
+            mf.addEventListener('focusin', () => mf.blur());
+            mf.value = latex;
+            return mf;
+        };
+
         if (c.type === 'equation' && c.roots?.length) {
             container.classList.add('is-equation');
             const fmt = c.cardRootFmt || 'cartesian';
@@ -3050,22 +3068,6 @@ class Komplexiti {
                 const wrapper = document.createElement('div');
                 wrapper.title = tooltip;
 
-                const makeMF = (latex, fontSize = 18) => {
-                    const mf = document.createElement('math-field');
-                    mf.className = 'asymptote-equation-field asymptote-equation-item-wide';
-                    mf.setAttribute('read-only', 'true');
-                    mf.setAttribute('default-mode', 'math');
-                    mf.setAttribute('virtual-keyboard-mode', 'off');
-                    mf.setAttribute('tabindex', '-1');
-                    mf.setAttribute('color-scheme', 'dark');
-                    mf.style.setProperty('color', '#E8F4FD', 'important');
-                    mf.style.setProperty('--text-color', '#E8F4FD');
-                    mf.style.setProperty('--mf-font-size', `${fontSize}px`);
-                    mf.addEventListener('focus', () => mf.blur());
-                    mf.addEventListener('focusin', () => mf.blur());
-                    mf.value = latex;
-                    return mf;
-                };
                 const mfSize = fmt === 'exponential' ? 22 : 18;
 
                 if (fmt === 'trig') {
@@ -3104,10 +3106,40 @@ class Komplexiti {
             container.classList.remove('is-equation');
             badge.textContent      = 'Constant';
             valueEl.style.display  = '';
-            rootsEl.style.display  = 'none';
-            rootsEl.innerHTML      = '';
             const tol = 1e-9;
             valueEl.textContent = Math.abs(c.im) < tol ? 'real' : Math.abs(c.re) < tol ? 'imaginary' : 'complex';
+            // Modulus and argument as badge+value rows
+            const sym   = c.name || 'z';
+            const r     = Math.hypot(c.re, c.im);
+            const theta = Math.atan2(c.im, c.re);
+            const rLatex  = this.niceRealLatex(r)     ?? this.formatNumberShort(r);
+            const thLatex = this.niceAngleLatex(theta) ?? this.formatNumberShort(theta);
+            const makeMetaRow = (label, latex) => {
+                const row  = document.createElement('div');
+                row.style.cssText = 'display:flex;flex-direction:column;gap:2px';
+                const tr   = document.createElement('div');
+                tr.className = 'metadata-title-row';
+                const ph   = document.createElement('span');
+                ph.className = 'metadata-visibility-placeholder';
+                ph.setAttribute('aria-hidden', 'true');
+                const b    = document.createElement('div');
+                b.className = 'shape-info-title';
+                b.textContent = label;
+                tr.appendChild(ph);
+                tr.appendChild(b);
+                row.appendChild(tr);
+                const valWrap = document.createElement('div');
+                valWrap.style.paddingLeft = '10px';
+                valWrap.appendChild(makeMF(latex, 16));
+                row.appendChild(valWrap);
+                return row;
+            };
+            rootsEl.innerHTML = '';
+            rootsEl.appendChild(makeMetaRow('Modulus', rLatex));
+            rootsEl.appendChild(makeMetaRow('Argument', thLatex));
+            rootsEl.style.display = 'flex';
+            rootsEl.style.flexDirection = 'column';
+            rootsEl.style.gap = '4px';
             container.classList.add('visible');
 
         } else {

@@ -932,6 +932,7 @@
         .shape-info-container {
             display: none;
             flex-direction: row;
+            flex-wrap: wrap;
             align-items: center;
             gap: 8px;
             margin-top: 8px;
@@ -940,6 +941,11 @@
 
         .shape-info-container.visible {
             display: flex;
+        }
+
+        /* roots / detail fields always occupy a full new row */
+        .expr-card-roots {
+            flex: 0 0 100%;
         }
 
         /* equation cards stack badge above roots */
@@ -1003,10 +1009,6 @@
 
         .shape-info-container.is-equation .shape-info-title {
             cursor: pointer;
-        }
-
-        .shape-info-container.is-equation .expr-card-roots {
-            flex: 0 0 100%;
         }
 
         /* Read-only MathLive field for root values (same as Graphiti .asymptote-equation-field) */
