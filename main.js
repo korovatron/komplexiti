@@ -3333,12 +3333,13 @@ class Komplexiti {
             dropdown.classList.remove('show');
             return;
         }
-        // Position below the full split-button container and align to its left
+        // Position below the top toolbar row and match its full width (from left of 1st button to right of last button)
         const toggleBtn = e?.currentTarget || document.getElementById('add-dropdown-toggle');
-        const container = toggleBtn?.closest('.split-button-container') || toggleBtn;
-        const rect = container.getBoundingClientRect();
-        dropdown.style.top  = (rect.bottom + 4) + 'px';
-        dropdown.style.left = rect.left + 'px';
+        const toolbarRow = toggleBtn?.closest('.top-toolbar-row') || toggleBtn?.closest('.panel-control-row') || toggleBtn;
+        const rect = toolbarRow.getBoundingClientRect();
+        dropdown.style.top   = (rect.bottom + 4) + 'px';
+        dropdown.style.left  = rect.left + 'px';
+        dropdown.style.width = rect.width + 'px';
         dropdown.classList.add('show');
     }
 
