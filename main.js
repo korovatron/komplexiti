@@ -3498,6 +3498,12 @@ class Komplexiti {
                 'z+\\frac{1}{z}=1',
                 { latex: 'w^3=-27',   cardRootFmt: 'exponential' },
                 { latex: 'z^3=8i',    cardRootFmt: 'exponential' }
+            ],
+            'loci': [
+                '\\left|w\\right|=2',
+                '\\arg\\left(z-2\\right)=\\frac{\\pi}{3}',
+                '\\left|z-\\left(2-3i\\right)\\right|=\\left|z-1+2i\\right|',
+                '\\left|z^2+\\frac{1}{z^2}\\right|=2'
             ]
         };
 
