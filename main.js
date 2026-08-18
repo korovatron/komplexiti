@@ -1773,18 +1773,32 @@ class Komplexiti {
     }
 
     loadExpressions() {
+        let hasLoaded = false;
         try {
             const raw = localStorage.getItem('komplexiti-constants');
-            if (!raw) return;
-            const data = JSON.parse(raw);
-            if (data.nextId) this.nextExpressionId = data.nextId;
-            for (const [idx, saved] of (data.expressions || data.constants || []).entries()) {
-                const color = this.expressionColors[idx % this.expressionColors.length];
-                const c = { id: saved.id, color, enabled: !!saved.enabled, latex: saved.latex || '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, locus: null, hasParseError: false };
-                this.expressions.push(c);
-                this.createExpressionUI(c, { skipFocus: true });
+            if (raw) {
+                const data = JSON.parse(raw);
+                if (data.nextId) this.nextExpressionId = data.nextId;
+                const saved = data.expressions || data.constants || [];
+                if (saved.length) {
+                    for (const [idx, item] of saved.entries()) {
+                        const color = this.expressionColors[idx % this.expressionColors.length];
+                        const c = { id: item.id, color, enabled: !!item.enabled, latex: item.latex || '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, locus: null, hasParseError: false };
+                        this.expressions.push(c);
+                        this.createExpressionUI(c, { skipFocus: true });
+                    }
+                    hasLoaded = true;
+                }
             }
         } catch { /* ignore corrupt data */ }
+
+        if (!hasLoaded) {
+            // No saved data (first run or all deleted): seed with defaults
+            for (const latex of ['a=1+\\sqrt{3}i', '\\left|z-a\\right|=3', 'z^3=1']) {
+                this.addExpression({ skipFocus: true });
+                this.expressions[this.expressions.length - 1].latex = latex;
+            }
+        }
         // Always keep one blank tile at the bottom
         if (!this.expressions.some(c => !c.latex || c.latex.trim() === '')) this.addExpression({ skipFocus: true });
     }
