@@ -59,9 +59,20 @@ class Komplexiti {
             }
         };
 
-        // ---- Pan & Zoom inertia ----
+        // ---- Pan, Zoom & Viewport Transition inertia ----
         this.mousePanInertia = { active: false, velocityX: 0, velocityY: 0 };
         this.wheelZoom       = { active: false, targetScaleRatio: 1.0, cx: 0, cy: 0 };
+        this.viewportAnimation = {
+            active: false,
+            fromCenterX: 0,
+            fromCenterY: 0,
+            fromScale: 1,
+            toCenterX: 0,
+            toCenterY: 0,
+            toScale: 1,
+            startTime: 0,
+            duration: 350
+        };
 
         // ---- Animation loop ----
         this.animationId   = null;
@@ -1175,6 +1186,7 @@ class Komplexiti {
     handlePointerStart(clientX, clientY) {
         this.stopMousePanInertia();
         this.stopWheelZoom();
+        this.stopViewportAnimation();
         const rect = this.canvas.getBoundingClientRect();
         const cx = clientX - rect.left;
         const cy = clientY - rect.top;
@@ -1258,6 +1270,7 @@ class Komplexiti {
 
     startSmoothZoom(factor, cx, cy) {
         if (!isFinite(factor) || factor <= 0) return;
+        this.stopViewportAnimation();
         const currentXRange = this.viewport.maxX - this.viewport.minX;
 
         // If already actively zooming, chain onto current target
@@ -1349,6 +1362,7 @@ class Komplexiti {
     }
 
     panBy(dxFraction, dyFraction) {
+        this.stopViewportAnimation();
         const dx = dxFraction * (this.viewport.maxX - this.viewport.minX);
         const dy = dyFraction * (this.viewport.maxY - this.viewport.minY);
         this.viewport.minX    += dx; this.viewport.maxX    += dx;
@@ -1372,6 +1386,7 @@ class Komplexiti {
             this.input.mouse.down = false;
             this.stopMousePanInertia();
             this.stopWheelZoom();
+            this.stopViewportAnimation();
             const t1   = e.touches[0];
             const t2   = e.touches[1];
             const rect = this.canvas.getBoundingClientRect();
@@ -1450,6 +1465,38 @@ class Komplexiti {
     }
 
     // =========================================================================
+    // Viewport transition animation
+    // =========================================================================
+
+    animateViewportTo(targetCenterX, targetCenterY, targetScale, duration = 350) {
+        this.stopMousePanInertia();
+        this.stopWheelZoom();
+
+        if (Math.abs(this.viewport.centerX - targetCenterX) < 1e-6 &&
+            Math.abs(this.viewport.centerY - targetCenterY) < 1e-6 &&
+            Math.abs(this.viewport.scale - targetScale) < 1e-6) {
+            return;
+        }
+
+        this.viewportAnimation = {
+            active: true,
+            fromCenterX: this.viewport.centerX,
+            fromCenterY: this.viewport.centerY,
+            fromScale: this.viewport.scale,
+            toCenterX: targetCenterX,
+            toCenterY: targetCenterY,
+            toScale: targetScale,
+            startTime: performance.now(),
+            duration
+        };
+        this.ensureAnimationLoopRunning();
+    }
+
+    stopViewportAnimation() {
+        this.viewportAnimation.active = false;
+    }
+
+    // =========================================================================
     // Animation loop
     // =========================================================================
 
@@ -1467,6 +1514,7 @@ class Komplexiti {
         }
         this.stopMousePanInertia();
         this.stopWheelZoom();
+        this.stopViewportAnimation();
     }
 
     animationTick(timestamp) {
@@ -1476,6 +1524,29 @@ class Komplexiti {
 
         let needsRedraw = false;
         let keepAnimating = false;
+
+        if (this.viewportAnimation.active) {
+            const elapsed = timestamp - this.viewportAnimation.startTime;
+            const progress = Math.min(Math.max(elapsed / this.viewportAnimation.duration, 0), 1);
+            // Ease-out cubic for responsive deceleration
+            const p = 1 - Math.pow(1 - progress, 3);
+
+            this.viewport.centerX = this.viewportAnimation.fromCenterX + (this.viewportAnimation.toCenterX - this.viewportAnimation.fromCenterX) * p;
+            this.viewport.centerY = this.viewportAnimation.fromCenterY + (this.viewportAnimation.toCenterY - this.viewportAnimation.fromCenterY) * p;
+
+            const fromLog = Math.log(Math.max(this.viewportAnimation.fromScale, 1e-6));
+            const toLog   = Math.log(Math.max(this.viewportAnimation.toScale, 1e-6));
+            this.viewport.scale = Math.exp(fromLog + (toLog - fromLog) * p);
+
+            this.updateViewport();
+            needsRedraw = true;
+
+            if (progress >= 1) {
+                this.stopViewportAnimation();
+            } else {
+                keepAnimating = true;
+            }
+        }
 
         if (this.mousePanInertia.active) {
             const worldDX = this.mousePanInertia.velocityX * this.deltaTime;
@@ -3058,12 +3129,9 @@ class Komplexiti {
     }
 
     resetAxes() {
-        const h = this.viewport.height;
-        if (h > 0) this.viewport.scale = h / 10;
-        this.viewport.centerX = 0;
-        this.viewport.centerY = 0;
-        this.updateViewport();
-        this.drawCanvas();
+        const h = this.viewport.height || this.canvas.height;
+        const targetScale = h > 0 ? h / 10 : this.viewport.scale;
+        this.animateViewportTo(0, 0, targetScale, 350);
     }
 
     toggleAddDropdown(e) {
