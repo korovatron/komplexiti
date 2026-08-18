@@ -2251,6 +2251,13 @@ class Komplexiti {
         e = e.replace(/\barcsinh\b/g, 'asinh').replace(/\barccosh\b/g, 'acosh').replace(/\barctanh\b/g, 'atanh');
         e = e.replace(/\^\s*\{([^{}]+)\}/g, '^($1)');
         e = e.replace(/\{([^{}]*)\}/g, '($1)');
+        // Convert LaTeX inequality operators before abs replacement to prevent \le concatenating with abs
+        e = e.replace(/\\leq(?![a-zA-Z])/g, '<=');
+        e = e.replace(/\\geq(?![a-zA-Z])/g, '>=');
+        e = e.replace(/\\le(?![a-zA-Z])/g, '<=');
+        e = e.replace(/\\ge(?![a-zA-Z])/g, '>=');
+        e = e.replace(/\\lt(?![a-zA-Z])/g, '<');
+        e = e.replace(/\\gt(?![a-zA-Z])/g, '>');
         // |expr| absolute value - both \left|...\right| (keyboard) and bare |...|
         e = e.replace(/\\left\s*\|(.+?)\\right\s*\|/g, 'abs($1)');
         e = e.replace(/\|([^|]+)\|/g, 'abs($1)');
@@ -2267,12 +2274,6 @@ class Komplexiti {
         e = e.replace(/\\sqrt\s*([0-9])/g, 'sqrt($1)');
         e = e.replace(/\\sqrt\b/g, 'sqrt');
         e = e.replace(/\\imaginaryI|\\imath/g, 'i');
-        e = e.replace(/\\leq(?![a-zA-Z])/g, '<=');
-        e = e.replace(/\\geq(?![a-zA-Z])/g, '>=');
-        e = e.replace(/\\le(?![a-zA-Z])/g, '<=');
-        e = e.replace(/\\ge(?![a-zA-Z])/g, '>=');
-        e = e.replace(/\\lt(?![a-zA-Z])/g, '<');
-        e = e.replace(/\\gt(?![a-zA-Z])/g, '>');
         e = e.replace(/\\[a-zA-Z]+\s*/g, '');
         e = e.trim();
         if (!e) return '';
@@ -2418,9 +2419,9 @@ class Komplexiti {
         if (!rest) return { offset: { re: 0, im: 0 } };
         const sign = rest[0];
         if (sign !== '+' && sign !== '-') return null;
-        const constExpr = rest.slice(1).trim();
-        if (!constExpr) return null;
-        const parsed = this.parseComplexFromLatex(sign === '+' ? constExpr : `-(${constExpr})`, scope);
+        // Parse the full rest expression directly so multi-term offsets like -1+2i
+        // are evaluated as (-1+2i) rather than -(1+2i).
+        const parsed = this.parseComplexFromLatex(rest, scope);
         if (!parsed) return null;
         return { offset: parsed };
     }
