@@ -2790,6 +2790,60 @@ class Komplexiti {
             }
         }
 
+        const joukowski = this._matchJoukowskiLocus(lhs, rhs, varName, scope);
+        if (joukowski) return joukowski;
+
+        return null;
+    }
+
+    // Returns the content of abs(…) if expr is exactly that form, else null.
+    _extractAbsInner(expr, varName) {
+        const e = expr.trim();
+        if (!e.startsWith('abs(') || !e.endsWith(')')) return null;
+        let depth = 0;
+        for (let i = 3; i < e.length; i++) {
+            if (e[i] === '(') depth++;
+            else if (e[i] === ')') {
+                depth--;
+                if (depth === 0) return i === e.length - 1 ? e.slice(4, i) : null;
+            }
+        }
+        return null;
+    }
+
+    // Detect |z^n ± z^{-n}| = k by evaluating the inner expression numerically.
+    _matchJoukowskiLocus(lhs, rhs, varName, scope) {
+        const sides = [{ absExpr: lhs, kExpr: rhs }, { absExpr: rhs, kExpr: lhs }];
+        for (const { absExpr, kExpr } of sides) {
+            const inner = this._extractAbsInner(absExpr, varName);
+            if (!inner) continue;
+            const k = this._evaluateRealExpr(kExpr, scope);
+            if (k === null || k < 0) continue;
+            let innerNode;
+            try { innerNode = math.parse(inner); } catch { continue; }
+            const testPts = [
+                { r: 1.5, theta: 0.7 }, { r: 2.0, theta: 1.3 },
+                { r: 0.8, theta: 2.1 }, { r: 1.2, theta: 0.4 }
+            ];
+            for (let n = 1; n <= 6; n++) {
+                // cosSign = -1 ↔ z^n - z^{-n}, cosSign = +1 ↔ z^n + z^{-n}
+                for (const cosSign of [-1, 1]) {
+                    let ok = true;
+                    for (const { r, theta } of testPts) {
+                        const z = math.complex(r * Math.cos(theta), r * Math.sin(theta));
+                        try {
+                            const val = innerNode.evaluate({ ...scope, [varName]: z });
+                            if (!val || typeof val.re !== 'number' || !isFinite(val.re)) { ok = false; break; }
+                            const rn = Math.pow(r, n), rni = Math.pow(r, -n);
+                            const expRe = cosSign === -1 ? (rn - rni) * Math.cos(n * theta) : (rn + rni) * Math.cos(n * theta);
+                            const expIm = cosSign === -1 ? (rn + rni) * Math.sin(n * theta) : (rn - rni) * Math.sin(n * theta);
+                            if (Math.hypot(val.re - expRe, val.im - expIm) > 1e-6) { ok = false; break; }
+                        } catch { ok = false; break; }
+                    }
+                    if (ok) return { lhs, rhs, angular: false, scalar: true, fastPath: { kind: 'joukowski', n, cosSign, k } };
+                }
+            }
+        }
         return null;
     }
 
@@ -2935,6 +2989,28 @@ class Komplexiti {
         return [a, b];
     }
 
+    // Parametric tracer for |z^n ± z^{-n}| = k: two branches via r^{2n} + r^{-2n} = k² + cosSign·2cos(2nθ).
+    _traceJoukowskiSegments({ n, cosSign, k }) {
+        const steps = 720;
+        const k2 = k * k;
+        const segments = [];
+        for (let branch = 0; branch < 2; branch++) {
+            let prev = null;
+            for (let step = 0; step <= steps; step++) {
+                const theta = 2 * Math.PI * step / steps;
+                const S = k2 - cosSign * 2 * Math.cos(2 * n * theta);
+                if (S < 2) { prev = null; continue; }
+                const disc = Math.sqrt(S * S - 4);
+                const w = branch === 0 ? (S + disc) / 2 : (S - disc) / 2;
+                const r = Math.pow(w, 1 / (2 * n));
+                const pt = { x: r * Math.cos(theta), y: r * Math.sin(theta) };
+                if (prev) segments.push([prev, pt]);
+                prev = pt;
+            }
+        }
+        return segments;
+    }
+
     _scheduleLocusRetrace() {
         if (this._locusRetraceTimer) clearTimeout(this._locusRetraceTimer);
         this._locusRetraceTimer = setTimeout(() => {
@@ -3033,6 +3109,10 @@ class Komplexiti {
 
         if (fp.kind === 'spiral-shifted') {
             return this._traceShiftedSpiralSegments(fp, this.getVisibleWorldBounds());
+        }
+
+        if (fp.kind === 'joukowski') {
+            return this._traceJoukowskiSegments(fp);
         }
 
         return null;
