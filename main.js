@@ -1927,9 +1927,12 @@ class Komplexiti {
                     c.roots = eq.roots ?? null;
                     c.equationVar = eq.variable;
                     c.locus = eq.locus ?? null;
+                    c._locusCache = null;
                     c.errorMessage = '';
                 } else {
                     hasError = true;
+                    c.locus = null;
+                    c._locusCache = null;
                     c.errorMessage = 'Needs exactly one undefined variable';
                 }
             } else {
@@ -2179,6 +2182,7 @@ class Komplexiti {
                         c.type = eq.type;
                         c.roots = eq.roots ?? null;
                         c.equationVar = eq.variable;
+                        if (c.locus !== eq.locus) c._locusCache = null;
                         c.locus = eq.locus ?? null;
                         c.hasParseError = false;
                         c.errorMessage = '';
@@ -2187,6 +2191,7 @@ class Komplexiti {
                         c.roots = null;
                         c.equationVar = null;
                         c.locus = null;
+                        c._locusCache = null;
                         c.hasParseError = true;
                         c.errorMessage = 'Needs exactly one undefined variable';
                     }
@@ -2845,18 +2850,22 @@ class Komplexiti {
             math.complex(0, 1),
             math.complex(-1.5, 0.75)
         ];
-        try {
-            for (const z of testPoints) {
+        let finiteCount = 0;
+        for (const z of testPoints) {
+            let lhsValue, rhsValue;
+            try {
                 const evalScope = { ...scope, [varName]: z };
-                const lhsValue = lhsNode.evaluate(evalScope);
-                const rhsValue = rhsNode.evaluate(evalScope);
-                if (scalar && this._equationSignedDifference(lhsValue, rhsValue, { angular }) === null) scalar = false;
-                const diff = this._equationDifferenceMagnitude(lhsValue, rhsValue, { angular });
-                if (!isFinite(diff)) return null;
+                lhsValue = lhsNode.evaluate(evalScope);
+                rhsValue = rhsNode.evaluate(evalScope);
+            } catch {
+                continue; // singularity at this test point - skip it
             }
-        } catch {
-            return null;
+            if (scalar && this._equationSignedDifference(lhsValue, rhsValue, { angular }) === null) scalar = false;
+            const diff = this._equationDifferenceMagnitude(lhsValue, rhsValue, { angular });
+            if (!isFinite(diff)) continue; // singularity - skip rather than reject the whole locus
+            finiteCount++;
         }
+        if (finiteCount === 0) return null;
         return { lhs, rhs, angular, scalar };
     }
 
@@ -2924,6 +2933,27 @@ class Komplexiti {
         const a = { x: p0.x + t0 * dx, y: p0.y + t0 * dy };
         const b = { x: p0.x + t1 * dx, y: p0.y + t1 * dy };
         return [a, b];
+    }
+
+    _scheduleLocusRetrace() {
+        if (this._locusRetraceTimer) clearTimeout(this._locusRetraceTimer);
+        this._locusRetraceTimer = setTimeout(() => {
+            this._locusRetraceTimer = null;
+            let retraced = false;
+            const vp = this.viewport;
+            for (const c of this.expressions) {
+                if (c.type !== 'locus' || !c.locus || !c.equationVar || c.locus.fastPath) continue;
+                const cached = c._locusCache;
+                if (cached && cached.minX === vp.minX && cached.maxX === vp.maxX &&
+                    cached.minY === vp.minY && cached.maxY === vp.maxY) continue;
+                c._locusCache = {
+                    segments: this._traceLocusSegments(c.locus, c.equationVar, c.id),
+                    minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
+                };
+                retraced = true;
+            }
+            if (retraced && this.currentState === this.states.APP) this.drawCanvas();
+        }, 200);
     }
 
     _traceFastLocusSegments(locus) {
@@ -3887,8 +3917,27 @@ class Komplexiti {
             }
 
             if (c.type === 'locus' && c.locus && c.equationVar) {
-                const segments = this._traceFastLocusSegments(c.locus) ?? this._traceLocusSegments(c.locus, c.equationVar, c.id);
-                if (!segments.length) continue;
+                const fastSegments = this._traceFastLocusSegments(c.locus);
+                let segments;
+                if (fastSegments !== null) {
+                    segments = fastSegments;
+                } else {
+                    const vp = this.viewport;
+                    const cached = c._locusCache;
+                    const fresh = cached &&
+                        cached.minX === vp.minX && cached.maxX === vp.maxX &&
+                        cached.minY === vp.minY && cached.maxY === vp.maxY;
+                    if (fresh) {
+                        segments = cached.segments;
+                    } else if (cached) {
+                        segments = cached.segments; // stale during pan/zoom; retrace deferred
+                        this._scheduleLocusRetrace();
+                    } else {
+                        segments = this._traceLocusSegments(c.locus, c.equationVar, c.id);
+                        c._locusCache = { segments, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                    }
+                }
+                if (!segments?.length) continue;
                 ctx.save();
                 ctx.strokeStyle = c.color;
                 ctx.lineWidth = Math.max(2, strokeWidth - 0.5);
