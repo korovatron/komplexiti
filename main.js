@@ -922,6 +922,14 @@ class Komplexiti {
         return parseFloat(n.toPrecision(6)).toString();
     }
 
+    // 4 significant figures for compact card display
+    formatNumberShort(n) {
+        if (Math.abs(n) < 1e-10) return '0';
+        const abs = Math.abs(n);
+        if (abs >= 1e4 || (abs < 1e-3 && abs > 0)) return parseFloat(n.toPrecision(4)).toExponential(3);
+        return parseFloat(n.toPrecision(4)).toString();
+    }
+
     // =========================================================================
     // Drawing
     // =========================================================================
@@ -1586,6 +1594,15 @@ class Komplexiti {
         const mathField = card.querySelector('math-field');
         const dot       = card.querySelector('.expr-color-dot');
         const removeBtn = card.querySelector('.expr-remove-btn');
+        const metaBadge = card.querySelector('.shape-info-title');
+
+        // Cycle root display format on badge click
+        metaBadge.addEventListener('click', () => {
+            if (c.type !== 'equation') return;
+            const fmts = ['cartesian', 'exponential', 'trig'];
+            c.cardRootFmt = fmts[(fmts.indexOf(c.cardRootFmt || 'cartesian') + 1) % fmts.length];
+            this.updateCardMetadata(c);
+        });
 
         mathField.addEventListener('input', () => {
             c.latex = mathField.value;
@@ -3013,24 +3030,56 @@ class Komplexiti {
 
         if (c.type === 'equation' && c.roots?.length) {
             container.classList.add('is-equation');
-            badge.textContent     = 'Equation';
+            const fmt = c.cardRootFmt || 'cartesian';
+            const fmtLabels = { cartesian: 'a+bi', exponential: 're^i\u03b8', trig: 'trig' };
+            badge.textContent     = fmtLabels[fmt];
+            badge.title           = 'Click to change root format';
             valueEl.style.display = 'none';
             rootsEl.style.display = 'flex';
             rootsEl.innerHTML     = '';
             for (const [k, root] of c.roots.entries()) {
                 if (!isFinite(root.re) || !isFinite(root.im)) continue;
-                const mf    = document.createElement('math-field');
-                mf.className = 'asymptote-equation-field asymptote-equation-item-wide';
-                mf.setAttribute('read-only', 'true');
-                mf.setAttribute('default-mode', 'math');
-                mf.setAttribute('virtual-keyboard-mode', 'off');
-                mf.setAttribute('tabindex', '-1');
-                mf.setAttribute('color-scheme', 'dark');
-                mf.style.setProperty('color', '#E8F4FD', 'important');
-                mf.style.setProperty('--text-color', '#E8F4FD');
+                // Full-precision tooltip in current display format
+                const toSub   = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
                 const varName = c.equationVar || 'z';
-                mf.value = `${varName}_{${k + 1}}=${this.formatCartesianLatex(root.re, root.im)}`;
-                rootsEl.appendChild(mf);
+                const tooltip = `${varName}${toSub(k + 1)} = ${this.formatComplexPlain(root.re, root.im, fmt)}`;
+                const wrapper = document.createElement('div');
+                wrapper.title = tooltip;
+
+                const makeMF = (latex) => {
+                    const mf = document.createElement('math-field');
+                    mf.className = 'asymptote-equation-field asymptote-equation-item-wide';
+                    mf.setAttribute('read-only', 'true');
+                    mf.setAttribute('default-mode', 'math');
+                    mf.setAttribute('virtual-keyboard-mode', 'off');
+                    mf.setAttribute('tabindex', '-1');
+                    mf.setAttribute('color-scheme', 'dark');
+                    mf.style.setProperty('color', '#E8F4FD', 'important');
+                    mf.style.setProperty('--text-color', '#E8F4FD');
+                    mf.addEventListener('focus', () => mf.blur());
+                    mf.addEventListener('focusin', () => mf.blur());
+                    mf.value = latex;
+                    return mf;
+                };
+
+                if (fmt === 'trig') {
+                    const r = Math.hypot(root.re, root.im);
+                    if (r < 1e-10) {
+                        wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=0`));
+                    } else {
+                        const theta  = Math.atan2(root.im, root.re);
+                        const rLatex = this.niceRealLatex(r) ?? this.formatNumberShort(r);
+                        const thStr  = this.niceAngleLatex(theta) ?? this.formatNumberShort(theta);
+                        const rPart  = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
+                        const label  = `${varName}_{${k + 1}}`;
+                        wrapper.appendChild(makeMF(`${label}=${rPart}\\cos(${thStr})`));
+                        wrapper.appendChild(makeMF(`\\phantom{${label}=}+i${rPart}\\sin(${thStr})`));
+                    }
+                } else {
+                    wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=${this.formatComplexLatex(root.re, root.im, fmt)}`));
+                }
+
+                rootsEl.appendChild(wrapper);
             }
             container.classList.add('visible');
 
@@ -3158,8 +3207,8 @@ class Komplexiti {
     }
 
     formatCartesianLatex(re, im) {
-        const aStr = this.niceRealLatex(re)          ?? this.formatNumber(re);
-        const bAbs = this.niceRealLatex(Math.abs(im)) ?? this.formatNumber(Math.abs(im));
+        const aStr = this.niceRealLatex(re)          ?? this.formatNumberShort(re);
+        const bAbs = this.niceRealLatex(Math.abs(im)) ?? this.formatNumberShort(Math.abs(im));
         if (Math.abs(im) < 1e-10) return aStr;
         if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${bAbs}i` : `${bAbs}i`;
         const sign = im < -1e-10 ? '-' : '+';
@@ -3208,6 +3257,87 @@ class Komplexiti {
             }
         }
         return null;
+    }
+
+    niceAngleLatex(theta) {
+        if (!isFinite(theta)) return null;
+        if (Math.abs(theta) < 1e-9) return '0';
+        for (let d = 1; d <= 30; d++) {
+            const nd      = theta / Math.PI * d;
+            const rounded = Math.round(nd);
+            if (rounded === 0) continue;
+            if (Math.abs(nd - rounded) < 0.002) {
+                const g   = this._gcd(Math.abs(rounded), d);
+                const sn  = rounded / g;
+                const sd  = d / g;
+                const neg = sn < 0 ? '-' : '';
+                const absN = Math.abs(sn);
+                if (sd === 1) return absN === 1 ? `${neg}\\pi` : `${neg}${absN}\\pi`;
+                return absN === 1 ? `${neg}\\frac{\\pi}{${sd}}` : `${neg}\\frac{${absN}\\pi}{${sd}}`;
+            }
+        }
+        return null;
+    }
+
+    formatComplexLatex(re, im, fmt) {
+        const r     = Math.hypot(re, im);
+        const theta = Math.atan2(im, re);
+        switch (fmt) {
+            case 'exponential': {
+                if (r < 1e-10) return '0';
+                const rStr  = this.niceRealLatex(r)              ?? this.formatNumberShort(r);
+                const absθ  = Math.abs(theta);
+                const thStr = this.niceAngleLatex(absθ)          ?? this.formatNumberShort(absθ);
+                const sign  = theta < -1e-10 ? '-' : '';
+                const rPart = Math.abs(r - 1) < 1e-9 ? '' : rStr;
+                return `${rPart}e^{${sign}i${thStr}}`;
+            }
+            case 'trig': {
+                if (r < 1e-10) return '0';
+                const rStr  = this.niceRealLatex(r)              ?? this.formatNumberShort(r);
+                const thStr = this.niceAngleLatex(theta)         ?? this.formatNumberShort(theta);
+                const trig  = `\\cos(${thStr})+i\\sin(${thStr})`;
+                return Math.abs(r - 1) < 1e-9 ? trig : `${rStr}(${trig})`;
+            }
+            default:
+                return this.formatCartesianLatex(re, im);
+        }
+    }
+
+    // Strips HTML entities/tags from niceRealHTML / niceAngleHTML output to plain text.
+    deHtmlify(s) {
+        return String(s)
+            .replace(/&pi;/g, 'π').replace(/&radic;/g, '√').replace(/&thinsp;/g, '')
+            .replace(/<sup>([^<]*)<\/sup>/g, '^($1)').replace(/<[^>]+>/g, '');
+    }
+
+    formatComplexPlain(re, im, fmt) {
+        const r     = Math.hypot(re, im);
+        const theta = Math.atan2(im, re);
+        const rTxt  = this.deHtmlify(this.niceRealHTML(r)              ?? this.formatNumber(r));
+        const rPart = Math.abs(r - 1) < 1e-9 ? '' : rTxt;
+        switch (fmt) {
+            case 'exponential': {
+                if (r < 1e-10) return '0';
+                const absθ  = Math.abs(theta);
+                const thTxt = this.deHtmlify(this.niceAngleHTML(absθ)  ?? this.formatNumber(absθ));
+                const sign  = theta < -1e-10 ? '-' : '';
+                return `${rPart}e^(${sign}i·${thTxt})`;
+            }
+            case 'trig': {
+                if (r < 1e-10) return '0';
+                const thTxt = this.deHtmlify(this.niceAngleHTML(theta) ?? this.formatNumber(theta));
+                const trig  = `cos(${thTxt}) + i·sin(${thTxt})`;
+                return Math.abs(r - 1) < 1e-9 ? trig : `${rTxt}(${trig})`;
+            }
+            default: {
+                const aStr  = this.deHtmlify(this.niceRealHTML(re)              ?? this.formatNumber(re));
+                const bAbs  = this.deHtmlify(this.niceRealHTML(Math.abs(im))    ?? this.formatNumber(Math.abs(im)));
+                if (Math.abs(im) < 1e-10) return aStr;
+                if (Math.abs(re) < 1e-10) return `${im < 0 ? '-' : ''}${bAbs}i`;
+                return `${aStr}${im < -1e-10 ? ' - ' : ' + '}${bAbs}i`;
+            }
+        }
     }
 
     // Returns an HTML string if theta (radians) is a multiple of π/24, else null.
