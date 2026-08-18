@@ -59,8 +59,9 @@ class Komplexiti {
             }
         };
 
-        // ---- Pan inertia ----
+        // ---- Pan & Zoom inertia ----
         this.mousePanInertia = { active: false, velocityX: 0, velocityY: 0 };
+        this.wheelZoom       = { active: false, targetScaleRatio: 1.0, cx: 0, cy: 0 };
 
         // ---- Animation loop ----
         this.animationId   = null;
@@ -1173,6 +1174,7 @@ class Komplexiti {
 
     handlePointerStart(clientX, clientY) {
         this.stopMousePanInertia();
+        this.stopWheelZoom();
         const rect = this.canvas.getBoundingClientRect();
         const cx = clientX - rect.left;
         const cy = clientY - rect.top;
@@ -1235,19 +1237,61 @@ class Komplexiti {
     }
 
     // =========================================================================
-    // Wheel zoom (towards cursor)
+    // Wheel zoom (towards cursor) & Smooth zoom
     // =========================================================================
 
     handleWheel(e) {
         e.preventDefault();
-        const factor = e.deltaY > 0 ? 1.15 : (1 / 1.15);
-        const rect   = this.canvas.getBoundingClientRect();
-        const cx     = e.clientX - rect.left;
-        const cy     = e.clientY - rect.top;
-        this.zoomAtScreenPoint(factor, cx, cy);
+        const rect = this.canvas.getBoundingClientRect();
+        const cx   = e.clientX - rect.left;
+        const cy   = e.clientY - rect.top;
+
+        // Normalise wheel delta across different browsers and devices (mice, trackpads)
+        let delta = e.deltaY;
+        if (e.deltaMode === 1) delta *= 20;       // DOM_DELTA_LINE
+        else if (e.deltaMode === 2) delta *= 400; // DOM_DELTA_PAGE
+
+        // For a typical mouse wheel notch (~100px), factor is ~1.15 / (1/1.15)
+        const factor = Math.pow(1.15, Math.max(-3, Math.min(3, delta / 100)));
+        this.startSmoothZoom(factor, cx, cy);
     }
 
-    zoomAtScreenPoint(factor, cx, cy) {
+    startSmoothZoom(factor, cx, cy) {
+        if (!isFinite(factor) || factor <= 0) return;
+        const currentXRange = this.viewport.maxX - this.viewport.minX;
+
+        // If already actively zooming, chain onto current target
+        if (this.wheelZoom.active) {
+            this.wheelZoom.targetScaleRatio *= factor;
+        } else {
+            this.wheelZoom.active = true;
+            this.wheelZoom.targetScaleRatio = factor;
+        }
+        this.wheelZoom.cx = cx;
+        this.wheelZoom.cy = cy;
+
+        // Clamp target range to avoid over-zooming beyond boundaries
+        const projectedRange = currentXRange * this.wheelZoom.targetScaleRatio;
+        if (projectedRange < 0.0005) {
+            this.wheelZoom.targetScaleRatio = 0.0005 / currentXRange;
+        } else if (projectedRange > 1e9) {
+            this.wheelZoom.targetScaleRatio = 1e9 / currentXRange;
+        }
+
+        if (Math.abs(Math.log(this.wheelZoom.targetScaleRatio)) < 0.001) {
+            this.stopWheelZoom();
+            return;
+        }
+
+        this.ensureAnimationLoopRunning();
+    }
+
+    stopWheelZoom() {
+        this.wheelZoom.active = false;
+        this.wheelZoom.targetScaleRatio = 1.0;
+    }
+
+    zoomAtScreenPoint(factor, cx, cy, redraw = true) {
         const pivot  = this.screenToWorld(cx, cy);
         const xRange = (this.viewport.maxX - this.viewport.minX) * factor;
         const yRange = (this.viewport.maxY - this.viewport.minY) * factor;
@@ -1262,11 +1306,11 @@ class Komplexiti {
         this.viewport.scale   = this.viewport.width / xRange;
         this.viewport.centerX = (this.viewport.minX + this.viewport.maxX) / 2;
         this.viewport.centerY = (this.viewport.minY + this.viewport.maxY) / 2;
-        this.drawCanvas();
+        if (redraw) this.drawCanvas();
     }
 
-    zoomIn()  { this.zoomAtScreenPoint(1 / 1.2, this.viewport.width / 2, this.viewport.height / 2); }
-    zoomOut() { this.zoomAtScreenPoint(1.2,     this.viewport.width / 2, this.viewport.height / 2); }
+    zoomIn()  { this.startSmoothZoom(1 / 1.2, this.viewport.width / 2, this.viewport.height / 2); }
+    zoomOut() { this.startSmoothZoom(1.2,     this.viewport.width / 2, this.viewport.height / 2); }
 
     // =========================================================================
     // Keyboard
@@ -1327,6 +1371,7 @@ class Komplexiti {
         } else if (e.touches.length === 2) {
             this.input.mouse.down = false;
             this.stopMousePanInertia();
+            this.stopWheelZoom();
             const t1   = e.touches[0];
             const t2   = e.touches[1];
             const rect = this.canvas.getBoundingClientRect();
@@ -1421,12 +1466,16 @@ class Komplexiti {
             this.animationId = null;
         }
         this.stopMousePanInertia();
+        this.stopWheelZoom();
     }
 
     animationTick(timestamp) {
         this.animationId  = null;
         this.deltaTime    = Math.min(timestamp - this.lastFrameTime, 100);
         this.lastFrameTime = timestamp;
+
+        let needsRedraw = false;
+        let keepAnimating = false;
 
         if (this.mousePanInertia.active) {
             const worldDX = this.mousePanInertia.velocityX * this.deltaTime;
@@ -1440,11 +1489,39 @@ class Komplexiti {
                 const decay = Math.exp(-this.deltaTime / 180);
                 this.mousePanInertia.velocityX *= decay;
                 this.mousePanInertia.velocityY *= decay;
-                if (this.currentState === this.states.APP) this.drawCanvas();
-                this.animationId = requestAnimationFrame((t) => this.animationTick(t));
+                needsRedraw = true;
+                keepAnimating = true;
             } else {
                 this.stopMousePanInertia();
             }
+        }
+
+        if (this.wheelZoom.active) {
+            const currentLog = Math.log(this.wheelZoom.targetScaleRatio);
+            if (Math.abs(currentLog) < 0.001) {
+                if (Math.abs(this.wheelZoom.targetScaleRatio - 1.0) > 1e-6) {
+                    this.zoomAtScreenPoint(this.wheelZoom.targetScaleRatio, this.wheelZoom.cx, this.wheelZoom.cy, false);
+                    needsRedraw = true;
+                }
+                this.stopWheelZoom();
+            } else {
+                // Smooth exponential easing with ~90ms time constant
+                const fraction = 1 - Math.exp(-this.deltaTime / 90);
+                const applyLog = currentLog * fraction;
+                const stepFactor = Math.exp(applyLog);
+                this.zoomAtScreenPoint(stepFactor, this.wheelZoom.cx, this.wheelZoom.cy, false);
+                this.wheelZoom.targetScaleRatio = Math.exp(currentLog - applyLog);
+                needsRedraw = true;
+                keepAnimating = true;
+            }
+        }
+
+        if (needsRedraw && this.currentState === this.states.APP) {
+            this.drawCanvas();
+        }
+
+        if (keepAnimating) {
+            this.animationId = requestAnimationFrame((t) => this.animationTick(t));
         }
     }
 
@@ -2267,7 +2344,6 @@ class Komplexiti {
         const { minX, maxX, minY, maxY } = bounds;
         const principalMin = -Math.PI;
         const principalMax = Math.PI;
-        const steps = 1600;
         const delta = {
             x: fp.absCenter.re - fp.argOrigin.re,
             y: fp.absCenter.im - fp.argOrigin.im
@@ -2282,8 +2358,18 @@ class Komplexiti {
         const maxDistance = Math.max(...corners.map(c => Math.hypot(c.x - fp.absCenter.re, c.y - fp.absCenter.im))) + 1;
         const minPhase = Math.min(fp.offset, fp.offset + fp.scale * maxDistance);
         const maxPhase = Math.max(fp.offset, fp.offset + fp.scale * maxDistance);
-        const branchMin = Math.floor((minPhase - principalMax) / (2 * Math.PI)) - 1;
-        const branchMax = Math.ceil((maxPhase - principalMin) / (2 * Math.PI)) + 1;
+        let branchMin = Math.floor((minPhase - principalMax) / (2 * Math.PI)) - 1;
+        let branchMax = Math.ceil((maxPhase - principalMin) / (2 * Math.PI)) + 1;
+
+        // Cap maximum revolutions (branches) to preserve smooth zooming and avoid dense visual aliasing
+        const MAX_TURNS = 16;
+        branchMin = Math.max(branchMin, -MAX_TURNS);
+        branchMax = Math.min(branchMax, MAX_TURNS);
+        if (branchMax < branchMin) return [];
+
+        const totalBranches = branchMax - branchMin + 1;
+        const maxTotalSteps = 8000;
+        const steps = Math.max(120, Math.min(1600, Math.floor(maxTotalSteps / totalBranches)));
         const segments = [];
 
         for (let branch = branchMin; branch <= branchMax; branch++) {
@@ -2670,8 +2756,20 @@ class Komplexiti {
         if (fp.kind === 'spiral') {
             const bounds = this.getVisibleWorldBounds();
             const { minX, maxX, minY, maxY } = bounds;
-            const radiusLimit = Math.max(Math.abs(minX), Math.abs(maxX), Math.abs(minY), Math.abs(maxY), 1) + 2;
-            const stepCount = 4000;
+            const radiusLimit = Math.max(
+                Math.hypot(minX - fp.origin.re, minY - fp.origin.im),
+                Math.hypot(minX - fp.origin.re, maxY - fp.origin.im),
+                Math.hypot(maxX - fp.origin.re, minY - fp.origin.im),
+                Math.hypot(maxX - fp.origin.re, maxY - fp.origin.im),
+                1
+            ) + 2;
+
+            const MAX_TURNS = 16;
+            const maxAngle = MAX_TURNS * 2 * Math.PI;
+            const maxRFromTurns = Math.abs(fp.scale) > 1e-9 ? Math.abs((maxAngle - fp.offset) / fp.scale) : radiusLimit;
+            const effectiveRadiusLimit = Math.min(radiusLimit, Math.max(1, maxRFromTurns));
+            const totalTurns = Math.max(1, (Math.abs(fp.scale) * effectiveRadiusLimit) / (2 * Math.PI));
+            const stepCount = Math.max(200, Math.min(4000, Math.round(totalTurns * 200)));
             const segments = [];
             const sample = (t) => {
                 const r = t;
@@ -2683,8 +2781,8 @@ class Komplexiti {
             };
 
             for (let i = 1; i <= stepCount; i++) {
-                const t0 = (i - 1) * radiusLimit / stepCount;
-                const t1 = i * radiusLimit / stepCount;
+                const t0 = (i - 1) * effectiveRadiusLimit / stepCount;
+                const t1 = i * effectiveRadiusLimit / stepCount;
                 const p0 = sample(t0);
                 const p1 = sample(t1);
                 const clipped = this._clipSegmentToBounds(p0, p1, bounds);
