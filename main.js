@@ -622,7 +622,7 @@ class Komplexiti {
         document.addEventListener('click', (e) => {
             const dropdown = document.getElementById('add-dropdown');
             if (!dropdown || !dropdown.classList.contains('show')) return;
-            if (!dropdown.contains(e.target) && e.target.id !== 'add-dropdown-toggle') {
+            if (!dropdown.contains(e.target) && !e.target.closest('#add-dropdown-toggle')) {
                 dropdown.classList.remove('show');
             }
         });
@@ -686,8 +686,27 @@ class Komplexiti {
         const addExpressionBtn = document.getElementById('add-expression-btn');
         if (addExpressionBtn) addExpressionBtn.addEventListener('click', () => this.addExpression());
 
+        // Add dropdown toggle and items
         const addDropdownToggle = document.getElementById('add-dropdown-toggle');
         if (addDropdownToggle) addDropdownToggle.addEventListener('click', (e) => this.toggleAddDropdown(e));
+
+        const addDropdown = document.getElementById('add-dropdown');
+        if (addDropdown) {
+            addDropdown.addEventListener('click', (e) => {
+                const item = e.target.closest('[data-action], [data-demo-set]');
+                if (!item) return;
+                addDropdown.classList.remove('show');
+                const action = item.dataset.action;
+                const demoSet = item.dataset.demoSet;
+                if (action === 'blank') {
+                    this.addExpression();
+                } else if (action === 'clear-all') {
+                    this.clearAllExpressions();
+                } else if (demoSet) {
+                    this.loadDemoSet(demoSet);
+                }
+            });
+        }
 
         const resetAxesBtn = document.getElementById('reset-axes');
         if (resetAxesBtn) resetAxesBtn.addEventListener('click', () => this.resetAxes());
@@ -1364,9 +1383,14 @@ class Komplexiti {
     }
 
     handleKeyboard(e) {
-        // Close help modal on Escape
+        // Close dropdown or help modal on Escape
         if (e.key === 'Escape') {
             if (e.repeat) return;
+            const dropdown = document.getElementById('add-dropdown');
+            if (dropdown?.classList.contains('show')) {
+                dropdown.classList.remove('show');
+                return;
+            }
             if (this.shortcutsOverlay?.classList.contains('show')) {
                 this.hideHelpModal();
                 return;
@@ -3246,7 +3270,62 @@ class Komplexiti {
         this.animateViewportTo(0, 0, targetScale, 350);
     }
 
+    clearAllExpressions() {
+        this.expressions = [];
+        if (this.expressionsContainer) {
+            this.expressionsContainer.innerHTML = '';
+        }
+        this.addExpression({ skipFocus: true });
+        this.cascadeEvaluate(null);
+        this.saveExpressions();
+        if (this.currentState === this.states.APP) this.drawCanvas();
+    }
+
+    loadDemoSet(setName) {
+        const demoSets = {
+            'complex-numbers': [
+                'a=2-2i',
+                'b=-4e^{\\frac{\\pi}{3}i}',
+                'c=3\\left(\\cos\\left(\\frac{\\pi}{6}\\right)+i\\sin\\left(\\frac{\\pi}{6}\\right)\\right)',
+                'z=\\frac{a}{b}'
+            ]
+        };
+
+        const list = demoSets[setName];
+        if (!list) return;
+
+        this.expressions = [];
+        if (this.expressionsContainer) {
+            this.expressionsContainer.innerHTML = '';
+        }
+
+        for (const latex of list) {
+            this.addExpression({ skipFocus: true });
+            const expr = this.expressions[this.expressions.length - 1];
+            expr.latex = latex;
+            const card = document.querySelector(`.expr-card[data-const-id="${expr.id}"]`);
+            if (card) {
+                const mathField = card.querySelector('math-field');
+                if (mathField) {
+                    mathField.value = latex;
+                    mathField.dispatchEvent(new Event('input'));
+                }
+            }
+        }
+
+        // Add a blank tile at bottom
+        this.addExpression({ skipFocus: true });
+        this.cascadeEvaluate(null);
+        this.saveExpressions();
+        this.resetAxes();
+        if (this.currentState === this.states.APP) this.drawCanvas();
+    }
+
     toggleAddDropdown(e) {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
         const dropdown = document.getElementById('add-dropdown');
         if (!dropdown) return;
         const isOpen = dropdown.classList.contains('show');
@@ -3254,9 +3333,10 @@ class Komplexiti {
             dropdown.classList.remove('show');
             return;
         }
-        // Position below the toggle button
-        const btn = e.currentTarget;
-        const rect = btn.getBoundingClientRect();
+        // Position below the full split-button container and align to its left
+        const toggleBtn = e?.currentTarget || document.getElementById('add-dropdown-toggle');
+        const container = toggleBtn?.closest('.split-button-container') || toggleBtn;
+        const rect = container.getBoundingClientRect();
         dropdown.style.top  = (rect.bottom + 4) + 'px';
         dropdown.style.left = rect.left + 'px';
         dropdown.classList.add('show');
@@ -3886,5 +3966,5 @@ class Komplexiti {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    new Komplexiti();
+    window.app = new Komplexiti();
 });
