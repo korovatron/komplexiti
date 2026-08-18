@@ -993,9 +993,20 @@
             gap: 0;
         }
 
-        /* equation badge cycles format on click */
+        /* equation header: badge + format name inline, roots below */
+        .shape-info-container.is-equation {
+            flex-direction: row;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+        }
+
         .shape-info-container.is-equation .shape-info-title {
             cursor: pointer;
+        }
+
+        .shape-info-container.is-equation .expr-card-roots {
+            flex: 0 0 100%;
         }
 
         /* Read-only MathLive field for root values (same as Graphiti .asymptote-equation-field) */
@@ -1023,7 +1034,7 @@
         }
 
         .asymptote-equation-field::part(content) {
-            font-size: 18px !important;
+            font-size: var(--mf-font-size, 18px) !important;
             padding: 0 !important;
             overflow: hidden !important;
             user-select: none !important;

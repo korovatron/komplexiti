@@ -1669,7 +1669,8 @@ class Komplexiti {
 
         dot.addEventListener('click', () => {
             c.enabled = !c.enabled;
-            dot.style.opacity = c.enabled ? '1' : '0.3';
+            dot.style.opacity      = c.enabled ? '1' : '0.3';
+            mathField.style.opacity = c.enabled ? '1' : '0.4';
             this.updateCardMetadata(c);
             this.saveExpressions();
             if (this.currentState === this.states.APP) this.drawCanvas();
@@ -1734,6 +1735,7 @@ class Komplexiti {
         // Apply theme after DOM insertion so MathLive's connectedCallback fires first
         requestAnimationFrame(() => {
             this.applyMathFieldTheme(mathField);
+            if (!c.enabled) mathField.style.opacity = '0.4';
             if (c.latex) {
                 mathField.value = c.latex;
                 mathField.dispatchEvent(new Event('input'));
@@ -3022,6 +3024,7 @@ class Komplexiti {
         const hide = () => container.classList.remove('visible');
 
         if (!c.latex || !c.latex.trim()) { hide(); return; }
+        if (!c.enabled) { hide(); return; }
         if (c.hasParseError && c.re === null && c.im === null && !c.roots?.length && !c.locus) { hide(); return; }
 
         // Set badge colors from card color
@@ -3031,10 +3034,11 @@ class Komplexiti {
         if (c.type === 'equation' && c.roots?.length) {
             container.classList.add('is-equation');
             const fmt = c.cardRootFmt || 'cartesian';
-            const fmtLabels = { cartesian: 'a+bi', exponential: 're^i\u03b8', trig: 'trig' };
-            badge.textContent     = fmtLabels[fmt];
-            badge.title           = 'Click to change root format';
-            valueEl.style.display = 'none';
+            const fmtNames  = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
+            badge.textContent     = 'Root format (click to change)';
+            badge.title           = '';
+            valueEl.style.display = '';
+            valueEl.textContent   = fmtNames[fmt];
             rootsEl.style.display = 'flex';
             rootsEl.innerHTML     = '';
             for (const [k, root] of c.roots.entries()) {
@@ -3046,7 +3050,7 @@ class Komplexiti {
                 const wrapper = document.createElement('div');
                 wrapper.title = tooltip;
 
-                const makeMF = (latex) => {
+                const makeMF = (latex, fontSize = 18) => {
                     const mf = document.createElement('math-field');
                     mf.className = 'asymptote-equation-field asymptote-equation-item-wide';
                     mf.setAttribute('read-only', 'true');
@@ -3056,27 +3060,29 @@ class Komplexiti {
                     mf.setAttribute('color-scheme', 'dark');
                     mf.style.setProperty('color', '#E8F4FD', 'important');
                     mf.style.setProperty('--text-color', '#E8F4FD');
+                    mf.style.setProperty('--mf-font-size', `${fontSize}px`);
                     mf.addEventListener('focus', () => mf.blur());
                     mf.addEventListener('focusin', () => mf.blur());
                     mf.value = latex;
                     return mf;
                 };
+                const mfSize = fmt === 'exponential' ? 22 : 18;
 
                 if (fmt === 'trig') {
                     const r = Math.hypot(root.re, root.im);
                     if (r < 1e-10) {
-                        wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=0`));
+                        wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=0`, mfSize));
                     } else {
                         const theta  = Math.atan2(root.im, root.re);
                         const rLatex = this.niceRealLatex(r) ?? this.formatNumberShort(r);
                         const thStr  = this.niceAngleLatex(theta) ?? this.formatNumberShort(theta);
                         const rPart  = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
                         const label  = `${varName}_{${k + 1}}`;
-                        wrapper.appendChild(makeMF(`${label}=${rPart}\\cos(${thStr})`));
-                        wrapper.appendChild(makeMF(`\\phantom{${label}=}+i${rPart}\\sin(${thStr})`));
+                        wrapper.appendChild(makeMF(`${label}=${rPart}\\cos(${thStr})`, mfSize));
+                        wrapper.appendChild(makeMF(`\\phantom{${label}=}+i${rPart}\\sin(${thStr})`, mfSize));
                     }
                 } else {
-                    wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=${this.formatComplexLatex(root.re, root.im, fmt)}`));
+                    wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=${this.formatComplexLatex(root.re, root.im, fmt)}`, mfSize));
                 }
 
                 rootsEl.appendChild(wrapper);
