@@ -3337,20 +3337,31 @@ class Komplexiti {
 
             // General polynomial solver via symbolic differentiation
             const hExpr  = `(${lhs}) - (${rhs})`;
-            let coeffs = this._extractPolynomialCoeffs(hExpr, varName, scope);
 
-            // Fallback: rationalize to handle rational equations like 1+w^2 = (w-2)/w
+            // abs/arg/conj expressions are never polynomials; skip symbolic differentiation to avoid hangs
+            if (/\babs\(|\barg\(|\bconj\(/.test(hExpr)) {
+                const locus = this._buildLocus(lhs, rhs, varName, scope);
+                return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
+            }
+
+            let coeffs = this._extractPolynomialCoeffs(hExpr, varName, scope);
+            let fromRationalize = false;
+
+            // Discard Taylor series before trying rationalization: a degree-6 series for 1/(z+1)
+            // looks non-null but fails the approximation check, blocking the rational path.
+            if (coeffs && coeffs.length >= 2 && !this._matchesPolynomialApproximation(hExpr, coeffs, varName, scope)) {
+                coeffs = null;
+            }
+
+            // Rationalize to find exact roots of rational equations like 1/(z+1) = 1
             if (!coeffs || coeffs.length < 2) {
                 try {
                     const rat = math.rationalize(hExpr, {}, true);
                     if (rat?.numerator) {
                         coeffs = this._extractPolynomialCoeffs(rat.numerator.toString(), varName, scope);
+                        fromRationalize = coeffs != null;
                     }
-                } catch { /* not rationalizable, leave coeffs as-is */ }
-            }
-
-            if (coeffs && coeffs.length >= 2 && !this._matchesPolynomialApproximation(hExpr, coeffs, varName, scope)) {
-                coeffs = null;
+                } catch { /* not rationalizable */ }
             }
 
             if (!coeffs || coeffs.length < 2) {
