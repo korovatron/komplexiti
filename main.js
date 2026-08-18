@@ -3350,6 +3350,57 @@ class Komplexiti {
     }
 
     // Draw the shaded region for an inequality locus. Call before drawing the boundary curve.
+    // Stitch marching-squares segment pairs into continuous chains so dashes flow
+    // naturally across the whole curve rather than resetting at each short segment.
+    _stitchSegmentsToChains(segments) {
+        if (!segments?.length) return [];
+        const n = segments.length;
+        const used = new Uint8Array(n);
+        const key = p => `${p.x},${p.y}`;
+
+        // Map endpoint key → packed list of (segIdx<<1 | ptIdx)
+        const map = new Map();
+        for (let i = 0; i < n; i++) {
+            for (let pi = 0; pi < 2; pi++) {
+                const k = key(segments[i][pi]);
+                if (!map.has(k)) map.set(k, []);
+                map.get(k).push((i << 1) | pi);
+            }
+        }
+
+        const chains = [];
+        for (let start = 0; start < n; start++) {
+            if (used[start]) continue;
+            used[start] = 1;
+            const chain = [segments[start][0], segments[start][1]];
+
+            const extend = (getTail, addPt) => {
+                for (;;) {
+                    const nbrs = map.get(key(getTail()));
+                    let ok = false;
+                    if (nbrs) {
+                        for (const packed of nbrs) {
+                            const si = packed >> 1, pi = packed & 1;
+                            if (used[si]) continue;
+                            used[si] = 1;
+                            addPt(pi === 0 ? segments[si][1] : segments[si][0]);
+                            ok = true;
+                            break;
+                        }
+                    }
+                    if (!ok) break;
+                }
+            };
+
+            extend(() => chain[chain.length - 1], p => chain.push(p));
+            if (key(chain[0]) !== key(chain[chain.length - 1]))
+                extend(() => chain[0], p => chain.unshift(p));
+
+            chains.push(chain);
+        }
+        return chains;
+    }
+
     _drawLocusShade(c, ctx) {
         const ineq = c.locus.inequality;
         if (!ineq) return;
@@ -3383,21 +3434,29 @@ class Komplexiti {
             return;
         }
 
-        // Grid-based fill for all other loci
+        // Grid-based fill for all other loci - row-merge to reduce blockiness
         const sg = c._locusCache?.shadeGrid;
         if (!sg) return;
         ctx.save();
         ctx.fillStyle = c.color;
         ctx.globalAlpha = SHADE_ALPHA;
         for (let iy = 0; iy < sg.rows; iy++) {
-            for (let ix = 0; ix < sg.cols; ix++) {
-                if (!sg.grid[iy][ix]) continue;
-                const wx = sg.originX + ix * sg.dx;
-                const wy = sg.originY + iy * sg.dy;
-                // worldToScreen flips y (higher world-y → lower screen-y)
-                const topLeft  = this.worldToScreen(wx,          wy + sg.dy);
-                const botRight = this.worldToScreen(wx + sg.dx,  wy);
-                ctx.fillRect(topLeft.x, topLeft.y, botRight.x - topLeft.x, botRight.y - topLeft.y);
+            const wyBottom = sg.originY + iy * sg.dy;
+            const wyTop    = sg.originY + (iy + 1) * sg.dy;
+            const screenTop    = this.worldToScreen(0, wyTop).y;
+            const screenBottom = this.worldToScreen(0, wyBottom).y;
+            const cellH = Math.ceil(screenBottom - screenTop) + 1;  // +1 overlaps rows to eliminate gaps
+            let runStart = -1;
+            for (let ix = 0; ix <= sg.cols; ix++) {
+                const filled = ix < sg.cols && sg.grid[iy][ix];
+                if (filled && runStart < 0) {
+                    runStart = ix;
+                } else if (!filled && runStart >= 0) {
+                    const x0 = this.worldToScreen(sg.originX + runStart * sg.dx, 0).x;
+                    const x1 = this.worldToScreen(sg.originX + ix * sg.dx, 0).x;
+                    ctx.fillRect(x0, screenTop, x1 - x0, cellH);
+                    runStart = -1;
+                }
             }
         }
         ctx.restore();
@@ -4336,12 +4395,16 @@ class Komplexiti {
                 ctx.lineWidth = Math.max(2, strokeWidth - 0.5);
                 ctx.globalAlpha = 0.95;
                 if (c.locus.inequality?.strict) ctx.setLineDash([8, 5]);
+                const chains = this._stitchSegmentsToChains(segments);
                 ctx.beginPath();
-                for (const [start, end] of segments) {
-                    const p0 = this.worldToScreen(start.x, start.y);
-                    const p1 = this.worldToScreen(end.x, end.y);
+                for (const chain of chains) {
+                    if (!chain.length) continue;
+                    const p0 = this.worldToScreen(chain[0].x, chain[0].y);
                     ctx.moveTo(p0.x, p0.y);
-                    ctx.lineTo(p1.x, p1.y);
+                    for (let ci = 1; ci < chain.length; ci++) {
+                        const pt = this.worldToScreen(chain[ci].x, chain[ci].y);
+                        ctx.lineTo(pt.x, pt.y);
+                    }
                 }
                 ctx.stroke();
                 ctx.restore();
