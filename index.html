@@ -1124,6 +1124,146 @@
             }
         }
 
+        /* Help / Shortcuts modal overlay */
+        .shortcuts-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(4px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            pointer-events: auto;
+            animation: fadeInHelp 0.2s ease;
+        }
+
+        .shortcuts-overlay.show {
+            display: flex;
+        }
+
+        @keyframes fadeInHelp {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .shortcuts-content {
+            background: #1A2F42 !important;
+            border: 1px solid #2A3F5A !important;
+            border-radius: 12px;
+            padding: 26px 32px;
+            max-width: 620px;
+            width: calc(100% - 32px);
+            max-height: 84vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            margin: 0 16px;
+            color: #E8F4FD !important;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            box-sizing: border-box;
+        }
+
+        .shortcuts-content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .shortcuts-content::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .shortcuts-content::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        @media (max-width: 500px) {
+            .shortcuts-content {
+                padding: 18px 20px;
+                margin: 0 12px;
+                max-width: calc(100% - 24px);
+            }
+        }
+
+        .shortcuts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 0 0 18px 0;
+            gap: 12px;
+        }
+
+        .shortcuts-content h2 {
+            margin: 0;
+            color: #fff;
+            font-size: 22px;
+            text-align: left;
+            flex: 1;
+        }
+
+        .shortcuts-section {
+            margin-bottom: 20px;
+        }
+
+        .shortcuts-section h3 {
+            color: #4A90E2;
+            font-size: 15px;
+            margin: 0 0 8px 0;
+            font-weight: 600;
+        }
+
+        .shortcut-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 7px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 14px;
+            gap: 12px;
+        }
+
+        .shortcut-item:last-child {
+            border-bottom: none;
+        }
+
+        .shortcut-description {
+            color: #d0d8e2;
+            font-size: 13.5px;
+            line-height: 1.4;
+        }
+
+        .shortcut-keys {
+            display: flex;
+            gap: 4px;
+            flex-shrink: 0;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .shortcuts-content kbd {
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-family: monospace;
+            font-size: 12.5px;
+            color: #fff;
+            white-space: nowrap;
+        }
+
+        .shortcuts-close-hint {
+            margin-top: 18px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            text-align: center;
+            color: #8fa0b5;
+            font-size: 12.5px;
+        }
+
     </style>
 </head>
 <body>
@@ -1222,7 +1362,7 @@
 
                 <!-- Bottom controls -->
                 <div class="panel-section" style="margin-top: 0;">
-                    <div class="panel-control-row" style="grid-template-columns: 1fr 1fr 1fr;">
+                    <div class="panel-control-row" style="grid-template-columns: 1fr 1fr 1fr; margin-bottom: 8px;">
 
                         <!-- Col 1: home + keyboard paired -->
                         <div style="display: flex; gap: 4px;">
@@ -1256,7 +1396,7 @@
                         </button>
 
                         <!-- Col 3: theme toggle -->
-                        <button id="theme-toggle" class="panel-btn" title="Toggle theme">
+                        <button id="theme-toggle" class="panel-btn" title="Toggle theme" aria-label="Toggle theme">
                             <svg id="light-icon" width="24" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.3;">
                                 <circle cx="12" cy="12" r="5"></circle>
                                 <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -1274,6 +1414,118 @@
                             </svg>
                         </button>
 
+                    </div>
+
+                    <!-- Row 2: Help button -->
+                    <div class="panel-control-row" style="grid-template-columns: 1fr;">
+                        <button id="help-button" class="panel-btn" title="How to Use" aria-label="How to Use" style="gap: 8px;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                            </svg>
+                            <span>How to Use Komplexiti</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Help / Shortcuts overlay modal -->
+            <div id="shortcuts-overlay" class="shortcuts-overlay" aria-modal="true" role="dialog" aria-label="How to use Komplexiti">
+                <div class="shortcuts-content">
+                    <div class="shortcuts-header">
+                        <h2>How to use Komplexiti</h2>
+                        <button id="shortcuts-close-btn" class="info-panel-close-btn" title="Close" aria-label="Close help">&times;</button>
+                    </div>
+
+                    <!-- Complex Numbers & Values -->
+                    <div class="shortcuts-section">
+                        <h3>Complex Numbers &amp; Constants</h3>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Cartesian form:</strong> <kbd>a = 1 + 2i</kbd> or <kbd>z = 3 - 4i</kbd></span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Modulus-argument:</strong> <kbd>z = 2*e^(i*pi/3)</kbd> or <kbd>2(cos(pi/4) + i*sin(pi/4))</kbd></span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Functions &amp; Operations:</strong> <kbd>abs(z)</kbd>, <kbd>arg(z)</kbd>, <kbd>conj(z)</kbd>, <kbd>re(z)</kbd>, <kbd>im(z)</kbd></span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Dynamic vectors:</strong> Define variables (e.g. <kbd>w = a + b</kbd>, <kbd>z = a*b</kbd>, <kbd>z = a/b</kbd>)</span>
+                        </div>
+                    </div>
+
+                    <!-- Polynomial Equations -->
+                    <div class="shortcuts-section">
+                        <h3>Polynomial Equations &amp; Roots</h3>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Roots of unity / powers:</strong> <kbd>z^3 = 1</kbd>, <kbd>z^4 = -16</kbd>, <kbd>z^5 = 1 + i</kbd></span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Polynomials:</strong> <kbd>z^2 + 2z + 5 = 0</kbd>, <kbd>z^3 - 3z + 2 = 0</kbd></span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Display format:</strong> Click the format badge below an equation to cycle Cartesian &harr; Mod-Arg &harr; Exponential</span>
+                        </div>
+                    </div>
+
+                    <!-- Loci -->
+                    <div class="shortcuts-section">
+                        <h3>Loci in the Complex Plane</h3>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Circle:</strong> <kbd>|z - (1+i)| = 2</kbd> or <kbd>abs(z - a) = 3</kbd></span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Perpendicular bisector:</strong> <kbd>|z - 1| = |z - i|</kbd> or <kbd>abs(z - a) = abs(z - b)</kbd></span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Half-line (ray):</strong> <kbd>arg(z - (1+i)) = pi/4</kbd></span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Cartesian lines:</strong> <kbd>re(z) = 2</kbd>, <kbd>im(z) = -1</kbd></span>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Spirals:</strong> <kbd>arg(z) = |z|</kbd> or <kbd>1/2*arg(z+i) = |z-1|</kbd></span>
+                        </div>
+                    </div>
+
+                    <!-- Navigation Controls -->
+                    <div class="shortcuts-section">
+                        <h3>Navigation &amp; Controls</h3>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description">Pan diagram</span>
+                            <div class="shortcut-keys">
+                                Drag with mouse/finger or <kbd>&larr;</kbd> <kbd>&rarr;</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd>
+                            </div>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description">Zoom</span>
+                            <div class="shortcut-keys">
+                                Mouse wheel, pinch, or <kbd>+</kbd> <kbd>-</kbd>
+                            </div>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description">Reset view</span>
+                            <div class="shortcut-keys">
+                                Click <kbd>RESET AXES</kbd> button
+                            </div>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description">Display mode</span>
+                            <div class="shortcut-keys">
+                                Toggle vector arrows vs point dots
+                            </div>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description">Label size &amp; theme</span>
+                            <div class="shortcut-keys">
+                                Cycle size <kbd>A</kbd> / Toggle light &amp; dark mode
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="shortcuts-close-hint">
+                        Press <kbd>Esc</kbd> or click outside to close
                     </div>
                 </div>
             </div>

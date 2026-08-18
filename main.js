@@ -516,6 +516,9 @@ class Komplexiti {
         this.titleScreen        = document.getElementById('title-screen');
         this.launchBtn          = document.getElementById('title-launch-button');
         this.returnBtn          = document.getElementById('return-to-title');
+        this.helpBtn            = document.getElementById('help-button');
+        this.shortcutsOverlay   = document.getElementById('shortcuts-overlay');
+        this.shortcutsCloseBtn  = document.getElementById('shortcuts-close-btn');
         this.appContainer       = document.getElementById('app-container');
         this.expressionsContainer = document.getElementById('expressions-container');
     }
@@ -629,6 +632,21 @@ class Komplexiti {
         if (themeToggle) themeToggle.addEventListener('click', () => this.toggleTheme());
         const sizeModeToggle = document.getElementById('size-mode-toggle');
         if (sizeModeToggle) sizeModeToggle.addEventListener('click', () => this.toggleSizeMode());
+
+        // Help modal button and close triggers
+        if (this.helpBtn) {
+            this.helpBtn.addEventListener('click', () => this.showHelpModal());
+        }
+        if (this.shortcutsCloseBtn) {
+            this.shortcutsCloseBtn.addEventListener('click', () => this.hideHelpModal());
+        }
+        if (this.shortcutsOverlay) {
+            this.shortcutsOverlay.addEventListener('click', (e) => {
+                if (e.target === this.shortcutsOverlay) {
+                    this.hideHelpModal();
+                }
+            });
+        }
 
         // Virtual keyboard toggle button
         const virtualKeyboardToggle = document.getElementById('virtual-keyboard-toggle');
@@ -771,6 +789,7 @@ class Komplexiti {
     returnToTitle() {
         this.currentState = this.states.TITLE;
         this.stopAnimationLoop();
+        this.hideHelpModal();
 
         this.closePanel();
 
@@ -1345,7 +1364,34 @@ class Komplexiti {
     }
 
     handleKeyboard(e) {
-        // Suppress all key handling while a text / math input is focused
+        // Close help modal on Escape
+        if (e.key === 'Escape') {
+            if (e.repeat) return;
+            if (this.shortcutsOverlay?.classList.contains('show')) {
+                this.hideHelpModal();
+                return;
+            }
+            this.returnToTitle();
+            return;
+        }
+
+        // Open help modal on ? or / when no input is active
+        if ((e.key === '?' || e.key === '/') && !this.shortcutsOverlay?.classList.contains('show')) {
+            const active = document.activeElement;
+            const isEditing = active && (
+                active.tagName === 'INPUT' ||
+                active.tagName === 'TEXTAREA' ||
+                active.isContentEditable ||
+                active.tagName === 'MATH-FIELD'
+            );
+            if (!isEditing && this.currentState === this.states.APP) {
+                e.preventDefault();
+                this.showHelpModal();
+                return;
+            }
+        }
+
+        // Suppress other key handling while a text / math input is focused
         const active = document.activeElement;
         if (active && (
             active.tagName === 'INPUT' ||
@@ -1354,11 +1400,6 @@ class Komplexiti {
             active.tagName === 'MATH-FIELD'
         )) return;
 
-        if (e.key === 'Escape') {
-            if (e.repeat) return;
-            this.returnToTitle();
-            return;
-        }
         if (e.key === ' ' && this.currentState === this.states.TITLE) {
             e.preventDefault();
             this.launchApp();
@@ -1651,6 +1692,20 @@ class Komplexiti {
         if (keepAnimating) {
             this.animationId = requestAnimationFrame((t) => this.animationTick(t));
         }
+    }
+
+    // =========================================================================
+    // Help modal
+    // =========================================================================
+
+    showHelpModal() {
+        if (!this.shortcutsOverlay) return;
+        this.shortcutsOverlay.classList.add('show');
+    }
+
+    hideHelpModal() {
+        if (!this.shortcutsOverlay) return;
+        this.shortcutsOverlay.classList.remove('show');
     }
 
     // =========================================================================
