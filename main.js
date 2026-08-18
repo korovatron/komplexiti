@@ -3444,9 +3444,11 @@ class Komplexiti {
         for (let iy = 0; iy < sg.rows; iy++) {
             const wyBottom = sg.originY + iy * sg.dy;
             const wyTop    = sg.originY + (iy + 1) * sg.dy;
-            const screenTop    = this.worldToScreen(0, wyTop).y;
-            const screenBottom = this.worldToScreen(0, wyBottom).y;
-            const cellH = Math.ceil(screenBottom - screenTop) + 1;  // +1 overlaps rows to eliminate gaps
+            // Round to integer pixel boundaries so adjacent rows share an exact edge with no overlap or gap
+            const screenTop    = Math.round(this.worldToScreen(0, wyTop).y);
+            const screenBottom = Math.round(this.worldToScreen(0, wyBottom).y);
+            const cellH = screenBottom - screenTop;
+            if (cellH <= 0) continue;
             let runStart = -1;
             for (let ix = 0; ix <= sg.cols; ix++) {
                 const filled = ix < sg.cols && sg.grid[iy][ix];
