@@ -1895,7 +1895,15 @@ class Komplexiti {
         e = e.replace(/([a-zA-Z0-9])\\(sqrt|sin|cos|tan|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan|arcsinh|arccosh|arctanh)\b/g, '$1*\\$2');
         for (let p = 0; p < 4; p++) {
             e = e.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '(($1)/($2))');
+            // also handle \frac12 style (no braces, single-char args)
+            e = e.replace(/\\frac\s*([^\s\\{])([^\s\\{])/g, '(($1)/($2))');
         }
+        // Collapse purely-numeric ((a)/(b)) fractions to decimal literals so coefficient matchers
+        // always receive a plain number (e.g. 1.5) rather than an expression string.
+        e = e.replace(/\(\(([+-]?\d+\.?\d*(?:e[+-]?\d+)?)\)\/\(([+-]?\d+\.?\d*(?:e[+-]?\d+)?)\)\)/g, (_, n, d) => {
+            const val = Number(n) / Number(d);
+            return isFinite(val) ? String(val) : _;
+        });
         for (let p = 0; p < 3; p++) {
             e = e.replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt($1)');
         }
@@ -2075,7 +2083,238 @@ class Komplexiti {
         }
     }
 
+    _matchAffineUnaryExpr(expr, fnName, varName, scope) {
+        const normalized = expr.replace(/\s+/g, '');
+        const needle = `${fnName}(`;
+        const start = normalized.indexOf(needle);
+        if (start < 0) return null;
+
+        const openIndex = start + fnName.length;
+        let depth = 0;
+        let closeIndex = -1;
+        for (let i = openIndex; i < normalized.length; i++) {
+            const ch = normalized[i];
+            if (ch === '(') depth++;
+            else if (ch === ')') {
+                depth--;
+                if (depth === 0) {
+                    closeIndex = i;
+                    break;
+                }
+            }
+        }
+        if (closeIndex < 0) return null;
+
+        const prefix = normalized.slice(0, start);
+        const inner = normalized.slice(openIndex + 1, closeIndex);
+        const suffix = normalized.slice(closeIndex + 1);
+        if (!inner) return null;
+        if (suffix && suffix[0] !== '+' && suffix[0] !== '-') return null;
+
+        let scale = 1;
+        if (prefix) {
+            const coeffExpr = prefix.endsWith('*') ? prefix.slice(0, -1) : prefix;
+            if (!coeffExpr) return null;
+            const value = this._evaluateRealExpr(coeffExpr, scope);
+            if (value === null) return null;
+            scale = value;
+        }
+        if (!isFinite(scale) || Math.abs(scale) < 1e-12) return null;
+
+        let offset = 0;
+        if (suffix) {
+            const value = this._evaluateRealExpr(suffix, scope);
+            if (value === null) return null;
+            offset = value;
+        }
+
+        const linear = this._parseLinearVarOffset(inner, varName, scope);
+        if (!linear) return null;
+
+        return {
+            scale,
+            offset,
+            innerExpr: inner,
+            point: { re: -linear.offset.re, im: -linear.offset.im }
+        };
+    }
+
+    _matchAffineAbsExpr(expr, varName, scope) {
+        const matched = this._matchAffineUnaryExpr(expr, 'abs', varName, scope);
+        if (!matched) return null;
+        return {
+            scale: matched.scale,
+            offset: matched.offset,
+            innerExpr: matched.innerExpr,
+            center: matched.point
+        };
+    }
+
+    _matchAffineArgExpr(expr, varName, scope) {
+        const matched = this._matchAffineUnaryExpr(expr, 'arg', varName, scope);
+        if (!matched) return null;
+        return {
+            scale: matched.scale,
+            offset: matched.offset,
+            innerExpr: matched.innerExpr,
+            origin: matched.point
+        };
+    }
+
+    _tryBuildShiftedSpiral(argInfo, otherExpr, varName, scope) {
+        const absInfo = this._matchAffineAbsExpr(otherExpr, varName, scope);
+        if (!absInfo) return null;
+        if (!isFinite(absInfo.scale) || Math.abs(absInfo.scale) < 1e-9) return null;
+
+        return {
+            kind: 'spiral-shifted',
+            argOrigin: argInfo.origin,
+            absCenter: absInfo.center,
+            scale: absInfo.scale,
+            offset: absInfo.offset
+        };
+    }
+
+    _normaliseAffineAbsInfo(absInfo, scale, offset) {
+        if (!absInfo || !isFinite(scale) || Math.abs(scale) < 1e-9) return null;
+        return {
+            scale: absInfo.scale / scale,
+            offset: (absInfo.offset - offset) / scale,
+            innerExpr: absInfo.innerExpr,
+            center: absInfo.center
+        };
+    }
+
+    _formatCanonicalReal(value) {
+        if (!isFinite(value)) return null;
+        if (Math.abs(value) < 1e-12) return '0';
+        return `${Number(value.toPrecision(12))}`;
+    }
+
+    _buildCanonicalAffineAbsExpr(absInfo) {
+        if (!absInfo?.innerExpr) return null;
+        const scale = this._formatCanonicalReal(absInfo.scale);
+        const offset = this._formatCanonicalReal(absInfo.offset);
+        if (scale === null || offset === null) return null;
+        if (Math.abs(absInfo.scale) < 1e-12) return null;
+        const scalePart = Math.abs(absInfo.scale - 1) < 1e-12
+            ? `abs(${absInfo.innerExpr})`
+            : `(${scale})*abs(${absInfo.innerExpr})`;
+        if (Math.abs(absInfo.offset) < 1e-12) return scalePart;
+        return absInfo.offset > 0 ? `${scalePart}+(${offset})` : `${scalePart}-(${this._formatCanonicalReal(Math.abs(absInfo.offset))})`;
+    }
+
+    _canonicaliseAffineArgEquation(lhs, rhs, varName, scope) {
+        const pairs = [
+            { argExpr: lhs, otherExpr: rhs, argOnLeft: true },
+            { argExpr: rhs, otherExpr: lhs, argOnLeft: false }
+        ];
+        for (const { argExpr, otherExpr, argOnLeft } of pairs) {
+            const argInfo = this._matchAffineArgExpr(argExpr, varName, scope);
+            if (!argInfo || Math.abs(argInfo.scale) < 1e-9 || !argInfo.innerExpr) continue;
+
+            const normalizedOtherExpr = (Math.abs(argInfo.scale - 1) < 1e-9 && Math.abs(argInfo.offset) < 1e-9)
+                ? otherExpr
+                : `(((${otherExpr}))-(${argInfo.offset}))/(${argInfo.scale})`;
+            const otherAbsInfo = this._matchAffineAbsExpr(otherExpr, varName, scope);
+            const normalizedAbsInfo = this._normaliseAffineAbsInfo(otherAbsInfo, argInfo.scale, argInfo.offset);
+            const canonicalAbsExpr = this._buildCanonicalAffineAbsExpr(normalizedAbsInfo);
+            return {
+                lhs: `arg(${argInfo.innerExpr})`,
+                rhs: canonicalAbsExpr ?? normalizedOtherExpr,
+                argInfo: {
+                    ...argInfo,
+                    scale: 1,
+                    offset: 0
+                },
+                absInfo: normalizedAbsInfo,
+                argOnLeft
+            };
+        }
+        return null;
+    }
+
+    _traceShiftedSpiralSegments(fp, bounds) {
+        const { minX, maxX, minY, maxY } = bounds;
+        const principalMin = -Math.PI;
+        const principalMax = Math.PI;
+        const steps = 1600;
+        const delta = {
+            x: fp.absCenter.re - fp.argOrigin.re,
+            y: fp.absCenter.im - fp.argOrigin.im
+        };
+        const delta2 = delta.x * delta.x + delta.y * delta.y;
+        const corners = [
+            { x: minX, y: minY },
+            { x: minX, y: maxY },
+            { x: maxX, y: minY },
+            { x: maxX, y: maxY }
+        ];
+        const maxDistance = Math.max(...corners.map(c => Math.hypot(c.x - fp.absCenter.re, c.y - fp.absCenter.im))) + 1;
+        const minPhase = Math.min(fp.offset, fp.offset + fp.scale * maxDistance);
+        const maxPhase = Math.max(fp.offset, fp.offset + fp.scale * maxDistance);
+        const branchMin = Math.floor((minPhase - principalMax) / (2 * Math.PI)) - 1;
+        const branchMax = Math.ceil((maxPhase - principalMin) / (2 * Math.PI)) + 1;
+        const segments = [];
+
+        for (let branch = branchMin; branch <= branchMax; branch++) {
+            const branchPoints = [[], []];
+            for (let i = 0; i <= steps; i++) {
+                const alpha = principalMin + (principalMax - principalMin) * i / steps;
+                const requiredDistance = (alpha + 2 * Math.PI * branch - fp.offset) / fp.scale;
+                if (!isFinite(requiredDistance) || requiredDistance < 0) {
+                    branchPoints[0].push(null);
+                    branchPoints[1].push(null);
+                    continue;
+                }
+
+                const projection = delta.x * Math.cos(alpha) + delta.y * Math.sin(alpha);
+                const disc = projection * projection - delta2 + requiredDistance * requiredDistance;
+                if (disc < -1e-9) {
+                    branchPoints[0].push(null);
+                    branchPoints[1].push(null);
+                    continue;
+                }
+
+                const root = Math.sqrt(Math.max(0, disc));
+                const rayDistances = [projection - root, projection + root];
+                for (let rootIndex = 0; rootIndex < branchPoints.length; rootIndex++) {
+                    const rayDistance = rayDistances[rootIndex];
+                    if (!isFinite(rayDistance) || rayDistance < -1e-9) {
+                        branchPoints[rootIndex].push(null);
+                        continue;
+                    }
+                    const pt = {
+                        x: fp.argOrigin.re + rayDistance * Math.cos(alpha),
+                        y: fp.argOrigin.im + rayDistance * Math.sin(alpha)
+                    };
+                    if (pt.x >= minX - 1e-9 && pt.x <= maxX + 1e-9 && pt.y >= minY - 1e-9 && pt.y <= maxY + 1e-9) {
+                        branchPoints[rootIndex].push(pt);
+                    } else {
+                        branchPoints[rootIndex].push(null);
+                    }
+                }
+            }
+
+            for (const points of branchPoints) {
+                for (let i = 1; i < points.length; i++) {
+                    const prev = points[i - 1];
+                    const curr = points[i];
+                    if (!prev || !curr) continue;
+                    segments.push([prev, curr]);
+                }
+            }
+        }
+
+        return segments;
+    }
+
     _tryBuildFastLocus(lhs, rhs, varName, scope) {
+        const canonical = this._canonicaliseAffineArgEquation(lhs, rhs, varName, scope);
+        if (canonical) {
+            lhs = canonical.lhs;
+            rhs = canonical.rhs;
+        }
         const circleSides = [
             { absExpr: lhs, otherExpr: rhs },
             { absExpr: rhs, otherExpr: lhs }
@@ -2162,29 +2401,115 @@ class Komplexiti {
             { argExpr: rhs, otherExpr: lhs }
         ];
         for (const { argExpr, otherExpr } of argPairs) {
-            const inner = this._matchFunctionTerm(argExpr, 'arg', varName);
-            if (!inner) continue;
-            const linear = this._parseLinearVarOffset(inner, varName, scope);
-            if (!linear) continue;
-            const theta = this._evaluateRealExpr(otherExpr, scope);
-            if (theta === null) continue;
-            return {
-                lhs,
-                rhs,
-                angular: true,
-                scalar: true,
-                fastPath: {
-                    kind: 'ray',
-                    origin: { re: -linear.offset.re, im: -linear.offset.im },
-                    angle: theta
+            const argInfo = this._matchAffineArgExpr(argExpr, varName, scope);
+            if (!argInfo || Math.abs(argInfo.scale) < 1e-9) continue;
+            const normalizedOtherExpr = otherExpr;
+            const otherAbsInfo = this._matchAffineAbsExpr(otherExpr, varName, scope);
+            const normalizedAbsInfo = otherAbsInfo;
+            const theta = this._evaluateRealExpr(normalizedOtherExpr, scope);
+            if (theta !== null) {
+                return {
+                    lhs,
+                    rhs,
+                    angular: true,
+                    scalar: true,
+                    fastPath: {
+                        kind: 'ray',
+                        origin: argInfo.origin,
+                        angle: theta
+                    }
+                };
+            }
+
+            const spiral = normalizedAbsInfo ?? this._matchAffineAbsExpr(normalizedOtherExpr, varName, scope);
+            if (spiral) {
+                const sameCenter = Math.hypot(
+                    argInfo.origin.re - spiral.center.re,
+                    argInfo.origin.im - spiral.center.im
+                ) < 1e-9;
+                if (sameCenter) {
+                    return {
+                        lhs,
+                        rhs,
+                        angular: true,
+                        scalar: true,
+                        fastPath: {
+                            kind: 'spiral',
+                            scale: spiral.scale,
+                            offset: spiral.offset,
+                            origin: argInfo.origin
+                        }
+                    };
                 }
-            };
+            }
+
+            const shiftedSpiral = spiral
+                ? {
+                    kind: 'spiral-shifted',
+                    argOrigin: argInfo.origin,
+                    absCenter: spiral.center,
+                    scale: spiral.scale,
+                    offset: spiral.offset
+                }
+                : this._tryBuildShiftedSpiral(argInfo, normalizedOtherExpr, varName, scope);
+            if (shiftedSpiral) {
+                return {
+                    lhs,
+                    rhs,
+                    angular: true,
+                    scalar: true,
+                    fastPath: shiftedSpiral
+                };
+            }
         }
 
         return null;
     }
 
     _buildLocus(lhs, rhs, varName, scope) {
+        const canonical = this._canonicaliseAffineArgEquation(lhs, rhs, varName, scope);
+        if (canonical?.absInfo) {
+            const { argInfo, absInfo } = canonical;
+            const sameCenter = Math.hypot(
+                argInfo.origin.re - absInfo.center.re,
+                argInfo.origin.im - absInfo.center.im
+            ) < 1e-9;
+            const theta = this._evaluateRealExpr(canonical.rhs, scope);
+            if (theta !== null) {
+                return {
+                    lhs: canonical.lhs, rhs: canonical.rhs,
+                    angular: true, scalar: true,
+                    fastPath: { kind: 'ray', origin: argInfo.origin, angle: theta }
+                };
+            }
+            if (sameCenter) {
+                return {
+                    lhs: canonical.lhs, rhs: canonical.rhs,
+                    angular: true, scalar: true,
+                    fastPath: {
+                        kind: 'spiral',
+                        scale: absInfo.scale,
+                        offset: absInfo.offset,
+                        origin: argInfo.origin
+                    }
+                };
+            }
+            return {
+                lhs: canonical.lhs, rhs: canonical.rhs,
+                angular: true, scalar: true,
+                fastPath: {
+                    kind: 'spiral-shifted',
+                    argOrigin: argInfo.origin,
+                    absCenter: absInfo.center,
+                    scale: absInfo.scale,
+                    offset: absInfo.offset
+                }
+            };
+        }
+        if (canonical) {
+            lhs = canonical.lhs;
+            rhs = canonical.rhs;
+        }
         const fastPath = this._tryBuildFastLocus(lhs, rhs, varName, scope);
         if (fastPath) return fastPath;
 
@@ -2241,6 +2566,44 @@ class Komplexiti {
         return [hits[0], hits[hits.length - 1]];
     }
 
+    _clipSegmentToBounds(p0, p1, bounds) {
+        const { minX, maxX, minY, maxY } = bounds;
+        let t0 = 0;
+        let t1 = 1;
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+        const p = [
+            -dx, dx,
+            -dy, dy
+        ];
+        const q = [
+            p0.x - minX,
+            maxX - p0.x,
+            p0.y - minY,
+            maxY - p0.y
+        ];
+
+        for (let i = 0; i < 4; i++) {
+            if (p[i] === 0) {
+                if (q[i] < 0) return [];
+                continue;
+            }
+            const t = q[i] / p[i];
+            if (p[i] < 0) {
+                if (t > t1) return [];
+                if (t > t0) t0 = t;
+            } else {
+                if (t < t0) return [];
+                if (t < t1) t1 = t;
+            }
+        }
+
+        if (t1 < t0) return [];
+        const a = { x: p0.x + t0 * dx, y: p0.y + t0 * dy };
+        const b = { x: p0.x + t1 * dx, y: p0.y + t1 * dy };
+        return [a, b];
+    }
+
     _traceFastLocusSegments(locus) {
         const fp = locus?.fastPath;
         if (!fp) return null;
@@ -2275,6 +2638,39 @@ class Komplexiti {
             return [[{ x: fp.origin.re, y: fp.origin.im }, { x: end.x, y: end.y }]];
         }
 
+        if (fp.kind === 'spiral') {
+            const bounds = this.getVisibleWorldBounds();
+            const { minX, maxX, minY, maxY } = bounds;
+            const radiusLimit = Math.max(Math.abs(minX), Math.abs(maxX), Math.abs(minY), Math.abs(maxY), 1) + 2;
+            const stepCount = 4000;
+            const segments = [];
+            const sample = (t) => {
+                const r = t;
+                const theta = fp.scale * r + fp.offset;
+                return {
+                    x: fp.origin.re + r * Math.cos(theta),
+                    y: fp.origin.im + r * Math.sin(theta)
+                };
+            };
+
+            for (let i = 1; i <= stepCount; i++) {
+                const t0 = (i - 1) * radiusLimit / stepCount;
+                const t1 = i * radiusLimit / stepCount;
+                const p0 = sample(t0);
+                const p1 = sample(t1);
+                const clipped = this._clipSegmentToBounds(p0, p1, bounds);
+                if (clipped.length === 2) {
+                    segments.push([clipped[0], clipped[1]]);
+                }
+            }
+
+            return segments;
+        }
+
+        if (fp.kind === 'spiral-shifted') {
+            return this._traceShiftedSpiralSegments(fp, this.getVisibleWorldBounds());
+        }
+
         return null;
     }
 
@@ -2285,8 +2681,8 @@ class Komplexiti {
         const spanY = maxY - minY;
         if (!(spanX > 0) || !(spanY > 0)) return [];
 
-        const cols = Math.max(48, Math.min(140, Math.round(this.canvas.width / 14)));
-        const rows = Math.max(48, Math.min(140, Math.round(this.canvas.height / 14)));
+        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width / 6)));
+        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6)));
         const dx = spanX / cols;
         const dy = spanY / rows;
         const eps = Math.max(spanX, spanY) / Math.max(cols, rows) * 0.3;
@@ -2351,7 +2747,14 @@ class Komplexiti {
                 if (hits.length === 2) {
                     segments.push([hits[0], hits[1]]);
                 } else if (hits.length === 4) {
-                    segments.push([hits[0], hits[1]], [hits[2], hits[3]]);
+                    const cx = (x0 + x1) / 2;
+                    const cy = (y0 + y1) / 2;
+                    hits.sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+                    for (let i = 0; i < hits.length; i += 2) {
+                        if (i + 1 < hits.length) {
+                            segments.push([hits[i], hits[i + 1]]);
+                        }
+                    }
                 }
             }
         }
