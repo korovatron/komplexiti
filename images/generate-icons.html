@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head><title>Generate Icons</title></head>
+<body>
+<p>Open browser console - icons will auto-download.</p>
+<canvas id="c"></canvas>
+<script>
+const sizes = [192, 512];
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#1A2F42"/>
+  <text x="175" y="288" text-anchor="middle" dominant-baseline="central"
+    font-family="Georgia,'Times New Roman',serif" font-style="italic"
+    font-size="340" fill="#FFD400">e</text>
+  <text x="283" y="206" text-anchor="start"
+    font-family="Georgia,'Times New Roman',serif" font-style="italic"
+    font-size="155" fill="#FF6B6B">i</text>
+  <text x="347" y="206" text-anchor="start"
+    font-family="Georgia,'Times New Roman',serif" font-style="italic"
+    font-size="155" fill="#00E5FF">π</text>
+</svg>`;
+
+const blob = new Blob([svg], { type: 'image/svg+xml' });
+const url  = URL.createObjectURL(blob);
+const img  = new Image();
+
+img.onload = () => {
+  const canvas = document.getElementById('c');
+  for (const size of sizes) {
+    canvas.width  = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(img, 0, 0, size, size);
+    const a = document.createElement('a');
+    a.download = `icon-${size}.png`;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  }
+  URL.revokeObjectURL(url);
+};
+img.src = url;
+</script>
+</body>
+</html>

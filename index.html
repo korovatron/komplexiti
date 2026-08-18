@@ -19,9 +19,10 @@
     <!-- Manifest -->
     <link rel="manifest" href="./manifest.json">
 
-    <!-- Favicon placeholders - replace with real icons when available -->
-    <link rel="icon" href="./icon-192.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="./icon-192.png">
+    <!-- Favicon -->
+    <link rel="icon" href="./images/icon.svg" type="image/svg+xml">
+    <link rel="icon" href="./images/icon-192.png" type="image/png" sizes="192x192">
+    <link rel="apple-touch-icon" sizes="192x192" href="./images/icon-192.png">
 
     <style>
         * {
@@ -269,6 +270,22 @@
             color: #4A90E2;
         }
 
+        .title-logo {
+            width: min(480px, 88vw);
+            height: auto;
+            margin-bottom: 12px;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
+        .panel-logo {
+            width: 100%;
+            height: auto;
+            display: block;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
         .title-subtitle {
             font-size: 0.85em;
             color: rgba(232, 244, 253, 0.55);
@@ -371,7 +388,9 @@
         }
 
         html.pwa-landscape .title-wordmark,
-        html.title-compact-landscape .title-wordmark {
+        html.title-compact-landscape .title-wordmark,
+        html.pwa-landscape .title-logo,
+        html.title-compact-landscape .title-logo {
             font-size: 2em !important;
             margin-bottom: 2px !important;
         }
@@ -546,9 +565,9 @@
         .panel-header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            margin-bottom: 16px;
-            padding-bottom: 12px;
+            justify-content: center;
+            margin-bottom: 8px;
+            padding-bottom: 0;
         }
 
         .panel-wordmark {
@@ -1103,7 +1122,7 @@
 
             <!-- Title screen -->
             <div id="title-screen" class="title-screen">
-                <div class="title-wordmark"><span class="wordmark-k">K</span>omplexiti</div>
+                <img src="./images/komplexitiTitle.png" alt="Komplexiti" class="title-logo">
                 <div class="title-subtitle">Complex Numbers</div>
 
                 <button id="title-launch-button" class="title-button">Open Komplexiti</button>
@@ -1123,7 +1142,7 @@
             <!-- Sidebar panel -->
             <div id="sidebar-panel" class="hidden">
                 <div class="panel-header">
-                    <span class="panel-wordmark"><span class="wordmark-k">K</span>omplexiti</span>
+                    <img src="./images/komplexitiTitle.png" alt="Komplexiti" class="panel-logo">
                 </div>
 
                 <!-- Top toolbar: Add / Reset axes / Display mode -->

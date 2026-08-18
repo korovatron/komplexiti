@@ -1,10 +1,14 @@
-const CACHE_NAME = 'komplexiti-v1.0.25';
+const CACHE_NAME = 'komplexiti-v1.0.27';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
     './main.js',
     './manifest.json',
     './sw.js',
+    './images/komplexitiTitle.png',
+    './images/icon-192.png',
+    './images/icon-512.png',
+    './images/icon.svg',
     'https://unpkg.com/mathlive',
     'https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js'
 ];
