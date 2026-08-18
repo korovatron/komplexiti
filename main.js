@@ -3716,6 +3716,11 @@ class Komplexiti {
                 'z+\\overline{z}=4',
                 '\\left|z\\overline{z}+z\\right|=2',
                 '\\left|z^2+\\overline{z}\\right|=1'
+            ],
+            'inequalities': [
+                '\\left|z\\right|\\le3',
+                '\\left|z-\\left(1+2i\\right)\\right|<2',
+                '\\left|z-1\\right|\\le\\left|z-3\\right|'
             ]
         };
 
