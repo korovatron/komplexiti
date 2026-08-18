@@ -1575,7 +1575,15 @@ class Komplexiti {
                     <div class="expr-color-dot" style="background:${c.color};opacity:${c.enabled ? 1 : 0.3}" title="Toggle visibility"></div>
                 </div>
             </div>
-            <div class="expr-name-error"></div>`;
+            <div class="expr-name-error"></div>
+            <div class="shape-info-container">
+                <div class="metadata-title-row">
+                    <span class="metadata-visibility-placeholder" aria-hidden="true"></span>
+                    <div class="shape-info-title"></div>
+                </div>
+                <div class="shape-info-value"></div>
+                <div class="expr-card-roots"></div>
+            </div>`;
 
         const mathField = card.querySelector('math-field');
         const dot       = card.querySelector('.expr-color-dot');
@@ -1638,6 +1646,7 @@ class Komplexiti {
             c.hasParseError = hasError;
             this.cascadeEvaluate(c.id);
             this._refreshDuplicateNameErrors();
+            this.updateAllCardMetadata();
             this.saveExpressions();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -1653,6 +1662,7 @@ class Komplexiti {
                 if (panel) panel.style.display = 'none';
                 this.activeInfoExpressionId = null;
             }
+            this.updateCardMetadata(c);
             this.saveExpressions();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -2975,6 +2985,95 @@ class Komplexiti {
         this.updateComplexInfoPanel();
     }
 
+    // =========================================================================
+    // Card metadata
+    // =========================================================================
+
+    getContrastingTextColor(hex) {
+        if (!hex || typeof hex !== 'string') return '#fff';
+        const h = hex.replace('#', '');
+        if (h.length !== 6) return '#fff';
+        const r = parseInt(h.slice(0, 2), 16) / 255;
+        const g = parseInt(h.slice(2, 4), 16) / 255;
+        const b = parseInt(h.slice(4, 6), 16) / 255;
+        const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        return luminance > 0.5 ? '#000' : '#fff';
+    }
+
+    updateAllCardMetadata() {
+        for (const c of this.expressions) {
+            this.updateCardMetadata(c);
+        }
+    }
+
+    updateCardMetadata(c) {
+        const card = document.querySelector(`.expr-card[data-const-id="${c.id}"]`);
+        if (!card) return;
+        const container = card.querySelector('.shape-info-container');
+        if (!container) return;
+
+        const badge   = container.querySelector('.shape-info-title');
+        const valueEl = container.querySelector('.shape-info-value');
+        const rootsEl = container.querySelector('.expr-card-roots');
+
+        const hide = () => container.classList.remove('visible');
+
+        if (!c.latex || !c.latex.trim()) { hide(); return; }
+        if (c.hasParseError && c.re === null && c.im === null && !c.roots?.length && !c.locus) { hide(); return; }
+
+        // Set badge colors from card color
+        card.style.setProperty('--function-badge-bg', c.color);
+        card.style.setProperty('--function-badge-fg', this.getContrastingTextColor(c.color));
+
+        if (c.type === 'equation' && c.roots?.length) {
+            container.classList.add('is-equation');
+            badge.textContent     = 'Equation';
+            valueEl.style.display = 'none';
+            rootsEl.style.display = 'flex';
+            rootsEl.innerHTML     = '';
+            for (const [k, root] of c.roots.entries()) {
+                if (!isFinite(root.re) || !isFinite(root.im)) continue;
+                const mf    = document.createElement('math-field');
+                mf.className = 'asymptote-equation-field asymptote-equation-item-wide';
+                mf.setAttribute('read-only', 'true');
+                mf.setAttribute('default-mode', 'math');
+                mf.setAttribute('virtual-keyboard-mode', 'off');
+                mf.setAttribute('tabindex', '-1');
+                mf.setAttribute('color-scheme', 'dark');
+                mf.style.setProperty('color', '#E8F4FD', 'important');
+                mf.style.setProperty('--text-color', '#E8F4FD');
+                const varName = c.equationVar || 'z';
+                mf.value = `${varName}_{${k + 1}}=${this.formatCartesianLatex(root.re, root.im)}`;
+                rootsEl.appendChild(mf);
+            }
+            container.classList.add('visible');
+
+        } else if (c.type === 'locus' && c.locus) {
+            container.classList.remove('is-equation');
+            badge.textContent      = 'Locus';
+            valueEl.style.display  = '';
+            rootsEl.style.display  = 'none';
+            rootsEl.innerHTML      = '';
+            const fp = c.locus.fastPath;
+            const kinds = { circle: 'circle', line: 'line', ray: 'half-line', spiral: 'spiral', 'spiral-shifted': 'spiral' };
+            valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
+            container.classList.add('visible');
+
+        } else if (c.type === 'value' && c.re !== null && c.im !== null) {
+            container.classList.remove('is-equation');
+            badge.textContent      = 'Constant';
+            valueEl.style.display  = '';
+            rootsEl.style.display  = 'none';
+            rootsEl.innerHTML      = '';
+            const tol = 1e-9;
+            valueEl.textContent = Math.abs(c.im) < tol ? 'real' : Math.abs(c.re) < tol ? 'imaginary' : 'complex';
+            container.classList.add('visible');
+
+        } else {
+            hide();
+        }
+    }
+
     updateComplexInfoPanel() {
         const panel    = document.getElementById('complex-info-panel');
         if (!panel || panel.style.display === 'none') return;
@@ -3035,6 +3134,50 @@ class Komplexiti {
         if (valEl) valEl.innerHTML = this.formatComplexValue(c.re, c.im, r, theta);
         if (modEl) modEl.innerHTML   = this.niceRealHTML(r) ?? this.formatNumber(r);
         if (argEl) argEl.innerHTML   = this.formatArgument(theta);
+    }
+
+    // Returns a LaTeX string if value has a recognisable nice form, else null.
+    niceRealLatex(value) {
+        if (!isFinite(value)) return null;
+        const tol = 5e-6;
+        if (Math.abs(value) < tol) return '0';
+        const sign = value < 0 ? -1 : 1;
+        const abs  = Math.abs(value);
+        const ri   = Math.round(abs);
+        if (Math.abs(abs - ri) < tol) return sign < 0 ? `-${ri}` : `${ri}`;
+        for (let d = 2; d <= 24; d++) {
+            const n = Math.round(abs * d);
+            if (n > 0 && Math.abs(abs - n / d) < tol) {
+                const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                if (sd > 1 && sd <= 24) return (sign < 0 ? '-' : '') + `\\frac{${sn}}{${sd}}`;
+            }
+        }
+        for (const k of [2, 3, 5, 6, 7]) {
+            const sqK = Math.sqrt(k);
+            const ratio = abs / sqK;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    const rad = `\\sqrt{${k}}`;
+                    const neg = sign < 0 ? '-' : '';
+                    if (sn === 1 && sd === 1) return `${neg}${rad}`;
+                    if (sd === 1)             return `${neg}${sn}${rad}`;
+                    if (sn === 1)             return `${neg}\\frac{${rad}}{${sd}}`;
+                    return `${neg}\\frac{${sn}${rad}}{${sd}}`;
+                }
+            }
+        }
+        return null;
+    }
+
+    formatCartesianLatex(re, im) {
+        const aStr = this.niceRealLatex(re)          ?? this.formatNumber(re);
+        const bAbs = this.niceRealLatex(Math.abs(im)) ?? this.formatNumber(Math.abs(im));
+        if (Math.abs(im) < 1e-10) return aStr;
+        if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${bAbs}i` : `${bAbs}i`;
+        const sign = im < -1e-10 ? '-' : '+';
+        return `${aStr}${sign}${bAbs}i`;
     }
 
     // ---- Nice-number helpers (adapted from Graphiti) ----

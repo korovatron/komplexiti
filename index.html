@@ -926,6 +926,111 @@
             transform: scale(1.1);
         }
 
+        /* ------------------------------------------------------------------ */
+        /* Card metadata (exact Graphiti styles)                                */
+        /* ------------------------------------------------------------------ */
+        .shape-info-container {
+            display: none;
+            flex-direction: row;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            padding-top: 8px;
+        }
+
+        .shape-info-container.visible {
+            display: flex;
+        }
+
+        /* equation cards stack badge above roots */
+        .shape-info-container.is-equation {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+        }
+
+        .metadata-title-row {
+            display: inline-flex;
+            align-items: center;
+            align-self: flex-start;
+            gap: 5px;
+        }
+
+        .metadata-visibility-placeholder {
+            width: 12px;
+            height: 12px;
+            flex: 0 0 auto;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .shape-info-title {
+            display: inline-flex;
+            align-self: flex-start;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: 0.02em;
+            color: var(--function-badge-fg, #000);
+            background: var(--function-badge-bg, #4A90E2);
+            border-radius: 999px;
+            padding: 3px 8px;
+        }
+
+        .shape-info-value {
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.3;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Roots list inside card metadata */
+        .expr-card-roots {
+            display: none;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        /* Read-only MathLive field for root values (same as Graphiti .asymptote-equation-field) */
+        .asymptote-equation-field {
+            display: block;
+            font-size: 18px !important;
+            line-height: 1.35 !important;
+            min-height: 28px !important;
+            padding: 2px 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            background: transparent !important;
+            color: var(--text-primary) !important;
+            --background: transparent;
+            --text-color: var(--text-primary);
+            --border: none;
+            --selection-background-color: transparent;
+            --selection-color: var(--text-primary);
+            pointer-events: none;
+            user-select: none !important;
+            -webkit-user-select: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            overflow: hidden !important;
+        }
+
+        .asymptote-equation-field::part(content) {
+            font-size: 18px !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            user-select: none !important;
+            -webkit-user-select: none !important;
+        }
+
+        .asymptote-equation-field::part(menu-toggle),
+        .asymptote-equation-field::part(virtual-keyboard-toggle),
+        .asymptote-equation-field::part(keyboard-toggle) {
+            display: none;
+        }
+
         /* Info button on expression cards */
         .expr-info-btn {
             width: 20px;
