@@ -3526,6 +3526,10 @@ class Komplexiti {
         const list = demoSets[setName];
         if (!list) return;
 
+        if (window.goatcounter?.count) {
+            window.goatcounter.count({ path: 'Complexiti - Demo Set Opened', event: true });
+        }
+
         this.expressions = [];
         if (this.expressionsContainer) {
             this.expressionsContainer.innerHTML = '';
