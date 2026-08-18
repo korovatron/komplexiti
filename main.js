@@ -3515,6 +3515,11 @@ class Komplexiti {
                 '\\arg\\left(z-2\\right)=\\frac{\\pi}{3}',
                 '\\left|z-\\left(2-3i\\right)\\right|=\\left|z-1+2i\\right|',
                 '\\left|z^2+\\frac{1}{z^2}\\right|=2'
+            ],
+            'conjugate-loci': [
+                'z+\\overline{z}=4',
+                '\\left|z\\overline{z}+z\\right|=2',
+                '\\left|z^2+\\overline{z}\\right|=1'
             ]
         };
 
