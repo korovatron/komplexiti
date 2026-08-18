@@ -1873,6 +1873,13 @@ class Komplexiti {
                 </div>
                 <div class="shape-info-value"></div>
                 <div class="expr-card-roots"></div>
+            </div>
+            <div class="foci-info-container">
+                <div class="metadata-title-row">
+                    <button class="metadata-visibility-toggle foci-visibility-toggle" aria-label="Toggle foci" title="Toggle foci" tabindex="-1"></button>
+                    <div class="foci-info-title">Foci</div>
+                </div>
+                <div class="foci-equation-list"></div>
             </div>`;
 
         const mathField = card.querySelector('math-field');
@@ -1953,6 +1960,13 @@ class Komplexiti {
         });
 
         removeBtn.addEventListener('click', () => this.removeExpression(c.id));
+
+        const fociToggleBtn = card.querySelector('.foci-visibility-toggle');
+        fociToggleBtn.addEventListener('click', () => {
+            c.showFoci = (c.showFoci !== false) ? false : true;
+            this.updateCardMetadata(c);
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        });
 
         dot.addEventListener('click', () => {
             c.enabled = !c.enabled;
@@ -2689,7 +2703,8 @@ class Komplexiti {
                         fastPath: {
                             kind: 'line',
                             point: { re: (a.re + b.re) / 2, im: (a.im + b.im) / 2 },
-                            direction: { re: -dy, im: dx }
+                            direction: { re: -dy, im: dx },
+                            focusA: a, focusB: b
                         }
                     };
                 }
@@ -2706,7 +2721,7 @@ class Komplexiti {
                 const center = { re: (a.re - k2 * b.re) / denom, im: (a.im - k2 * b.im) / denom };
                 const radius = k * Math.hypot(a.re - b.re, a.im - b.im) / Math.abs(denom);
                 if (radius > 0 && isFinite(radius) && isFinite(center.re) && isFinite(center.im)) {
-                    return { lhs, rhs, angular: false, scalar: true, fastPath: { kind: 'apollonius', center, radius } };
+                    return { lhs, rhs, angular: false, scalar: true, fastPath: { kind: 'apollonius', center, radius, focusA: a, focusB: b, ratio: k } };
                 }
             }
         }
@@ -3593,6 +3608,10 @@ class Komplexiti {
         const badge   = container.querySelector('.shape-info-title');
         const valueEl = container.querySelector('.shape-info-value');
         const rootsEl = container.querySelector('.expr-card-roots');
+        const fociContainer = card.querySelector('.foci-info-container');
+        const fociList      = card.querySelector('.foci-equation-list');
+        const fociToggle    = card.querySelector('.foci-visibility-toggle');
+        const hideFoci = () => { if (fociContainer) fociContainer.classList.remove('visible'); if (fociList) fociList.innerHTML = ''; };
 
         const hide = () => container.classList.remove('visible');
 
@@ -3623,6 +3642,7 @@ class Komplexiti {
         };
 
         if (c.type === 'equation' && c.roots?.length) {
+            hideFoci();
             container.classList.add('is-equation');
             const fmt = c.cardRootFmt || 'cartesian';
             const fmtNames  = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
@@ -3671,11 +3691,30 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             const fp = c.locus.fastPath;
-            const kinds = { circle: 'circle', line: 'line', ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski' };
+            const kinds = { circle: 'circle', line: 'perpendicular bisector', ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski' };
             valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
+            const hasFoci = !!(fp?.focusA && fp?.focusB);
+            if (hasFoci) {
+                fociContainer.classList.add('visible');
+                if (fociToggle) fociToggle.classList.toggle('is-hidden', c.showFoci === false);
+                fociList.innerHTML = '';
+                const fmtCoord = ({ re, im }) => {
+                    const a = this.niceRealLatex(re)  ?? this.formatNumberShort(re);
+                    const b = this.niceRealLatex(im)  ?? this.formatNumberShort(im);
+                    return `\\left(${a},\\,${b}\\right)`;
+                };
+                for (const focus of [fp.focusA, fp.focusB]) {
+                    const wrapper = document.createElement('div');
+                    wrapper.appendChild(makeMF(fmtCoord(focus), 17));
+                    fociList.appendChild(wrapper);
+                }
+            } else {
+                hideFoci();
+            }
             container.classList.add('visible');
 
         } else if (c.type === 'value' && c.re !== null && c.im !== null) {
+            hideFoci();
             container.classList.remove('is-equation');
             badge.textContent      = 'Constant';
             valueEl.style.display  = '';
@@ -4087,6 +4126,7 @@ class Komplexiti {
             }
 
             if (c.type === 'locus' && c.locus && c.equationVar) {
+                const fp = c.locus.fastPath;
                 const fastSegments = this._traceFastLocusSegments(c.locus);
                 let segments;
                 if (fastSegments !== null) {
@@ -4121,6 +4161,30 @@ class Komplexiti {
                 }
                 ctx.stroke();
                 ctx.restore();
+
+                // Draw F₁/F₂ foci if the locus has focus points and they are enabled
+                if (c.showFoci !== false && fp?.focusA && fp?.focusB) {
+                    const fDotR = Math.max(3, dotR - 1.5);
+                    for (const [idx, focus] of [[1, fp.focusA], [2, fp.focusB]]) {
+                        const fp2 = this.worldToScreen(focus.re, focus.im);
+                        ctx.save();
+                        ctx.fillStyle   = c.color;
+                        ctx.globalAlpha = 0.75;
+                        ctx.beginPath();
+                        ctx.arc(fp2.x, fp2.y, fDotR, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.55)';
+                        ctx.lineWidth   = 1.5;
+                        ctx.stroke();
+                        ctx.globalAlpha = 0.9;
+                        ctx.font      = `italic ${fSize}px Arial`;
+                        ctx.fillStyle = c.color;
+                        const sub = idx === 1 ? '\u2081' : '\u2082';
+                        ctx.fillText(`F${sub}`, fp2.x + fDotR + 3, fp2.y - fDotR - 2);
+                        ctx.restore();
+                    }
+                }
+
                 continue;
             }
 

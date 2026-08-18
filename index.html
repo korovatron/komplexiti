@@ -1109,6 +1109,61 @@
             pointer-events: none;
         }
 
+        .metadata-visibility-toggle {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 1.5px solid var(--function-badge-bg, #4A90E2);
+            background: var(--function-badge-bg, #4A90E2);
+            padding: 0;
+            margin: 0;
+            cursor: pointer;
+            flex: 0 0 auto;
+            opacity: 0.95;
+            box-shadow: 0 0 0 1px rgba(0,0,0,0.16);
+        }
+        .metadata-visibility-toggle.is-hidden {
+            background: transparent;
+            opacity: 0.55;
+            box-shadow: none;
+        }
+        .metadata-visibility-toggle:focus-visible {
+            outline: 2px solid var(--function-badge-bg, #4A90E2);
+            outline-offset: 2px;
+        }
+        .foci-visibility-toggle {
+            border-color: #fff;
+        }
+
+        .foci-info-container {
+            display: none;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 8px;
+            padding-top: 8px;
+        }
+        .foci-info-container.visible { display: flex; }
+        .foci-info-title {
+            display: inline-flex;
+            align-self: flex-start;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: 0.02em;
+            color: var(--function-badge-fg, #000);
+            background: var(--function-badge-bg, #4A90E2);
+            border-radius: 999px;
+            padding: 3px 8px;
+        }
+        .foci-equation-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding-left: 10px;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
         .shape-info-title {
             display: inline-flex;
             align-self: flex-start;
