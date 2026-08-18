@@ -2263,6 +2263,12 @@ class Komplexiti {
         e = e.replace(/\)\s*i\b/g, ')*i');
         // Insert * before a trailing imaginary i that directly follows a letter or digit (e.g. wi → w*i)
         e = e.replace(/([a-zA-Z0-9])i(?=[^a-zA-Z0-9]|$)/g, (match, prefix) => prefix === 'p' ? match : `${prefix}*i`);
+        // Insert * where a letter directly precedes ( but is not the end of a known function name (e.g. z\left(...) → z*(...))
+        e = e.replace(/([a-zA-Z])\(/g, (_, ch, offset, str) => {
+            const tail = str.slice(Math.max(0, offset - 9), offset + 1);
+            return /(sqrt|log10|log|exp|abs|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|sinh|cosh|tanh|re|im)$/.test(tail)
+                ? `${ch}(` : `${ch}*(`;
+        });
         return e;
     }
 
@@ -3376,7 +3382,17 @@ class Komplexiti {
             else                roots = this._solveDurandKerner(coeffs);
 
             if (roots?.length) {
-                const valid = roots.filter(r => isFinite(r.re) && isFinite(r.im));
+                let valid = roots.filter(r => isFinite(r.re) && isFinite(r.im));
+                if (fromRationalize && valid.length) {
+                    // Remove poles: roots where the original expression throws or isn't near zero
+                    const hNode = math.parse(hExpr);
+                    valid = valid.filter(r => {
+                        try {
+                            const val = hNode.evaluate({ ...scope, [varName]: math.complex(r.re, r.im) });
+                            return this._equationDifferenceMagnitude(val, { re: 0, im: 0 }) < 0.01;
+                        } catch { return false; }
+                    });
+                }
                 if (valid.length) return { type: 'equation', variable: varName, roots: valid };
             }
 
