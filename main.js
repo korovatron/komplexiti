@@ -2223,6 +2223,11 @@ class Komplexiti {
     // Normalises a LaTeX expression string into a JS/mathjs-evaluable string.
     latexToExpr(latex) {
         let e = latex.trim();
+        // Conjugate must run first so \bar{z}/\overline{z} in frac denominators have no nested braces
+        for (let p = 0; p < 3; p++) {
+            e = e.replace(/\\overline\s*\{([^{}]*)\}/g, 'conj($1)');
+            e = e.replace(/\\bar\s*\{([^{}]+)\}/g, 'conj($1)');
+        }
         // Insert * where a variable/digit directly precedes a \function command (e.g. w\sqrt → w*\sqrt)
         e = e.replace(/([a-zA-Z0-9])\\(sqrt|sin|cos|tan|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan|arcsinh|arccosh|arctanh)\b/g, '$1*\\$2');
         for (let p = 0; p < 4; p++) {
@@ -2238,10 +2243,6 @@ class Komplexiti {
         });
         for (let p = 0; p < 3; p++) {
             e = e.replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt($1)');
-        }
-        // Conjugate: \overline{expr} → conj(expr); must run before generic {} → () stripping
-        for (let p = 0; p < 3; p++) {
-            e = e.replace(/\\overline\s*\{([^{}]*)\}/g, 'conj($1)');
         }
         // \operatorname{fn} → fn (used by the keyboard for named functions)
         e = e.replace(/\\operatorname\{([^{}]+)\}/g, '$1');
@@ -2270,9 +2271,17 @@ class Komplexiti {
         e = e.trim();
         if (!e) return '';
         // Split consecutive letters that aren't a known name into implicit products (user vars are single-letter only)
-        e = e.replace(/[a-zA-Z]{2,}/g, m =>
-            /^(sqrt|log10|log|exp|abs|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|sinh|cosh|tanh|re|im|pi|Infinity|NaN)$/.test(m)
-                ? m : m.split('').join('*'));
+        // Also handles variable immediately followed by function name, e.g. zconj → z*conj
+        const knownFnNames = ['log10', 'sqrt', 'conj', 'arg', 'abs', 'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh', 'sinh', 'cosh', 'tanh', 'sin', 'cos', 'tan', 'exp', 'log', 're', 'im', 'pi', 'Infinity', 'NaN'];
+        e = e.replace(/[a-zA-Z]{2,}/g, m => {
+            if (/^(sqrt|log10|log|exp|abs|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|sinh|cosh|tanh|re|im|pi|Infinity|NaN)$/.test(m)) return m;
+            for (const fn of knownFnNames) {
+                if (m.length > fn.length && m.endsWith(fn)) {
+                    return m.slice(0, m.length - fn.length).split('').join('*') + '*' + fn;
+                }
+            }
+            return m.split('').join('*');
+        });
         e = e.replace(/\bi\s*(sqrt|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|asinh|acosh|atanh|log|log10|exp|conj)\s*\(/g, 'i*$1(');
         e = e.replace(/\)\s*i\b/g, ')*i');
         // Insert * before a trailing imaginary i that directly follows a letter or digit (e.g. wi → w*i)
@@ -2840,6 +2849,8 @@ class Komplexiti {
         for (const { absExpr, otherExpr } of sides) {
             const inner = this._extractAbsInner(absExpr, varName);
             if (!inner || !inner.includes('/')) continue;
+            // Skip if the inner contains non-polynomial ops on varName - rationalize gives nonsense
+            if (/\bconj\(|\barg\(|\bre\(|\bim\(/.test(inner)) continue;
             let rat;
             try { rat = math.rationalize(inner, {}, true); } catch { continue; }
             const denStr = rat?.denominator?.toString();
