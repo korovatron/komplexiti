@@ -2674,27 +2674,41 @@ class Komplexiti {
                 };
             }
 
+            // Perpendicular bisector: |z - a| = |z - b|
             const otherAbs = this._matchFunctionTerm(otherExpr, 'abs', varName);
-            if (!otherAbs) continue;
-            const otherLinear = this._parseLinearVarOffset(otherAbs, varName, scope);
-            if (!otherLinear) continue;
-
-            const a = { re: -linear.offset.re, im: -linear.offset.im };
-            const b = { re: -otherLinear.offset.re, im: -otherLinear.offset.im };
-            const dx = b.re - a.re;
-            const dy = b.im - a.im;
-            if (Math.hypot(dx, dy) < 1e-9) return null;
-            return {
-                lhs,
-                rhs,
-                angular: false,
-                scalar: true,
-                fastPath: {
-                    kind: 'line',
-                    point: { re: (a.re + b.re) / 2, im: (a.im + b.im) / 2 },
-                    direction: { re: -dy, im: dx }
+            if (otherAbs) {
+                const otherLinear = this._parseLinearVarOffset(otherAbs, varName, scope);
+                if (otherLinear) {
+                    const a = { re: -linear.offset.re, im: -linear.offset.im };
+                    const b = { re: -otherLinear.offset.re, im: -otherLinear.offset.im };
+                    const dx = b.re - a.re;
+                    const dy = b.im - a.im;
+                    if (Math.hypot(dx, dy) < 1e-9) return null;
+                    return {
+                        lhs, rhs, angular: false, scalar: true,
+                        fastPath: {
+                            kind: 'line',
+                            point: { re: (a.re + b.re) / 2, im: (a.im + b.im) / 2 },
+                            direction: { re: -dy, im: dx }
+                        }
+                    };
                 }
-            };
+            }
+
+            // Apollonius circle: |z - a| = k|z - b|, k > 0, k ≠ 1
+            const otherAbsScaled = this._matchAffineAbsExpr(otherExpr, varName, scope);
+            if (otherAbsScaled && Math.abs(otherAbsScaled.offset) < 1e-9 && otherAbsScaled.scale > 0 && Math.abs(otherAbsScaled.scale - 1) > 1e-6) {
+                const k = otherAbsScaled.scale;
+                const a = { re: -linear.offset.re, im: -linear.offset.im };
+                const b = otherAbsScaled.center;
+                const k2 = k * k;
+                const denom = 1 - k2;
+                const center = { re: (a.re - k2 * b.re) / denom, im: (a.im - k2 * b.im) / denom };
+                const radius = k * Math.hypot(a.re - b.re, a.im - b.im) / Math.abs(denom);
+                if (radius > 0 && isFinite(radius) && isFinite(center.re) && isFinite(center.im)) {
+                    return { lhs, rhs, angular: false, scalar: true, fastPath: { kind: 'apollonius', center, radius } };
+                }
+            }
         }
 
         const scalarForms = [
@@ -2799,6 +2813,30 @@ class Komplexiti {
         const joukowski = this._matchJoukowskiLocus(lhs, rhs, varName, scope);
         if (joukowski) return joukowski;
 
+        // Rewrite |N/D| = k as |N| = k|D| to expose geometric fast paths (e.g. |z/(z+1)| = 1 → perp bisector)
+        const denCleared = this._tryDenominatorClearedFastLocus(lhs, rhs, varName, scope);
+        if (denCleared) return denCleared;
+
+        return null;
+    }
+
+    _tryDenominatorClearedFastLocus(lhs, rhs, varName, scope) {
+        const sides = [{ absExpr: lhs, otherExpr: rhs }, { absExpr: rhs, otherExpr: lhs }];
+        for (const { absExpr, otherExpr } of sides) {
+            const inner = this._extractAbsInner(absExpr, varName);
+            if (!inner || !inner.includes('/')) continue;
+            let rat;
+            try { rat = math.rationalize(inner, {}, true); } catch { continue; }
+            const denStr = rat?.denominator?.toString();
+            const numStr = rat?.numerator?.toString();
+            if (!denStr || !numStr || denStr === '1' || !denStr.includes(varName)) continue;
+            const k = this._evaluateRealExpr(otherExpr, scope);
+            const clearedRhs = (k !== null && Math.abs(k - 1) < 1e-9)
+                ? `abs(${denStr})`
+                : `(${otherExpr})*abs(${denStr})`;
+            const fast = this._tryBuildFastLocus(`abs(${numStr})`, clearedRhs, varName, scope);
+            if (fast) return fast;
+        }
         return null;
     }
 
@@ -3110,6 +3148,21 @@ class Komplexiti {
                 }
             }
 
+            return segments;
+        }
+
+        if (fp.kind === 'apollonius') {
+            // Apollonius circle shares geometry with the circle tracer
+            const steps = 160;
+            const segments = [];
+            for (let k = 0; k < steps; k++) {
+                const a0 = 2 * Math.PI * k / steps;
+                const a1 = 2 * Math.PI * (k + 1) / steps;
+                segments.push([
+                    { x: fp.center.re + fp.radius * Math.cos(a0), y: fp.center.im + fp.radius * Math.sin(a0) },
+                    { x: fp.center.re + fp.radius * Math.cos(a1), y: fp.center.im + fp.radius * Math.sin(a1) }
+                ]);
+            }
             return segments;
         }
 
@@ -3618,7 +3671,7 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             const fp = c.locus.fastPath;
-            const kinds = { circle: 'circle', line: 'line', ray: 'half-line', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski' };
+            const kinds = { circle: 'circle', line: 'line', ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski' };
             valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
             container.classList.add('visible');
 
