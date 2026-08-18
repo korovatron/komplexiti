@@ -799,7 +799,6 @@ class Komplexiti {
         this.drawAxes();
         this.drawAxisLabels();
         this.drawExpressions();
-        this.updateComplexInfoPanel();
     }
 
     // -------------------------------------------------------------------------
@@ -1571,7 +1570,6 @@ class Komplexiti {
                     <button class="expr-remove-btn" title="Delete" aria-label="Delete expression">
                         <svg viewBox="0 0 16 16"><path d="M4 4L12 12M12 4L4 12"/></svg>
                     </button>
-                    <button class="expr-info-btn" title="Show info about this complex number" aria-label="Show complex number info">i</button>
                     <div class="expr-color-dot" style="background:${c.color};opacity:${c.enabled ? 1 : 0.3}" title="Toggle visibility"></div>
                 </div>
             </div>
@@ -1588,7 +1586,6 @@ class Komplexiti {
         const mathField = card.querySelector('math-field');
         const dot       = card.querySelector('.expr-color-dot');
         const removeBtn = card.querySelector('.expr-remove-btn');
-        const infoBtn   = card.querySelector('.expr-info-btn');
 
         mathField.addEventListener('input', () => {
             c.latex = mathField.value;
@@ -1652,16 +1649,10 @@ class Komplexiti {
         });
 
         removeBtn.addEventListener('click', () => this.removeExpression(c.id));
-        infoBtn.addEventListener('click',   () => this.showComplexInfoPanel(c.id));
 
         dot.addEventListener('click', () => {
             c.enabled = !c.enabled;
             dot.style.opacity = c.enabled ? '1' : '0.3';
-            if (!c.enabled && this.activeInfoExpressionId === c.id) {
-                const panel = document.getElementById('complex-info-panel');
-                if (panel) panel.style.display = 'none';
-                this.activeInfoExpressionId = null;
-            }
             this.updateCardMetadata(c);
             this.saveExpressions();
             if (this.currentState === this.states.APP) this.drawCanvas();
@@ -1737,11 +1728,6 @@ class Komplexiti {
     }
 
     removeExpression(id) {
-        if (this.activeInfoExpressionId === id) {
-            const panel = document.getElementById('complex-info-panel');
-            if (panel) panel.style.display = 'none';
-            this.activeInfoExpressionId = null;
-        }
         const idx = this.expressions.findIndex(c => c.id === id);
         if (idx !== -1) this.expressions.splice(idx, 1);
         const card = document.querySelector(`.expr-card[data-const-id="${id}"]`);
