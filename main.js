@@ -62,6 +62,8 @@ class Komplexiti {
         // ---- Pan, Zoom & Viewport Transition inertia ----
         this.mousePanInertia = { active: false, velocityX: 0, velocityY: 0 };
         this.wheelZoom       = { active: false, targetScaleRatio: 1.0, cx: 0, cy: 0 };
+        this.keyPanVelocity  = { vx: 0, vy: 0 };
+        this.pressedKeys     = new Set();
         this.viewportAnimation = {
             active: false,
             fromCenterX: 0,
@@ -606,9 +608,12 @@ class Komplexiti {
         };
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) reopenPanelIfClosed();
+            else this.clearPressedKeys();
         });
         window.addEventListener('focus', reopenPanelIfClosed);
+        window.addEventListener('blur', () => this.clearPressedKeys());
         document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+        document.addEventListener('keyup', (e) => this.handleKeyUp(e));
 
         // Dismiss add-dropdown when clicking outside it
         document.addEventListener('click', (e) => {
@@ -1329,6 +1334,16 @@ class Komplexiti {
     // Keyboard
     // =========================================================================
 
+    clearPressedKeys() {
+        this.pressedKeys.clear();
+    }
+
+    handleKeyUp(e) {
+        if (this.pressedKeys.has(e.key)) {
+            this.pressedKeys.delete(e.key);
+        }
+    }
+
     handleKeyboard(e) {
         // Suppress all key handling while a text / math input is focused
         const active = document.activeElement;
@@ -1352,12 +1367,17 @@ class Komplexiti {
         if (this.currentState !== this.states.APP) return;
 
         switch (e.key) {
-            case '=': case '+': e.preventDefault(); this.zoomIn();         break;
-            case '-': case '_': e.preventDefault(); this.zoomOut();        break;
-            case 'ArrowLeft':   e.preventDefault(); this.panBy(-0.15, 0);  break;
-            case 'ArrowRight':  e.preventDefault(); this.panBy( 0.15, 0);  break;
-            case 'ArrowUp':     e.preventDefault(); this.panBy(0,  0.15);  break;
-            case 'ArrowDown':   e.preventDefault(); this.panBy(0, -0.15);  break;
+            case '=': case '+': e.preventDefault(); this.zoomIn(); break;
+            case '-': case '_': e.preventDefault(); this.zoomOut(); break;
+            case 'ArrowLeft':
+            case 'ArrowRight':
+            case 'ArrowUp':
+            case 'ArrowDown':
+                e.preventDefault();
+                this.stopViewportAnimation();
+                this.pressedKeys.add(e.key);
+                this.ensureAnimationLoopRunning();
+                break;
         }
     }
 
@@ -1515,6 +1535,7 @@ class Komplexiti {
         this.stopMousePanInertia();
         this.stopWheelZoom();
         this.stopViewportAnimation();
+        this.keyPanVelocity = { vx: 0, vy: 0 };
     }
 
     animationTick(timestamp) {
@@ -1524,6 +1545,42 @@ class Komplexiti {
 
         let needsRedraw = false;
         let keepAnimating = false;
+
+        // Smooth arrow key panning with acceleration and inertia decay
+        let dirX = 0;
+        let dirY = 0;
+        if (this.pressedKeys.has('ArrowLeft'))  dirX -= 1;
+        if (this.pressedKeys.has('ArrowRight')) dirX += 1;
+        if (this.pressedKeys.has('ArrowUp'))    dirY += 1;
+        if (this.pressedKeys.has('ArrowDown'))  dirY -= 1;
+
+        const xRange = this.viewport.maxX - this.viewport.minX;
+        const yRange = this.viewport.maxY - this.viewport.minY;
+        // Move at ~0.9 viewport width/height per second
+        const targetSpeedX = dirX * (xRange * 0.9 / 1000);
+        const targetSpeedY = dirY * (yRange * 0.9 / 1000);
+
+        const isHoldingKeys = dirX !== 0 || dirY !== 0;
+        const timeConstant = isHoldingKeys ? 60 : 120;
+        const blend = 1 - Math.exp(-this.deltaTime / timeConstant);
+
+        this.keyPanVelocity.vx += (targetSpeedX - this.keyPanVelocity.vx) * blend;
+        this.keyPanVelocity.vy += (targetSpeedY - this.keyPanVelocity.vy) * blend;
+
+        const keySpeed = Math.hypot(this.keyPanVelocity.vx, this.keyPanVelocity.vy);
+        if (keySpeed > 1e-6) {
+            const worldDX = this.keyPanVelocity.vx * this.deltaTime;
+            const worldDY = this.keyPanVelocity.vy * this.deltaTime;
+            this.viewport.minX   += worldDX; this.viewport.maxX   += worldDX;
+            this.viewport.minY   += worldDY; this.viewport.maxY   += worldDY;
+            this.viewport.centerX = (this.viewport.minX + this.viewport.maxX) / 2;
+            this.viewport.centerY = (this.viewport.minY + this.viewport.maxY) / 2;
+            needsRedraw = true;
+            keepAnimating = true;
+        } else if (!isHoldingKeys) {
+            this.keyPanVelocity.vx = 0;
+            this.keyPanVelocity.vy = 0;
+        }
 
         if (this.viewportAnimation.active) {
             const elapsed = timestamp - this.viewportAnimation.startTime;
