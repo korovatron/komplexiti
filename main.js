@@ -3651,6 +3651,15 @@ class Komplexiti {
             ctx.restore();
         }
 
+        // Perpendicular-bisector fast path: smooth polygon fill (no staircase)
+        if (fp?.kind === 'line') {
+            ctx.save();
+            ctx.fillStyle = c.color;
+            ctx.globalAlpha = SHADE_ALPHA;
+            if (this._fillLineRegion(fp, ineq.dir, ctx)) { ctx.restore(); return; }
+            ctx.restore();
+        }
+
         // Grid-based fill for all other loci - row-merge to reduce blockiness
         const sg = c._locusCache?.shadeGrid;
         if (!sg) return;
@@ -3749,6 +3758,48 @@ class Komplexiti {
         return true;
     }
 
+    // Fill the half-plane for a perpendicular-bisector inequality using a canvas polygon.
+    // Clips the infinite line to the viewport, determines the shaded side from focusA/focusB,
+    // then closes via the viewport boundary walk. Returns false if the line misses the viewport.
+    _fillLineRegion(fp, ineqDir, targetCtx) {
+        const hits = this._clipInfiniteLine(fp.point, fp.direction);
+        if (!hits || hits.length < 2) return false;
+        const cw = this.canvas.width, ch = this.canvas.height;
+        const P1 = this.worldToScreen(hits[0].x, hits[0].y);
+        const P2 = this.worldToScreen(hits[1].x, hits[1].y);
+        // dir=-1: shade focusA side (|z-a| ≤ |z-b|, closer to a); dir=1: shade focusB side
+        const sf = ineqDir < 0 ? fp.focusA : fp.focusB;
+        const sp = this.worldToScreen(sf.re, sf.im);
+        // Cross product (P2-P1)×(sp-P1) > 0 → sp is to the LEFT of P1→P2 in screen coords
+        // Left of P1→P2 = walk CW screen from P2 to P1 to enclose that side
+        const cross = (P2.x-P1.x)*(sp.y-P1.y) - (P2.y-P1.y)*(sp.x-P1.x);
+        const eps = 0.5;
+        const vt = (sx, sy) => {
+            if (sy <= eps)      return sx / cw;
+            if (sx >= cw - eps) return 1 + sy / ch;
+            if (sy >= ch - eps) return 2 + (cw - sx) / cw;
+            return 3 + (ch - sy) / ch;
+        };
+        const corners = [[0,0],[cw,0],[cw,ch],[0,ch]];
+        const t2 = vt(P2.x, P2.y), t1 = vt(P1.x, P1.y);
+        const cwWalk = cross > 0;
+        const mid = [];
+        if (cwWalk) {
+            let te = t1; if (te <= t2) te += 4;
+            for (let ci = Math.floor(t2) + 1; ci <= Math.floor(te); ci++) mid.push(corners[ci % 4]);
+        } else {
+            let te = t1; if (te >= t2) te -= 4;
+            for (let ci = Math.floor(t2); ci > te; ci--) mid.push(corners[((ci % 4) + 4) % 4]);
+        }
+        targetCtx.beginPath();
+        targetCtx.moveTo(P1.x, P1.y);
+        targetCtx.lineTo(P2.x, P2.y);
+        for (const [x, y] of mid) targetCtx.lineTo(x, y);
+        targetCtx.closePath();
+        targetCtx.fill();
+        return true;
+    }
+
     // Draw the intersection of 2+ enabled inequality loci using destination-in compositing.
     // Each region is rendered white to an off-screen canvas; successive destination-in passes
     // leave only the area common to all of them, which is then tinted and drawn to ctx.
@@ -3781,8 +3832,9 @@ class Komplexiti {
                     offCtx.arc(sc.x, sc.y, sr, 0, Math.PI * 2, true);
                 }
                 offCtx.fill();
-            } else if (fp?.kind === 'ray' && this._fillRayRegion(fp, ineq.dir, offCtx)) {
-                // ray polygon fill succeeded
+            } else if ((fp?.kind === 'ray'  && this._fillRayRegion (fp, ineq.dir, offCtx)) ||
+                       (fp?.kind === 'line' && this._fillLineRegion(fp, ineq.dir, offCtx))) {
+                // geometric fill succeeded
             } else {
                 const sg = c._locusCache?.shadeGrid
                     ?? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id);
