@@ -3343,7 +3343,9 @@ class Komplexiti {
                     const evalScope = { ...scope, [varName]: math.complex(x, y) };
                     const lv = lhsNode.evaluate(evalScope);
                     const rv = rhsNode.evaluate(evalScope);
-                    const signed = this._equationSignedDifference(lv, rv, { angular: locus.angular });
+                    // angular: false - arg inequalities need direct numeric comparison, not wrapped,
+                    // so arg(w) ≤ θ shades the full arc rather than only the near π-wide half.
+                    const signed = this._equationSignedDifference(lv, rv, { angular: false });
                     if (signed !== null && isFinite(signed) && signed * dir > 0) grid[iy][ix] = 1;
                 } catch { /* skip */ }
             }
