@@ -2925,6 +2925,85 @@ class Komplexiti {
         return null;
     }
 
+    // For equations whose LHS-RHS is complex-valued (scalar=false), the zero set is
+    // generically a finite set of isolated points, not a curve.  Sample a coarse grid,
+    // find local minima of |h|, and refine each via 2-D Newton.  Returns the roots, or
+    // null if there are too many candidates (suggesting a 1-D solution curve instead).
+    _findComplexEquationRootsNumerically(lhs, rhs, varName, scope) {
+        const hExpr = `(${lhs}) - (${rhs})`;
+        let hNode;
+        try { hNode = math.parse(hExpr); } catch { return null; }
+
+        const evalH = (x, y) => {
+            try {
+                const v = hNode.evaluate({ ...scope, [varName]: math.complex(x, y) });
+                if (typeof v === 'number') return { re: v, im: 0 };
+                return { re: v.re ?? 0, im: v.im ?? 0 };
+            } catch { return null; }
+        };
+        const mag = v => v ? Math.hypot(v.re, v.im) : Infinity;
+
+        // Coarse grid: 21x21 points over [-5,5]^2; step=0.5 ensures y=0 and x=0,1 are exact rows/columns
+        const R = 5, step = 0.5, N = Math.ceil(2 * R / step);
+        const grid = [];
+        for (let iy = 0; iy <= N; iy++) {
+            grid.push([]);
+            for (let ix = 0; ix <= N; ix++) {
+                const x = -R + ix * step, y = -R + iy * step;
+                grid[iy].push({ x, y, m: mag(evalH(x, y)) });
+            }
+        }
+
+        // Collect strict local minima (smaller than all 8 neighbours)
+        const candidates = [];
+        for (let iy = 1; iy < N; iy++) {
+            for (let ix = 1; ix < N; ix++) {
+                const m = grid[iy][ix].m;
+                if (!isFinite(m)) continue;
+                let isMin = true;
+                outer: for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        if ((grid[iy + dy]?.[ix + dx]?.m ?? Infinity) <= m) { isMin = false; break outer; }
+                    }
+                }
+                if (isMin) candidates.push(grid[iy][ix]);
+            }
+        }
+
+        // Many local minima indicates a 1-D zero set (curve) - defer to locus tracer
+        if (candidates.length > 25) return null;
+
+        // 2-D Newton refinement for each candidate
+        const roots = [];
+        for (const cand of candidates) {
+            let { x, y } = cand;
+            for (let iter = 0; iter < 50; iter++) {
+                const h = evalH(x, y);
+                if (!h || !isFinite(h.re) || !isFinite(h.im)) break;
+                if (Math.hypot(h.re, h.im) < 1e-10) break;
+                const d = 1e-6;
+                const hxp = evalH(x + d, y), hxm = evalH(x - d, y);
+                const hyp = evalH(x, y + d), hym = evalH(x, y - d);
+                if (!hxp || !hxm || !hyp || !hym) break;
+                const dRe_dx = (hxp.re - hxm.re) / (2 * d);
+                const dRe_dy = (hyp.re - hym.re) / (2 * d);
+                const dIm_dx = (hxp.im - hxm.im) / (2 * d);
+                const dIm_dy = (hyp.im - hym.im) / (2 * d);
+                const det = dRe_dx * dIm_dy - dRe_dy * dIm_dx;
+                if (Math.abs(det) < 1e-12) break;
+                const stepX = (h.re * dIm_dy - h.im * dRe_dy) / det;
+                const stepY = (h.im * dRe_dx - h.re * dIm_dx) / det;
+                x -= stepX; y -= stepY;
+                if (Math.hypot(stepX, stepY) < 1e-10) break;
+            }
+            if (mag(evalH(x, y)) > 1e-6) continue;
+            const isDup = roots.some(r => Math.hypot(r.re - x, r.im - y) < 1e-4);
+            if (!isDup) roots.push({ re: x, im: y });
+        }
+        return roots.length > 0 ? roots : null;
+    }
+
     _buildLocus(lhs, rhs, varName, scope) {
         const canonical = this._canonicaliseAffineArgEquation(lhs, rhs, varName, scope);
         if (canonical?.absInfo) {
@@ -3625,7 +3704,15 @@ class Komplexiti {
             // abs/arg/conj expressions are never polynomials; skip symbolic differentiation to avoid hangs
             if (/\babs\(|\barg\(|\bconj\(/.test(hExpr)) {
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
-                return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
+                if (!locus) return null;
+                // A non-scalar locus has a complex-valued LHS-RHS, so its zero set is
+                // generically 0-dimensional (isolated points).  Try to find them directly
+                // before falling back to the contour tracer.
+                if (!locus.scalar) {
+                    const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
+                    if (roots) return { type: 'equation', variable: varName, roots };
+                }
+                return { type: 'locus', variable: varName, roots: null, locus };
             }
 
             let coeffs = this._extractPolynomialCoeffs(hExpr, varName, scope);
