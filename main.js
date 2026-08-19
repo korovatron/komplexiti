@@ -4343,6 +4343,7 @@ class Komplexiti {
                 '\\left|w\\right|=2',
                 '\\arg\\left(z-2\\right)=\\frac{\\pi}{3}',
                 '\\left|z-\\left(2-3i\\right)\\right|=\\left|z-1+2i\\right|',
+                '\\arg\\left(\\frac{z-1}{z+1}\\right)=\\frac{\\pi}{4}',
                 '\\left|z^2+\\frac{1}{z^2}\\right|=2'
             ],
             'conjugate-equations': [
