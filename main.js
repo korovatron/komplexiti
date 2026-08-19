@@ -2783,15 +2783,34 @@ class Komplexiti {
             fastPath: { kind: 'inscribed-arc', a, b, theta, center, radius } };
     }
 
-    // Detect arg(z-a) - arg(z-b) = theta  and  arg((z-a)/(z-b)) = theta.
+    // Detect k*arg(z-a) - k*arg(z-b) = theta  and  k*arg((z-a)/(z-b)) = theta.
+    // Also handles a leading coefficient k on the arg side (e.g. 4*arg(...) = pi).
     _tryBuildInscribedArcLocus(lhs, rhs, varName, scope) {
         for (const [side, thetaSide] of [[lhs, rhs], [rhs, lhs]]) {
-            const theta = this._evaluateRealExpr(thetaSide, scope);
-            if (theta === null || !isFinite(theta) || Math.abs(theta) < 1e-9
-                    || Math.abs(Math.abs(theta) - Math.PI) < 1e-9) continue;
-            const diffPair = this._tryExtractArgDifferencePair(side, varName, scope);
+            const thetaRaw = this._evaluateRealExpr(thetaSide, scope);
+            if (thetaRaw === null || !isFinite(thetaRaw)) continue;
+
+            // Strip an optional leading coefficient: k*arg(...) or karg(...) → argExpr=arg(...), theta=thetaRaw/k
+            let argExpr = side.replace(/\s+/g, '');
+            let theta = thetaRaw;
+            if (!argExpr.startsWith('arg(')) {
+                const argIdx = argExpr.indexOf('arg(');
+                if (argIdx > 0) {
+                    // Accept both "4*arg(" and "4arg(" by stripping a trailing * if present
+                    const prefix = argExpr[argIdx - 1] === '*' ? argExpr.slice(0, argIdx - 1) : argExpr.slice(0, argIdx);
+                    const scale = this._evaluateRealExpr(prefix, scope);
+                    if (scale !== null && Math.abs(scale) > 1e-9) {
+                        theta = thetaRaw / scale;
+                        argExpr = argExpr.slice(argIdx);
+                    }
+                }
+            }
+
+            if (Math.abs(theta) < 1e-9 || Math.abs(Math.abs(theta) - Math.PI) < 1e-9) continue;
+
+            const diffPair = this._tryExtractArgDifferencePair(argExpr, varName, scope);
             if (diffPair) return this._buildInscribedArcFastPath(diffPair.a, diffPair.b, theta, lhs, rhs);
-            const argInner = this._extractArgInner(side);
+            const argInner = this._extractArgInner(argExpr);
             if (argInner) {
                 const fracPair = this._tryExtractLinearFraction(argInner, varName, scope);
                 if (fracPair) return this._buildInscribedArcFastPath(fracPair.a, fracPair.b, theta, lhs, rhs);
