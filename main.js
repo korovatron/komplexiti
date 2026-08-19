@@ -4308,7 +4308,7 @@ class Komplexiti {
         const fociToggle    = card.querySelector('.foci-visibility-toggle');
         const hideFoci = () => { if (fociContainer) fociContainer.classList.remove('visible'); if (fociList) fociList.innerHTML = ''; };
 
-        const hide = () => container.classList.remove('visible');
+        const hide = () => { container.classList.remove('visible'); hideFoci(); };
 
         if (!c.latex || !c.latex.trim()) { hide(); return; }
         if (!c.enabled) { hide(); return; }
