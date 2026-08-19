@@ -3802,6 +3802,9 @@ class Komplexiti {
                 '\\left|z-\\left(2-3i\\right)\\right|=\\left|z-1+2i\\right|',
                 '\\left|z^2+\\frac{1}{z^2}\\right|=2'
             ],
+            'conjugate-equations': [
+                { latex: '\\overline{2z-\\overline{z}}=z^2', cardRootFmt: 'cartesian' }
+            ],
             'conjugate-loci': [
                 'z+\\overline{z}=4',
                 '\\left|z\\overline{z}+z\\right|=2',
@@ -4154,7 +4157,7 @@ class Komplexiti {
                 if (sd > 1 && sd <= 24) return (sign < 0 ? '-' : '') + `\\frac{${sn}}{${sd}}`;
             }
         }
-        for (const k of [2, 3, 5, 6, 7]) {
+        for (const k of [2, 3, 5, 6, 7, 10, 11, 13, 14, 15]) {
             const sqK = Math.sqrt(k);
             const ratio = abs / sqK;
             for (let d = 1; d <= 12; d++) {
@@ -4206,7 +4209,7 @@ class Komplexiti {
             }
         }
         // Rational multiple of √k
-        for (const k of [2, 3, 5, 6, 7]) {
+        for (const k of [2, 3, 5, 6, 7, 10, 11, 13, 14, 15]) {
             const sqK = Math.sqrt(k);
             const ratio = abs / sqK;
             for (let d = 1; d <= 12; d++) {
