@@ -4354,7 +4354,8 @@ class Komplexiti {
                 'a=-2-2i',
                 'im\\left(z\\right)=3',
                 're\\left(z\\right)=\\frac{3}{2}',
-                '\\left|z-\\left(2-3i\\right)\\right|=\\left|z-1+2i\\right|'
+                '\\left|z-\\left(2-3i\\right)\\right|=\\left|z-1+2i\\right|',
+                '\\arg\\left(z-a\\right)=\\frac{\\pi}{3}'
             ],
             'conjugate-equations': [
                 { latex: '\\overline{2z-\\overline{z}}=z^2', cardRootFmt: 'cartesian' }
