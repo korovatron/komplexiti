@@ -2719,11 +2719,26 @@ class Komplexiti {
             else if (e[i] === '/' && depth === 0) { slashAt = i; break; }
         }
         if (slashAt < 0) return null;
-        const wrap = s => (s.startsWith('(') && s.endsWith(')')) ? s : `(${s})`;
-        const linA = this._parseLinearVarOffset(wrap(e.slice(0, slashAt)), varName, scope);
-        const linB = this._parseLinearVarOffset(wrap(e.slice(slashAt + 1)), varName, scope);
-        if (!linA || !linB) return null;
-        return { a: { re: -linA.offset.re, im: -linA.offset.im }, b: { re: -linB.offset.re, im: -linB.offset.im } };
+        const zeroA = this._extractLinearZero(e.slice(0, slashAt), varName, scope);
+        const zeroB = this._extractLinearZero(e.slice(slashAt + 1), varName, scope);
+        if (!zeroA || !zeroB) return null;
+        return { a: zeroA, b: zeroB };
+    }
+
+    // Return the zero of a linear expression az+b in varName, or null if not linear.
+    _extractLinearZero(expr, varName, scope) {
+        try {
+            const node = math.parse(expr);
+            const ev = z => this._mathValueToComplex(node.evaluate({ ...scope, [varName]: math.complex(z, 0) }));
+            const v0 = ev(0), v1 = ev(1), v2 = ev(2);
+            if (!v0 || !v1 || !v2) return null;
+            const aRe = v1.re - v0.re, aIm = v1.im - v0.im;
+            if (Math.hypot(aRe, aIm) < 1e-9) return null; // constant - no zero
+            // Verify linearity
+            if (Math.abs(v2.re - (2*v1.re - v0.re)) > 1e-6 || Math.abs(v2.im - (2*v1.im - v0.im)) > 1e-6) return null;
+            const den = aRe*aRe + aIm*aIm;
+            return { re: -(v0.re*aRe + v0.im*aIm) / den, im: -(v0.im*aRe - v0.re*aIm) / den };
+        } catch { return null; }
     }
 
     // Match "arg(A) - arg(B)" where A and B are each affine in varName.
@@ -2745,11 +2760,10 @@ class Komplexiti {
         }
         if (closeB !== argBStr.length - 1) return null;
         const innerB = argBStr.slice(4, closeB);
-        const wrap = s => (s.startsWith('(') && s.endsWith(')')) ? s : `(${s})`;
-        const linA = this._parseLinearVarOffset(wrap(innerA), varName, scope);
-        const linB = this._parseLinearVarOffset(wrap(innerB), varName, scope);
-        if (!linA || !linB) return null;
-        return { a: { re: -linA.offset.re, im: -linA.offset.im }, b: { re: -linB.offset.re, im: -linB.offset.im } };
+        const zeroA = this._extractLinearZero(innerA, varName, scope);
+        const zeroB = this._extractLinearZero(innerB, varName, scope);
+        if (!zeroA || !zeroB) return null;
+        return { a: zeroA, b: zeroB };
     }
 
     // Build inscribed-arc fast path for arg(z-a) - arg(z-b) = theta.
