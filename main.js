@@ -3918,6 +3918,12 @@ class Komplexiti {
 
             // Inequalities go directly to the locus builder - a region, not discrete roots
             if (inequalityDir !== 0) {
+                // Normalise: if the variable is only on the rhs (e.g. "π/6 ≤ arg(z)"), swap
+                // sides and negate dir so _buildLocus always receives the canonical lhs = expr(z) form.
+                if (!this._findEquationVariable(lhs, scope) && this._findEquationVariable(rhs, scope)) {
+                    [lhs, rhs] = [rhs, lhs];
+                    inequalityDir = -inequalityDir;
+                }
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
                 if (!locus || !locus.scalar) return null;
                 locus.inequality = { dir: inequalityDir, strict: inequalityStrict };
