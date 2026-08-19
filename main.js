@@ -1906,6 +1906,7 @@ class Komplexiti {
             c.roots = null;
             c.equationVar = null;
             c.locus = null;
+            c.compoundParts = null;
 
             if (assignment) {
                 const reserved = (assignment.name === 'i' || assignment.name === 'e');
@@ -1936,6 +1937,11 @@ class Komplexiti {
                     c.locus = eq.locus ?? null;
                     c._locusCache = null;
                     c.errorMessage = '';
+                    if (eq.type === 'compound-locus') {
+                        c.compoundParts = eq.loci.map(locus => ({
+                            locus, equationVar: eq.variable, id: c.id, color: c.color, _locusCache: null, enabled: true,
+                        }));
+                    }
                 } else {
                     hasError = true;
                     c.locus = null;
@@ -2200,11 +2206,19 @@ class Komplexiti {
                         c.locus = eq.locus ?? null;
                         c.hasParseError = false;
                         c.errorMessage = '';
+                        if (eq.type === 'compound-locus') {
+                            c.compoundParts = eq.loci.map(locus => ({
+                                locus, equationVar: eq.variable, id: c.id, color: c.color, _locusCache: null, enabled: true,
+                            }));
+                        } else {
+                            c.compoundParts = null;
+                        }
                     } else {
                         c.type = 'value';
                         c.roots = null;
                         c.equationVar = null;
                         c.locus = null;
+                        c.compoundParts = null;
                         c._locusCache = null;
                         c.hasParseError = true;
                         c.errorMessage = 'Needs exactly one undefined variable';
@@ -3175,6 +3189,18 @@ class Komplexiti {
             let retraced = false;
             const vp = this.viewport;
             for (const c of this.expressions) {
+                if (c.type === 'compound-locus' && c.compoundParts) {
+                    for (const part of c.compoundParts) {
+                        const cc = part._locusCache;
+                        if (cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY) continue;
+                        part._locusCache = {
+                            segments: this._traceLocusSegments(part.locus, part.equationVar, part.id),
+                            shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id),
+                            minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
+                        };
+                        retraced = true;
+                    }
+                }
                 if (c.type !== 'locus' || !c.locus || !c.equationVar) continue;
                 const cached = c._locusCache;
                 if (cached && cached.minX === vp.minX && cached.maxX === vp.maxX &&
@@ -3621,12 +3647,13 @@ class Komplexiti {
             compCtx.drawImage(offscreens[i], 0, 0);
         }
 
-        // Tint the intersection with a neutral colour distinct from any locus colour
+        // Tint: use the shared card colour for a compound inequality, otherwise a neutral accent
+        const tintColor = ineqLoci.every(c => c.color === ineqLoci[0].color) ? ineqLoci[0].color : '#9932CC';
         const colorCanvas = document.createElement('canvas');
         colorCanvas.width  = cw;
         colorCanvas.height = ch;
         const colorCtx = colorCanvas.getContext('2d', { alpha: true });
-        colorCtx.fillStyle = '#9932CC';
+        colorCtx.fillStyle = tintColor;
         colorCtx.fillRect(0, 0, cw, ch);
         colorCtx.globalCompositeOperation = 'destination-in';
         colorCtx.drawImage(composite, 0, 0);
@@ -3745,6 +3772,28 @@ class Komplexiti {
             const scope = this.buildExpressionScope(ownId);
             const expr  = this.latexToExpr(rawLatex);
             if (!expr) return null;
+
+            // Detect compound inequality: bound op1 expr op2 bound (e.g. -pi/6 <= arg(z) < pi/2)
+            {
+                const cmpRe = /^([\s\S]*?)(<=|>=|<(?!=)|>(?!=))([\s\S]+?)(<=|>=|<(?!=)|>(?!=))([\s\S]*)$/;
+                const cm = cmpRe.exec(expr);
+                if (cm) {
+                    const bound1 = cm[1].trim(), op1 = cm[2], middle = cm[3].trim(), op2 = cm[4], bound2 = cm[5].trim();
+                    if (bound1 && middle && bound2) {
+                        const varName = this._findEquationVariable(middle, scope);
+                        if (varName) {
+                            const locus1 = this._buildLocus(middle, bound1, varName, scope);
+                            const locus2 = this._buildLocus(middle, bound2, varName, scope);
+                            if (locus1?.scalar && locus2?.scalar) {
+                                // bound1 op1 middle → middle flipOp(op1) bound1; preserve strictness
+                                locus1.inequality = { dir: (op1 === '<' || op1 === '<=') ? 1 : -1, strict: (op1 === '<' || op1 === '>') };
+                                locus2.inequality = { dir: (op2 === '<' || op2 === '<=') ? -1 : 1, strict: (op2 === '<' || op2 === '>') };
+                                return { type: 'compound-locus', variable: varName, loci: [locus1, locus2] };
+                            }
+                        }
+                    }
+                }
+            }
 
             // Detect operator: inequality or equality
             let lhs, rhs, inequalityDir = 0, inequalityStrict = false;
@@ -4092,6 +4141,16 @@ class Komplexiti {
 
                 rootsEl.appendChild(wrapper);
             }
+            container.classList.add('visible');
+
+        } else if (c.type === 'compound-locus' && c.compoundParts) {
+            container.classList.remove('is-equation');
+            badge.textContent      = 'Compound Inequality';
+            valueEl.style.display  = '';
+            rootsEl.style.display  = 'none';
+            rootsEl.innerHTML      = '';
+            valueEl.textContent    = 'region';
+            hideFoci();
             container.classList.add('visible');
 
         } else if (c.type === 'locus' && c.locus) {
@@ -4470,9 +4529,15 @@ class Komplexiti {
         const strokeWidth = this.sizeMode === 'xlarge' ? 5  : this.sizeMode === 'large' ? 4  : 3;
         const headLen     = this.sizeMode === 'xlarge' ? 15 : this.sizeMode === 'large' ? 13 : 11;
 
-        const ineqLoci = this.expressions.filter(c =>
-            c.enabled && c.type === 'locus' && c.locus?.inequality && c.equationVar
-        );
+        const ineqLoci = [];
+        for (const _c of this.expressions) {
+            if (!_c.enabled) continue;
+            if (_c.type === 'locus' && _c.locus?.inequality && _c.equationVar) {
+                ineqLoci.push(_c);
+            } else if (_c.type === 'compound-locus' && _c.compoundParts) {
+                for (const part of _c.compoundParts) ineqLoci.push(part);
+            }
+        }
         if (ineqLoci.length >= 2) this._drawInequalityIntersection(ineqLoci, ctx);
 
         for (const c of this.expressions) {
@@ -4628,6 +4693,63 @@ class Komplexiti {
                     }
                 }
 
+                continue;
+            }
+
+            // --- Compound inequality: draw each boundary curve in the card colour ---
+            if (c.type === 'compound-locus' && c.compoundParts) {
+                for (const part of c.compoundParts) {
+                    const fastSegs = this._traceFastLocusSegments(part.locus);
+                    let segs;
+                    if (fastSegs !== null) {
+                        segs = fastSegs;
+                        const fpKind = part.locus.fastPath?.kind;
+                        if (fpKind !== 'circle' && fpKind !== 'apollonius') {
+                            const vp = this.viewport;
+                            const cc = part._locusCache;
+                            const fresh = cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY;
+                            if (!fresh) {
+                                if (!cc) {
+                                    part._locusCache = { segments: null, shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id), ...vp };
+                                } else {
+                                    this._scheduleLocusRetrace();
+                                }
+                            }
+                        }
+                    } else {
+                        const vp = this.viewport;
+                        const cc = part._locusCache;
+                        const fresh = cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY;
+                        if (fresh) {
+                            segs = cc.segments;
+                        } else if (cc) {
+                            segs = cc.segments;
+                            this._scheduleLocusRetrace();
+                        } else {
+                            segs = this._traceLocusSegments(part.locus, part.equationVar, part.id);
+                            part._locusCache = { segments: segs, shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id), minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                        }
+                    }
+                    if (!segs?.length) continue;
+                    ctx.save();
+                    ctx.strokeStyle = c.color;
+                    ctx.lineWidth = Math.max(2, strokeWidth - 0.5);
+                    ctx.globalAlpha = 0.95;
+                    if (part.locus.inequality?.strict) ctx.setLineDash([8, 5]);
+                    const chains = this._stitchSegmentsToChains(segs);
+                    ctx.beginPath();
+                    for (const chain of chains) {
+                        if (!chain.length) continue;
+                        const p0 = this.worldToScreen(chain[0].x, chain[0].y);
+                        ctx.moveTo(p0.x, p0.y);
+                        for (let ci = 1; ci < chain.length; ci++) {
+                            const pt = this.worldToScreen(chain[ci].x, chain[ci].y);
+                            ctx.lineTo(pt.x, pt.y);
+                        }
+                    }
+                    ctx.stroke();
+                    ctx.restore();
+                }
                 continue;
             }
 
