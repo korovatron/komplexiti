@@ -4352,6 +4352,12 @@ class Komplexiti {
                 '\\arg\\left(\\frac{z-1}{z+1}\\right)=\\frac{\\pi}{4}',
                 '\\left|z^2+\\frac{1}{z^2}\\right|=2'
             ],
+            'line-loci': [
+                'a=-2-2i',
+                'im\\left(z\\right)=3',
+                're\\left(z\\right)=\\frac{3}{2}',
+                '\\left|z-\\left(2-3i\\right)\\right|=\\left|z-1+2i\\right|'
+            ],
             'conjugate-equations': [
                 { latex: '\\overline{2z-\\overline{z}}=z^2', cardRootFmt: 'cartesian' }
             ],
