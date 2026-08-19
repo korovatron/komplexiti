@@ -4451,7 +4451,7 @@ class Komplexiti {
         if (!list) return;
 
         if (window.goatcounter?.count) {
-            window.goatcounter.count({ path: 'Complexiti - Demo Set Opened', event: true });
+            window.goatcounter.count({ path: 'Komplexiti - Demo Set Opened', event: true });
         }
 
         this.expressions = [];
