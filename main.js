@@ -2867,7 +2867,8 @@ class Komplexiti {
                             kind: 'line',
                             point: { re: (a.re + b.re) / 2, im: (a.im + b.im) / 2 },
                             direction: { re: -dy, im: dx },
-                            focusA: a, focusB: b
+                            focusA: a, focusB: b,
+                            perpBisector: true
                         }
                     };
                 }
@@ -2905,6 +2906,11 @@ class Komplexiti {
                 if (!linear) continue;
                 const constant = this._evaluateRealExpr(otherExpr, scope);
                 if (constant === null) continue;
+                const pt = axis === 'vertical'
+                    ? { re: constant - linear.offset.re, im: 0 }
+                    : { re: 0, im: constant - linear.offset.im };
+                // focusA: where lhs < rhs (dir=-1); focusB: where lhs > rhs (dir=1)
+                const grad = axis === 'vertical' ? { re: 1, im: 0 } : { re: 0, im: 1 };
                 return {
                     lhs,
                     rhs,
@@ -2912,10 +2918,10 @@ class Komplexiti {
                     scalar: true,
                     fastPath: {
                         kind: 'line',
-                        point: axis === 'vertical'
-                            ? { re: constant - linear.offset.re, im: 0 }
-                            : { re: 0, im: constant - linear.offset.im },
-                        direction: axis === 'vertical' ? { re: 0, im: 1 } : { re: 1, im: 0 }
+                        point: pt,
+                        direction: axis === 'vertical' ? { re: 0, im: 1 } : { re: 1, im: 0 },
+                        focusA: { re: pt.re - grad.re, im: pt.im - grad.im },
+                        focusB: { re: pt.re + grad.re, im: pt.im + grad.im }
                     }
                 };
             }
@@ -4565,10 +4571,10 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             const fp = c.locus.fastPath;
-            const lineLabel = (fp?.kind === 'line' && fp?.focusA) ? 'perpendicular bisector' : 'line';
+            const lineLabel = fp?.kind === 'line' ? (fp.perpBisector ? 'perpendicular bisector' : 'line') : null;
             const kinds = { circle: 'circle', line: lineLabel, ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski', 'inscribed-arc': 'inscribed arc' };
             valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
-            const hasFoci = !!(fp?.focusA && fp?.focusB);
+            const hasFoci = !!(fp?.focusA && fp?.focusB && fp?.perpBisector);
             if (hasFoci) {
                 fociContainer.classList.add('visible');
                 if (fociToggle) fociToggle.classList.toggle('is-hidden', c.showFoci === false);
@@ -5077,7 +5083,7 @@ class Komplexiti {
                 ctx.restore();
 
                 // Draw F₁/F₂ foci if the locus has focus points and they are enabled
-                if (c.showFoci !== false && fp?.focusA && fp?.focusB) {
+                if (c.showFoci !== false && fp?.perpBisector && fp?.focusA && fp?.focusB) {
                     const fDotR = Math.max(3, dotR - 1.5);
                     for (const [idx, focus] of [[1, fp.focusA], [2, fp.focusB]]) {
                         const fp2 = this.worldToScreen(focus.re, focus.im);
