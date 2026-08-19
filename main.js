@@ -3223,7 +3223,7 @@ class Komplexiti {
                     // Fast-path loci need a shade grid rebuild only (segments come from geometry)
                     if (!c.locus.inequality) continue;
                     const fpKind = c.locus.fastPath.kind;
-                    if (fpKind === 'circle' || fpKind === 'apollonius') continue;
+                    if (fpKind === 'circle' || fpKind === 'apollonius' || fpKind === 'ray' || fpKind === 'line') continue;
                     c._locusCache = {
                         segments: null,
                         shadeGrid: this._buildLocusShadeGrid(c.locus, c.equationVar, c.id),
@@ -4186,9 +4186,9 @@ class Komplexiti {
                 '\\left|z^2+\\overline{z}\\right|=1'
             ],
             'inequalities': [
-                '\\left|z\\right|\\le3',
-                '\\left|z-\\left(1+2i\\right)\\right|<2',
-                '\\left|z-1\\right|\\le\\left|z-3\\right|'
+                '\\frac{\\pi}{6}\\le\\arg\\left(w+2i\\right)\\le\\frac{\\pi}{3}',
+                '\\left|z-\\left(1-i\\right)\\right|<2',
+                '\\left|z+i\\right|<\\left|z-2\\right|'
             ]
         };
 
@@ -4850,7 +4850,7 @@ class Komplexiti {
                     // For fast-path inequality loci, build/cache shade grid where needed
                     if (c.locus.inequality) {
                         const fpKind = fp?.kind;
-                        if (fpKind !== 'circle' && fpKind !== 'apollonius') {
+                        if (fpKind !== 'circle' && fpKind !== 'apollonius' && fpKind !== 'ray' && fpKind !== 'line') {
                             const vp = this.viewport;
                             const cached = c._locusCache;
                             const fresh = cached && cached.minX === vp.minX && cached.maxX === vp.maxX &&
@@ -4934,10 +4934,12 @@ class Komplexiti {
 
             // --- Compound inequality: draw each boundary curve in the card colour ---
             if (c.type === 'compound-locus' && c.compoundParts) {
-                // On initial build, share the LHS evaluation across both parts in one pass
+                // On initial build, share the LHS evaluation - skip if all parts have geometric fast paths
                 {
                     const _pp = c.compoundParts, _vp = this.viewport;
-                    if (_pp.length === 2 && _pp[0].locus.lhs === _pp[1].locus.lhs &&
+                    const _geomKinds = new Set(['ray', 'line', 'circle', 'apollonius']);
+                    const _allGeom = _pp.every(p => _geomKinds.has(p.locus.fastPath?.kind));
+                    if (!_allGeom && _pp.length === 2 && _pp[0].locus.lhs === _pp[1].locus.lhs &&
                         !_pp[0]._locusCache && !_pp[1]._locusCache) {
                         const _res = this._traceCompoundPartsWithShade(_pp[0].locus, _pp[1].locus, _pp[0].equationVar, _pp[0].id);
                         if (_res) for (let i = 0; i < 2; i++) {
@@ -4951,7 +4953,7 @@ class Komplexiti {
                     if (fastSegs !== null) {
                         segs = fastSegs;
                         const fpKind = part.locus.fastPath?.kind;
-                        if (fpKind !== 'circle' && fpKind !== 'apollonius') {
+                        if (fpKind !== 'circle' && fpKind !== 'apollonius' && fpKind !== 'ray' && fpKind !== 'line') {
                             const vp = this.viewport;
                             const cc = part._locusCache;
                             const fresh = cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY;
