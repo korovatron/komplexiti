@@ -3547,6 +3547,96 @@ class Komplexiti {
         ctx.restore();
     }
 
+    // Draw the intersection of 2+ enabled inequality loci using destination-in compositing.
+    // Each region is rendered white to an off-screen canvas; successive destination-in passes
+    // leave only the area common to all of them, which is then tinted and drawn to ctx.
+    _drawInequalityIntersection(ineqLoci, ctx) {
+        const cw = this.canvas.width;
+        const ch = this.canvas.height;
+        if (!cw || !ch) return;
+
+        const offscreens = [];
+        for (const c of ineqLoci) {
+            const fp   = c.locus.fastPath;
+            const ineq = c.locus.inequality;
+            const off  = document.createElement('canvas');
+            off.width  = cw;
+            off.height = ch;
+            const offCtx = off.getContext('2d', { alpha: true });
+            offCtx.imageSmoothingEnabled = false;
+            offCtx.fillStyle = '#ffffff';
+
+            if (fp?.kind === 'circle' || fp?.kind === 'apollonius') {
+                const sc = this.worldToScreen(fp.center.re, fp.center.im);
+                const se = this.worldToScreen(fp.center.re + fp.radius, fp.center.im);
+                const sr = Math.abs(se.x - sc.x);
+                offCtx.beginPath();
+                if (ineq.dir < 0) {
+                    offCtx.arc(sc.x, sc.y, sr, 0, Math.PI * 2);
+                } else {
+                    offCtx.moveTo(0, 0); offCtx.lineTo(cw, 0); offCtx.lineTo(cw, ch); offCtx.lineTo(0, ch);
+                    offCtx.closePath();
+                    offCtx.arc(sc.x, sc.y, sr, 0, Math.PI * 2, true);
+                }
+                offCtx.fill();
+            } else {
+                const sg = c._locusCache?.shadeGrid
+                    ?? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id);
+                if (!sg) continue;
+                for (let iy = 0; iy < sg.rows; iy++) {
+                    const wyBottom = sg.originY + iy * sg.dy;
+                    const wyTop    = sg.originY + (iy + 1) * sg.dy;
+                    const screenTop    = Math.round(this.worldToScreen(0, wyTop).y);
+                    const screenBottom = Math.round(this.worldToScreen(0, wyBottom).y);
+                    const cellH = screenBottom - screenTop;
+                    if (cellH <= 0) continue;
+                    let runStart = -1;
+                    for (let ix = 0; ix <= sg.cols; ix++) {
+                        const filled = ix < sg.cols && sg.grid[iy][ix];
+                        if (filled && runStart < 0) {
+                            runStart = ix;
+                        } else if (!filled && runStart >= 0) {
+                            const x0 = this.worldToScreen(sg.originX + runStart * sg.dx, 0).x;
+                            const x1 = this.worldToScreen(sg.originX + ix * sg.dx, 0).x;
+                            offCtx.fillRect(x0, screenTop, x1 - x0, cellH);
+                            runStart = -1;
+                        }
+                    }
+                }
+            }
+            offscreens.push(off);
+        }
+
+        if (offscreens.length < 2) return;
+
+        // Intersect all regions via successive destination-in passes
+        const composite = document.createElement('canvas');
+        composite.width  = cw;
+        composite.height = ch;
+        const compCtx = composite.getContext('2d', { alpha: true });
+        compCtx.imageSmoothingEnabled = false;
+        compCtx.drawImage(offscreens[0], 0, 0);
+        for (let i = 1; i < offscreens.length; i++) {
+            compCtx.globalCompositeOperation = 'destination-in';
+            compCtx.drawImage(offscreens[i], 0, 0);
+        }
+
+        // Tint the intersection with a neutral colour distinct from any locus colour
+        const colorCanvas = document.createElement('canvas');
+        colorCanvas.width  = cw;
+        colorCanvas.height = ch;
+        const colorCtx = colorCanvas.getContext('2d', { alpha: true });
+        colorCtx.fillStyle = '#9932CC';
+        colorCtx.fillRect(0, 0, cw, ch);
+        colorCtx.globalCompositeOperation = 'destination-in';
+        colorCtx.drawImage(composite, 0, 0);
+
+        ctx.save();
+        ctx.globalAlpha = 0.22;
+        ctx.drawImage(colorCanvas, 0, 0);
+        ctx.restore();
+    }
+
     // Extract polynomial coefficients [a0..an] of h(varName) via symbolic differentiation.
     // Returns null if h is not a polynomial of degree ≤ maxDeg.
     _extractPolynomialCoeffs(hExpr, varName, scope, maxDeg = 6) {
@@ -4380,6 +4470,11 @@ class Komplexiti {
         const strokeWidth = this.sizeMode === 'xlarge' ? 5  : this.sizeMode === 'large' ? 4  : 3;
         const headLen     = this.sizeMode === 'xlarge' ? 15 : this.sizeMode === 'large' ? 13 : 11;
 
+        const ineqLoci = this.expressions.filter(c =>
+            c.enabled && c.type === 'locus' && c.locus?.inequality && c.equationVar
+        );
+        if (ineqLoci.length >= 2) this._drawInequalityIntersection(ineqLoci, ctx);
+
         for (const c of this.expressions) {
             if (!c.enabled) continue;
 
@@ -4489,7 +4584,7 @@ class Komplexiti {
                     }
                 }
                 // Draw shading before the boundary so the curve renders on top
-                if (c.locus.inequality) this._drawLocusShade(c, ctx);
+                if (c.locus.inequality && ineqLoci.length < 2) this._drawLocusShade(c, ctx);
                 if (!segments?.length) continue;
                 ctx.save();
                 ctx.strokeStyle = c.color;
