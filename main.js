@@ -3620,19 +3620,18 @@ class Komplexiti {
             rhsNode = math.parse(locus.rhs);
         } catch { return null; }
 
-        const grid = Array.from({ length: rows }, () => new Uint8Array(cols));
-        for (let iy = 0; iy < rows; iy++) {
-            const y = minY + (iy + 0.5) * dy;
-            for (let ix = 0; ix < cols; ix++) {
-                const x = minX + (ix + 0.5) * dx;
+        // Store signed-difference values at cell corners (rows+1 × cols+1) for smooth fill.
+        const grid = Array.from({ length: rows + 1 }, () => new Float32Array(cols + 1));
+        for (let iy = 0; iy <= rows; iy++) {
+            const y = minY + iy * dy;
+            for (let ix = 0; ix <= cols; ix++) {
+                const x = minX + ix * dx;
                 try {
                     const evalScope = { ...scope, [varName]: math.complex(x, y) };
                     const lv = lhsNode.evaluate(evalScope);
                     const rv = rhsNode.evaluate(evalScope);
-                    // angular: false - arg inequalities need direct numeric comparison, not wrapped,
-                    // so arg(w) ≤ θ shades the full arc rather than only the near π-wide half.
                     const signed = this._equationSignedDifference(lv, rv, { angular: false });
-                    if (signed !== null && isFinite(signed) && signed * dir > 0) grid[iy][ix] = 1;
+                    grid[iy][ix] = (signed !== null && isFinite(signed)) ? signed * dir : 0;
                 } catch { /* skip */ }
             }
         }
@@ -3665,8 +3664,8 @@ class Komplexiti {
         const ang0 = locus0.angular ?? false, ang1 = locus1.angular ?? false;
         const v0  = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(Infinity));
         const v1  = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(Infinity));
-        const sg0 = Array.from({ length: rows }, () => new Uint8Array(cols));
-        const sg1 = Array.from({ length: rows }, () => new Uint8Array(cols));
+        const sg0 = Array.from({ length: rows + 1 }, () => new Float32Array(cols + 1));
+        const sg1 = Array.from({ length: rows + 1 }, () => new Float32Array(cols + 1));
         for (let iy = 0; iy <= rows; iy++) {
             const y = minY + iy * dy;
             for (let ix = 0; ix <= cols; ix++) {
@@ -3678,12 +3677,10 @@ class Komplexiti {
                     const s1 = this._equationSignedDifference(lhsVal, rhs1Val, { angular: ang1 });
                     v0[iy][ix] = s0 === null ? Infinity : s0;
                     v1[iy][ix] = s1 === null ? Infinity : s1;
-                    if (iy < rows && ix < cols) {
-                        const f0 = this._equationSignedDifference(lhsVal, rhs0Val, { angular: false });
-                        const f1 = this._equationSignedDifference(lhsVal, rhs1Val, { angular: false });
-                        if (f0 !== null && isFinite(f0) && f0 * dir0 > 0) sg0[iy][ix] = 1;
-                        if (f1 !== null && isFinite(f1) && f1 * dir1 > 0) sg1[iy][ix] = 1;
-                    }
+                    const f0 = this._equationSignedDifference(lhsVal, rhs0Val, { angular: false });
+                    const f1 = this._equationSignedDifference(lhsVal, rhs1Val, { angular: false });
+                    sg0[iy][ix] = (f0 !== null && isFinite(f0)) ? f0 * dir0 : 0;
+                    sg1[iy][ix] = (f1 !== null && isFinite(f1)) ? f1 * dir1 : 0;
                 } catch { /* leave Infinity */ }
             }
         }
@@ -3785,6 +3782,51 @@ class Komplexiti {
         return chains;
     }
 
+    // Marching-squares polygon fill for a shade grid (corner float values, positive = inside).
+    _renderShadeGrid(sg, ctx) {
+        const { grid, rows, cols, dx, dy, originX, originY } = sg;
+        const scx = new Float64Array(cols + 1);
+        const scy = new Float64Array(rows + 1);
+        for (let ix = 0; ix <= cols; ix++) scx[ix] = this.worldToScreen(originX + ix * dx, 0).x;
+        for (let iy = 0; iy <= rows; iy++) scy[iy] = this.worldToScreen(0, originY + iy * dy).y;
+        const li = (a, b) => Math.abs(a - b) < 1e-9 ? 0.5 : a / (a - b); // lerp param [0,1]
+        ctx.beginPath();
+        for (let iy = 0; iy < rows; iy++) {
+            for (let ix = 0; ix < cols; ix++) {
+                const vBL = grid[iy][ix], vBR = grid[iy][ix + 1];
+                const vTL = grid[iy + 1][ix], vTR = grid[iy + 1][ix + 1];
+                const k = (vBL > 0 ? 1 : 0) | (vBR > 0 ? 2 : 0) | (vTR > 0 ? 4 : 0) | (vTL > 0 ? 8 : 0);
+                if (k === 0) continue;
+                const x0 = scx[ix], x1 = scx[ix + 1];
+                const y0 = scy[iy], y1 = scy[iy + 1]; // y0 = screen-bottom (larger y), y1 = screen-top
+                if (k === 15) { ctx.rect(x0, y1, x1 - x0, y0 - y1); continue; }
+                const cbx = x0 + li(vBL, vBR) * (x1 - x0);        // bottom edge crossing x
+                const cry = y0 + li(vBR, vTR) * (y1 - y0);         // right  edge crossing y
+                const tpx = x0 + li(vTL, vTR) * (x1 - x0);        // top    edge crossing x
+                const cly = y0 + li(vBL, vTL) * (y1 - y0);        // left   edge crossing y
+                switch (k) {
+                    case  1: ctx.moveTo(x0,y0);  ctx.lineTo(cbx,y0);  ctx.lineTo(x0,cly);  ctx.closePath(); break;
+                    case  2: ctx.moveTo(cbx,y0); ctx.lineTo(x1,y0);   ctx.lineTo(x1,cry);  ctx.closePath(); break;
+                    case  3: ctx.moveTo(x0,y0);  ctx.lineTo(x1,y0);   ctx.lineTo(x1,cry);  ctx.lineTo(x0,cly); ctx.closePath(); break;
+                    case  4: ctx.moveTo(x1,cry); ctx.lineTo(x1,y1);   ctx.lineTo(tpx,y1);  ctx.closePath(); break;
+                    case  5: ctx.moveTo(x0,y0);  ctx.lineTo(cbx,y0);  ctx.lineTo(x0,cly);  ctx.closePath();
+                             ctx.moveTo(x1,cry); ctx.lineTo(x1,y1);   ctx.lineTo(tpx,y1);  ctx.closePath(); break;
+                    case  6: ctx.moveTo(cbx,y0); ctx.lineTo(x1,y0);   ctx.lineTo(x1,y1);   ctx.lineTo(tpx,y1); ctx.closePath(); break;
+                    case  7: ctx.moveTo(x0,y0);  ctx.lineTo(x1,y0);   ctx.lineTo(x1,y1);   ctx.lineTo(tpx,y1); ctx.lineTo(x0,cly); ctx.closePath(); break;
+                    case  8: ctx.moveTo(x0,cly); ctx.lineTo(x0,y1);   ctx.lineTo(tpx,y1);  ctx.closePath(); break;
+                    case  9: ctx.moveTo(x0,y0);  ctx.lineTo(x0,y1);   ctx.lineTo(tpx,y1);  ctx.lineTo(cbx,y0); ctx.closePath(); break;
+                    case 10: ctx.moveTo(cbx,y0); ctx.lineTo(x1,y0);   ctx.lineTo(x1,cry);  ctx.closePath();
+                             ctx.moveTo(x0,cly); ctx.lineTo(x0,y1);   ctx.lineTo(tpx,y1);  ctx.closePath(); break;
+                    case 11: ctx.moveTo(x0,y0);  ctx.lineTo(x1,y0);   ctx.lineTo(x1,cry);  ctx.lineTo(tpx,y1); ctx.lineTo(x0,y1); ctx.closePath(); break;
+                    case 12: ctx.moveTo(x0,y1);  ctx.lineTo(x1,y1);   ctx.lineTo(x1,cry);  ctx.lineTo(x0,cly); ctx.closePath(); break;
+                    case 13: ctx.moveTo(x0,y0);  ctx.lineTo(cbx,y0);  ctx.lineTo(x1,cry);  ctx.lineTo(x1,y1); ctx.lineTo(x0,y1); ctx.closePath(); break;
+                    case 14: ctx.moveTo(x0,cly); ctx.lineTo(x0,y1);   ctx.lineTo(x1,y1);   ctx.lineTo(x1,y0); ctx.lineTo(cbx,y0); ctx.closePath(); break;
+                }
+            }
+        }
+        ctx.fill();
+    }
+
     _drawLocusShade(c, ctx) {
         const ineq = c.locus.inequality;
         if (!ineq) return;
@@ -3872,33 +3914,13 @@ class Komplexiti {
             return;
         }
 
-        // Grid-based fill for all other loci - row-merge to reduce blockiness
+        // Smooth marching-squares fill for all other loci
         const sg = c._locusCache?.shadeGrid;
         if (!sg) return;
         ctx.save();
         ctx.fillStyle = c.color;
         ctx.globalAlpha = SHADE_ALPHA;
-        for (let iy = 0; iy < sg.rows; iy++) {
-            const wyBottom = sg.originY + iy * sg.dy;
-            const wyTop    = sg.originY + (iy + 1) * sg.dy;
-            // Round to integer pixel boundaries so adjacent rows share an exact edge with no overlap or gap
-            const screenTop    = Math.round(this.worldToScreen(0, wyTop).y);
-            const screenBottom = Math.round(this.worldToScreen(0, wyBottom).y);
-            const cellH = screenBottom - screenTop;
-            if (cellH <= 0) continue;
-            let runStart = -1;
-            for (let ix = 0; ix <= sg.cols; ix++) {
-                const filled = ix < sg.cols && sg.grid[iy][ix];
-                if (filled && runStart < 0) {
-                    runStart = ix;
-                } else if (!filled && runStart >= 0) {
-                    const x0 = this.worldToScreen(sg.originX + runStart * sg.dx, 0).x;
-                    const x1 = this.worldToScreen(sg.originX + ix * sg.dx, 0).x;
-                    ctx.fillRect(x0, screenTop, x1 - x0, cellH);
-                    runStart = -1;
-                }
-            }
-        }
+        this._renderShadeGrid(sg, ctx);
         ctx.restore();
     }
 
@@ -4080,26 +4102,7 @@ class Komplexiti {
                         this._scheduleLocusRetrace();
                     }
                 }
-                for (let iy = 0; iy < sg.rows; iy++) {
-                    const wyBottom = sg.originY + iy * sg.dy;
-                    const wyTop    = sg.originY + (iy + 1) * sg.dy;
-                    const screenTop    = Math.round(this.worldToScreen(0, wyTop).y);
-                    const screenBottom = Math.round(this.worldToScreen(0, wyBottom).y);
-                    const cellH = screenBottom - screenTop;
-                    if (cellH <= 0) continue;
-                    let runStart = -1;
-                    for (let ix = 0; ix <= sg.cols; ix++) {
-                        const filled = ix < sg.cols && sg.grid[iy][ix];
-                        if (filled && runStart < 0) {
-                            runStart = ix;
-                        } else if (!filled && runStart >= 0) {
-                            const x0 = this.worldToScreen(sg.originX + runStart * sg.dx, 0).x;
-                            const x1 = this.worldToScreen(sg.originX + ix * sg.dx, 0).x;
-                            offCtx.fillRect(x0, screenTop, x1 - x0, cellH);
-                            runStart = -1;
-                        }
-                    }
-                }
+                this._renderShadeGrid(sg, offCtx);
             }
             offscreens.push(off);
         }
