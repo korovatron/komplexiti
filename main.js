@@ -2229,7 +2229,8 @@ class Komplexiti {
             e = e.replace(/\\bar\s*\{([^{}]+)\}/g, 'conj($1)');
         }
         // Insert * where a variable/digit directly precedes a \function command (e.g. w\sqrt → w*\sqrt)
-        e = e.replace(/([a-zA-Z0-9])\\(sqrt|sin|cos|tan|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan|arcsinh|arccosh|arctanh)\b/g, '$1*\\$2');
+        // Negative lookbehind prevents matching a letter that is itself part of a LaTeX command (e.g. 'e' in \le\arctan).
+        e = e.replace(/(?<![a-zA-Z])([a-zA-Z0-9])\\(sqrt|sin|cos|tan|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan|arcsinh|arccosh|arctanh)\b/g, '$1*\\$2');
         for (let p = 0; p < 4; p++) {
             e = e.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '(($1)/($2))');
             // also handle \frac12 style (no braces, single-char args)
