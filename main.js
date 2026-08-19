@@ -3642,6 +3642,15 @@ class Komplexiti {
             return;
         }
 
+        // Ray fast path: smooth polygon fill (no staircase)
+        if (fp?.kind === 'ray') {
+            ctx.save();
+            ctx.fillStyle = c.color;
+            ctx.globalAlpha = SHADE_ALPHA;
+            if (this._fillRayRegion(fp, ineq.dir, ctx)) { ctx.restore(); return; }
+            ctx.restore();
+        }
+
         // Grid-based fill for all other loci - row-merge to reduce blockiness
         const sg = c._locusCache?.shadeGrid;
         if (!sg) return;
@@ -3670,6 +3679,50 @@ class Komplexiti {
             }
         }
         ctx.restore();
+    }
+
+    // Fill the half-plane for a ray inequality using a canvas polygon (no staircase).
+    // Traces: origin → ray-exit-point → viewport-boundary-walk → branch-cut-exit → close.
+    // Returns false if the geometry is degenerate (caller falls back to shade grid).
+    _fillRayRegion(fp, ineqDir, targetCtx) {
+        const cw = this.canvas.width, ch = this.canvas.height;
+        const o  = fp.origin;
+        const rayHits    = this._clipInfiniteLine(o, { re: Math.cos(fp.angle), im: Math.sin(fp.angle) });
+        const branchHits = this._clipInfiniteLine(o, { re: -1, im: 0 });  // branch cut points left
+        if (!rayHits || rayHits.length < 2 || !branchHits || branchHits.length < 2) return false;
+        if (rayHits[1].t < -1e-9) return false;  // forward ray misses the viewport
+        const P_theta  = this.worldToScreen(rayHits[1].x,    rayHits[1].y);
+        const P_branch = this.worldToScreen(branchHits[1].x, branchHits[1].y);
+        const sc       = this.worldToScreen(o.re, o.im);
+        // Parameterise viewport boundary clockwise (screen): top→right→bottom→left, t ∈ [0,4)
+        const eps = 0.5;
+        const vt = (sx, sy) => {
+            if (sy <= eps)      return sx / cw;
+            if (sx >= cw - eps) return 1 + sy / ch;
+            if (sy >= ch - eps) return 2 + (cw - sx) / cw;
+            return 3 + (ch - sy) / ch;
+        };
+        const t0 = vt(P_theta.x,  P_theta.y);
+        const t1 = vt(P_branch.x, P_branch.y);
+        const corners = [[0,0],[cw,0],[cw,ch],[0,ch]];
+        const mid = [];
+        if (ineqDir > 0) {
+            // arg ≥ θ → shade CCW world = CCW screen → walk t decreasing
+            let te = t1; if (te >= t0) te -= 4;
+            for (let ci = Math.floor(t0); ci > te; ci--) mid.push(corners[((ci % 4) + 4) % 4]);
+        } else {
+            // arg ≤ θ → shade CW world = CW screen → walk t increasing
+            let te = t1; if (te <= t0) te += 4;
+            for (let ci = Math.floor(t0) + 1; ci <= Math.floor(te); ci++) mid.push(corners[ci % 4]);
+        }
+        targetCtx.beginPath();
+        targetCtx.moveTo(sc.x, sc.y);
+        targetCtx.lineTo(P_theta.x, P_theta.y);
+        for (const [x, y] of mid) targetCtx.lineTo(x, y);
+        targetCtx.lineTo(P_branch.x, P_branch.y);
+        targetCtx.closePath();
+        targetCtx.fill();
+        return true;
     }
 
     // Draw the intersection of 2+ enabled inequality loci using destination-in compositing.
@@ -3704,6 +3757,9 @@ class Komplexiti {
                     offCtx.arc(sc.x, sc.y, sr, 0, Math.PI * 2, true);
                 }
                 offCtx.fill();
+            } else if (fp?.kind === 'ray') {
+                offCtx.fillStyle = '#ffffff';
+                if (!this._fillRayRegion(fp, ineq.dir, offCtx)) continue;
             } else {
                 const sg = c._locusCache?.shadeGrid
                     ?? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id);
