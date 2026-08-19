@@ -3190,14 +3190,28 @@ class Komplexiti {
             const vp = this.viewport;
             for (const c of this.expressions) {
                 if (c.type === 'compound-locus' && c.compoundParts) {
-                    for (const part of c.compoundParts) {
-                        const cc = part._locusCache;
-                        if (cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY) continue;
-                        part._locusCache = {
-                            segments: this._traceLocusSegments(part.locus, part.equationVar, part.id),
-                            shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id),
-                            minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
-                        };
+                    const parts = c.compoundParts;
+                    const anyStale = parts.some(p => {
+                        const cc = p._locusCache;
+                        return !(cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY);
+                    });
+                    if (anyStale) {
+                        const combined = parts.length === 2 && parts[0].locus.lhs === parts[1].locus.lhs
+                            ? this._traceCompoundPartsWithShade(parts[0].locus, parts[1].locus, parts[0].equationVar, parts[0].id)
+                            : null;
+                        if (combined) {
+                            for (let i = 0; i < 2; i++) {
+                                parts[i]._locusCache = { ...combined[i], minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                            }
+                        } else {
+                            for (const part of parts) {
+                                part._locusCache = {
+                                    segments: this._traceLocusSegments(part.locus, part.equationVar, part.id),
+                                    shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id),
+                                    minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
+                                };
+                            }
+                        }
                         retraced = true;
                     }
                 }
@@ -3456,6 +3470,91 @@ class Komplexiti {
             }
         }
         return { grid, cols, rows, dx, dy, originX: minX, originY: minY };
+    }
+
+    // Evaluate both compound parts in one grid pass, sharing the single LHS expression evaluation.
+    // Reduces 4 full evaluations (2 trace + 2 shade) to 1, giving ~4x speedup after pan/zoom.
+    _traceCompoundPartsWithShade(locus0, locus1, varName, ownId) {
+        if (typeof math === 'undefined') return null;
+        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
+        const spanX = maxX - minX, spanY = maxY - minY;
+        if (!(spanX > 0) || !(spanY > 0)) return null;
+        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width / 6)));
+        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6)));
+        const dx = spanX / cols, dy = spanY / rows;
+        const scope = this.buildExpressionScope(ownId);
+        let lhsNode, rhs0Node, rhs1Node;
+        try {
+            lhsNode  = math.parse(locus0.lhs);
+            rhs0Node = math.parse(locus0.rhs);
+            rhs1Node = math.parse(locus1.rhs);
+        } catch { return null; }
+        let rhs0Val, rhs1Val;
+        try {
+            rhs0Val = rhs0Node.evaluate({ ...scope });
+            rhs1Val = rhs1Node.evaluate({ ...scope });
+        } catch { return null; }
+        const dir0 = locus0.inequality.dir,  dir1 = locus1.inequality.dir;
+        const ang0 = locus0.angular ?? false, ang1 = locus1.angular ?? false;
+        const v0  = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(Infinity));
+        const v1  = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(Infinity));
+        const sg0 = Array.from({ length: rows }, () => new Uint8Array(cols));
+        const sg1 = Array.from({ length: rows }, () => new Uint8Array(cols));
+        for (let iy = 0; iy <= rows; iy++) {
+            const y = minY + iy * dy;
+            for (let ix = 0; ix <= cols; ix++) {
+                const x = minX + ix * dx;
+                try {
+                    const evalScope = { ...scope, [varName]: math.complex(x, y) };
+                    const lhsVal = lhsNode.evaluate(evalScope);
+                    const s0 = this._equationSignedDifference(lhsVal, rhs0Val, { angular: ang0 });
+                    const s1 = this._equationSignedDifference(lhsVal, rhs1Val, { angular: ang1 });
+                    v0[iy][ix] = s0 === null ? Infinity : s0;
+                    v1[iy][ix] = s1 === null ? Infinity : s1;
+                    if (iy < rows && ix < cols) {
+                        const f0 = this._equationSignedDifference(lhsVal, rhs0Val, { angular: false });
+                        const f1 = this._equationSignedDifference(lhsVal, rhs1Val, { angular: false });
+                        if (f0 !== null && isFinite(f0) && f0 * dir0 > 0) sg0[iy][ix] = 1;
+                        if (f1 !== null && isFinite(f1) && f1 * dir1 > 0) sg1[iy][ix] = 1;
+                    }
+                } catch { /* leave Infinity */ }
+            }
+        }
+        const buildSegs = (vals) => {
+            const segs = [];
+            const interp = (x1, y1, a, x2, y2, b) => {
+                const t = Math.abs(a - b) < 1e-9 ? 0.5 : Math.max(0, Math.min(1, a / (a - b)));
+                return { x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t };
+            };
+            for (let iy = 0; iy < rows; iy++) {
+                const y0 = minY + iy * dy, y1 = y0 + dy;
+                for (let ix = 0; ix < cols; ix++) {
+                    const x0 = minX + ix * dx, x1 = x0 + dx;
+                    const a = vals[iy][ix], b = vals[iy][ix+1], cv = vals[iy+1][ix+1], d = vals[iy+1][ix];
+                    if (![a, b, cv, d].every(Number.isFinite)) continue;
+                    const cross = (p, q) => (p === 0) || (q === 0) || ((p < 0) !== (q < 0));
+                    const hits = [];
+                    if (cross(a, b))  hits.push(interp(x0, y0, a, x1, y0, b));
+                    if (cross(b, cv)) hits.push(interp(x1, y0, b, x1, y1, cv));
+                    if (cross(cv, d)) hits.push(interp(x1, y1, cv, x0, y1, d));
+                    if (cross(d, a))  hits.push(interp(x0, y1, d, x0, y0, a));
+                    if (hits.length === 2) {
+                        segs.push([hits[0], hits[1]]);
+                    } else if (hits.length === 4) {
+                        const cx = (x0+x1)/2, cy = (y0+y1)/2;
+                        hits.sort((p, q) => Math.atan2(p.y-cy, p.x-cx) - Math.atan2(q.y-cy, q.x-cx));
+                        segs.push([hits[0], hits[1]]);
+                        segs.push([hits[2], hits[3]]);
+                    }
+                }
+            }
+            return segs;
+        };
+        const meta = { cols, rows, dx, dy, originX: minX, originY: minY };
+        return [
+            { segments: buildSegs(v0), shadeGrid: { ...meta, grid: sg0 } },
+            { segments: buildSegs(v1), shadeGrid: { ...meta, grid: sg1 } },
+        ];
     }
 
     // Draw the shaded region for an inequality locus. Call before drawing the boundary curve.
@@ -4698,6 +4797,17 @@ class Komplexiti {
 
             // --- Compound inequality: draw each boundary curve in the card colour ---
             if (c.type === 'compound-locus' && c.compoundParts) {
+                // On initial build, share the LHS evaluation across both parts in one pass
+                {
+                    const _pp = c.compoundParts, _vp = this.viewport;
+                    if (_pp.length === 2 && _pp[0].locus.lhs === _pp[1].locus.lhs &&
+                        !_pp[0]._locusCache && !_pp[1]._locusCache) {
+                        const _res = this._traceCompoundPartsWithShade(_pp[0].locus, _pp[1].locus, _pp[0].equationVar, _pp[0].id);
+                        if (_res) for (let i = 0; i < 2; i++) {
+                            _pp[i]._locusCache = { ..._res[i], minX: _vp.minX, maxX: _vp.maxX, minY: _vp.minY, maxY: _vp.maxY };
+                        }
+                    }
+                }
                 for (const part of c.compoundParts) {
                     const fastSegs = this._traceFastLocusSegments(part.locus);
                     let segs;
