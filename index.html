@@ -479,10 +479,14 @@
         .title-screen p.copyright .tools-row .tool-link:nth-of-type(3) { color: #00c8ff; }
         .title-screen p.copyright .tools-row .tool-link:nth-of-type(3):hover { color: #35d6ff; }
         .title-screen p.copyright .tools-row .tool-link:nth-of-type(3):active { color: #00b8eb; }
+        .title-screen p.copyright .tools-row .tool-link:nth-of-type(4) { color: #ffd600; }
+        .title-screen p.copyright .tools-row .tool-link:nth-of-type(4):hover { color: #ffe34d; }
+        .title-screen p.copyright .tools-row .tool-link:nth-of-type(4):active { color: #d4aa00; }
 
         @media (max-width: 700px) {
             .title-screen p.copyright .tool-separator { display: none; }
-            .title-screen p.copyright .tool-link { display: block; margin-top: 2px; }
+            .title-screen p.copyright .tools-row .tool-link { display: none; }
+            .title-screen p.copyright .tools-row .tool-link:nth-of-type(4) { display: inline-block; margin-top: 2px; }
         }
 
         /* Short landscape: let copyright flow naturally to avoid overlap */
@@ -1543,6 +1547,8 @@
                         <a class="tool-link" href="https://www.korovatron.co.uk/graphiti/" target="_blank" rel="noopener noreferrer"><span class="tool-name">Graphiti</span></a>
                         <span class="tool-separator"> | </span>
                         <a class="tool-link" href="https://www.korovatron.co.uk/vectorama/" target="_blank" rel="noopener noreferrer"><span class="tool-name">Vectorama</span></a>
+                        <span class="tool-separator"> | </span>
+                        <a class="tool-link" href="https://www.korovatron.co.uk/trimension/" target="_blank" rel="noopener noreferrer"><span class="tool-name">Trimension</span></a>
                         <span class="tool-separator"> | </span>
                         <a class="tool-link" href="https://www.korovatron.co.uk/" target="_blank" rel="noopener noreferrer"><span class="tool-name">Korovatron</span></a>
                     </span>
