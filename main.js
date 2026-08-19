@@ -4565,7 +4565,8 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             const fp = c.locus.fastPath;
-            const kinds = { circle: 'circle', line: 'perpendicular bisector', ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski' };
+            const lineLabel = (fp?.kind === 'line' && fp?.focusA) ? 'perpendicular bisector' : 'line';
+            const kinds = { circle: 'circle', line: lineLabel, ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski', 'inscribed-arc': 'inscribed arc' };
             valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
             const hasFoci = !!(fp?.focusA && fp?.focusB);
             if (hasFoci) {
