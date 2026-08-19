@@ -3834,6 +3834,42 @@ class Komplexiti {
             ctx.restore();
         }
 
+        // Inscribed-arc fast path: smooth circular-segment fill (no staircase)
+        if (fp?.kind === 'inscribed-arc') {
+            const { a, b, theta, center, radius } = fp;
+            const sc   = this.worldToScreen(center.re, center.im);
+            const scE  = this.worldToScreen(center.re + radius, center.im);
+            const sr   = Math.abs(scE.x - sc.x);
+            const sA   = this.worldToScreen(a.re, a.im);
+            const sB   = this.worldToScreen(b.re, b.im);
+            const angB = Math.atan2(sB.y - sc.y, sB.x - sc.x);
+            const angA = Math.atan2(sA.y - sc.y, sA.x - sc.x);
+            // CW in world (theta>0) → anticlockwise=false in canvas (y-flip reverses visual spin)
+            const arcCCW = theta < 0;
+            // "simple segment": the cap between arc and chord on the arc's side of the chord
+            const isSimpleSegment = (ineq.dir > 0) === (theta > 0);
+            const cw = this.canvas.width, ch = this.canvas.height;
+            ctx.save();
+            ctx.fillStyle  = c.color;
+            ctx.globalAlpha = SHADE_ALPHA;
+            ctx.beginPath();
+            if (isSimpleSegment) {
+                ctx.moveTo(sB.x, sB.y);
+                ctx.arc(sc.x, sc.y, sr, angB, angA, arcCCW);
+                ctx.closePath();
+            } else {
+                // Viewport rect + same-winding segment → evenodd leaves segment unfilled
+                ctx.moveTo(0, 0); ctx.lineTo(cw, 0); ctx.lineTo(cw, ch); ctx.lineTo(0, ch);
+                ctx.closePath();
+                ctx.moveTo(sB.x, sB.y);
+                ctx.arc(sc.x, sc.y, sr, angB, angA, arcCCW);
+                ctx.closePath();
+            }
+            ctx.fill('evenodd');
+            ctx.restore();
+            return;
+        }
+
         // Grid-based fill for all other loci - row-merge to reduce blockiness
         const sg = c._locusCache?.shadeGrid;
         if (!sg) return;
