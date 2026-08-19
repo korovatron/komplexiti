@@ -4169,7 +4169,7 @@ class Komplexiti {
             'complex-equations': [
                 'z+\\frac{1}{z}=1',
                 { latex: 'w^3=-27',   cardRootFmt: 'exponential' },
-                { latex: 'z^3=8i',    cardRootFmt: 'exponential' }
+                { latex: 'z^3=8i',    cardRootFmt: 'trig' }
             ],
             'loci': [
                 '\\left|w\\right|=2',
@@ -4369,7 +4369,7 @@ class Komplexiti {
                         const rPart  = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
                         const label  = `${varName}_{${k + 1}}`;
                         wrapper.appendChild(makeMF(`${label}=${rPart}\\cos(${thStr})`, mfSize));
-                        wrapper.appendChild(makeMF(`\\phantom{${label}=}+i${rPart}\\sin(${thStr})`, mfSize));
+                        wrapper.appendChild(makeMF(`\\phantom{${label}=}+${rPart}i\\sin(${thStr})`, mfSize));
                     }
                 } else {
                     wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=${this.formatComplexLatex(root.re, root.im, fmt)}`, mfSize));
