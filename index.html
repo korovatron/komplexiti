@@ -1329,12 +1329,20 @@
             overflow: hidden !important;
         }
 
+        /* iOS/WebKit requires explicit part targeting to suppress the default white field background */
+        .asymptote-equation-field::part(container) {
+            background: transparent !important;
+            box-shadow: none !important;
+            border: none !important;
+        }
+
         .asymptote-equation-field::part(content) {
             font-size: var(--mf-font-size, 18px) !important;
             padding: 0 !important;
             overflow: hidden !important;
             user-select: none !important;
             -webkit-user-select: none !important;
+            background: transparent !important;
         }
 
         .asymptote-equation-field::part(menu-toggle),
