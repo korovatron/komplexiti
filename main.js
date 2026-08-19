@@ -3404,7 +3404,14 @@ class Komplexiti {
 
                 const crosses = (a, b) => {
                     if (locus.scalar) {
-                        return (a === 0) || (b === 0) || ((a < 0) !== (b < 0));
+                        if (a === 0 || b === 0) return true;
+                        if ((a < 0) !== (b < 0)) {
+                            // Suppress ±π wrapping artefact: residual jumps from ≈+π to ≈-π
+                            // across a false arc (e.g. lower arc of arg(z-1)-arg(z+1)=π/4).
+                            if (locus.angular && Math.abs(a) > Math.PI / 2 && Math.abs(b) > Math.PI / 2) return false;
+                            return true;
+                        }
+                        return false;
                     }
                     return (a <= eps) !== (b <= eps);
                 };
@@ -3520,7 +3527,7 @@ class Komplexiti {
                 } catch { /* leave Infinity */ }
             }
         }
-        const buildSegs = (vals) => {
+        const buildSegs = (vals, angular) => {
             const segs = [];
             const interp = (x1, y1, a, x2, y2, b) => {
                 const t = Math.abs(a - b) < 1e-9 ? 0.5 : Math.max(0, Math.min(1, a / (a - b)));
@@ -3532,7 +3539,14 @@ class Komplexiti {
                     const x0 = minX + ix * dx, x1 = x0 + dx;
                     const a = vals[iy][ix], b = vals[iy][ix+1], cv = vals[iy+1][ix+1], d = vals[iy+1][ix];
                     if (![a, b, cv, d].every(Number.isFinite)) continue;
-                    const cross = (p, q) => (p === 0) || (q === 0) || ((p < 0) !== (q < 0));
+                    const cross = (p, q) => {
+                        if (p === 0 || q === 0) return true;
+                        if ((p < 0) !== (q < 0)) {
+                            if (angular && Math.abs(p) > Math.PI / 2 && Math.abs(q) > Math.PI / 2) return false;
+                            return true;
+                        }
+                        return false;
+                    };
                     const hits = [];
                     if (cross(a, b))  hits.push(interp(x0, y0, a, x1, y0, b));
                     if (cross(b, cv)) hits.push(interp(x1, y0, b, x1, y1, cv));
@@ -3552,8 +3566,8 @@ class Komplexiti {
         };
         const meta = { cols, rows, dx, dy, originX: minX, originY: minY };
         return [
-            { segments: buildSegs(v0), shadeGrid: { ...meta, grid: sg0 } },
-            { segments: buildSegs(v1), shadeGrid: { ...meta, grid: sg1 } },
+            { segments: buildSegs(v0, ang0), shadeGrid: { ...meta, grid: sg0 } },
+            { segments: buildSegs(v1, ang1), shadeGrid: { ...meta, grid: sg1 } },
         ];
     }
 
