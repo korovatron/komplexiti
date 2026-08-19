@@ -3955,7 +3955,14 @@ class Komplexiti {
         } else {
             // Origin outside viewport: polygon is ray-entry → ray-exit → [walk] → (close)
             // Both hits must have t > 0 (ray actually reaches the viewport)
-            if (rayHits[0].t < -1e-9 || rayHits[1].t < -1e-9) return false;
+            if (rayHits[0].t < -1e-9 || rayHits[1].t < -1e-9) {
+                // Ray points away from viewport; check if viewport is fully inside the half-plane.
+                const { minX, minY } = this.getVisibleWorldBounds();
+                const nx = -Math.sin(fp.angle), ny = Math.cos(fp.angle); // CCW normal to ray
+                const cornerDot = (minX - o.re) * nx + (minY - o.im) * ny;
+                if ((ineqDir > 0) === (cornerDot > 0)) targetCtx.fillRect(0, 0, cw, ch);
+                return true;
+            }
             const E_theta = this.worldToScreen(rayHits[0].x, rayHits[0].y);
             const P_theta = this.worldToScreen(rayHits[1].x, rayHits[1].y);
             const t0 = vt(P_theta.x, P_theta.y), t1 = vt(E_theta.x, E_theta.y);
@@ -3975,7 +3982,17 @@ class Komplexiti {
     // then closes via the viewport boundary walk. Returns false if the line misses the viewport.
     _fillLineRegion(fp, ineqDir, targetCtx) {
         const hits = this._clipInfiniteLine(fp.point, fp.direction);
-        if (!hits || hits.length < 2) return false;
+        if (!hits || hits.length < 2) {
+            // Line misses viewport: entire viewport is on one side of the bisector.
+            // Normal (nx,ny) ⟂ direction; same sign as the focus → viewport is on the shaded side.
+            const { minX, minY } = this.getVisibleWorldBounds();
+            const nx = -fp.direction.im, ny = fp.direction.re;
+            const shade = ineqDir < 0 ? fp.focusA : fp.focusB;
+            const cornerDot = (minX - fp.point.re) * nx + (minY - fp.point.im) * ny;
+            const focusDot  = (shade.re - fp.point.re) * nx + (shade.im  - fp.point.im) * ny;
+            if (cornerDot * focusDot > 0) targetCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            return true;
+        }
         const cw = this.canvas.width, ch = this.canvas.height;
         const P1 = this.worldToScreen(hits[0].x, hits[0].y);
         const P2 = this.worldToScreen(hits[1].x, hits[1].y);
@@ -4048,9 +4065,22 @@ class Komplexiti {
                        (fp?.kind === 'line' && this._fillLineRegion(fp, ineq.dir, offCtx))) {
                 // geometric fill succeeded
             } else {
-                const sg = c._locusCache?.shadeGrid
-                    ?? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id);
-                if (!sg) continue;
+                let sg = c._locusCache?.shadeGrid ?? null;
+                if (!sg) {
+                    sg = this._buildLocusShadeGrid(c.locus, c.equationVar, c.id);
+                    if (!sg) continue;
+                    // Cache so subsequent frames don't trigger a full rebuild every frame
+                    const vp = this.viewport;
+                    c._locusCache = { segments: c._locusCache?.segments ?? null, shadeGrid: sg,
+                                      minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                } else {
+                    // Stale cache: use the existing grid this frame, rebuild after panning settles
+                    const { minX, maxX, minY, maxY } = this.viewport;
+                    const cc = c._locusCache;
+                    if (cc.minX !== minX || cc.maxX !== maxX || cc.minY !== minY || cc.maxY !== maxY) {
+                        this._scheduleLocusRetrace();
+                    }
+                }
                 for (let iy = 0; iy < sg.rows; iy++) {
                     const wyBottom = sg.originY + iy * sg.dy;
                     const wyTop    = sg.originY + (iy + 1) * sg.dy;
