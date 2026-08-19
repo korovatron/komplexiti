@@ -3792,14 +3792,17 @@ class Komplexiti {
         const li = (a, b) => Math.abs(a - b) < 1e-9 ? 0.5 : a / (a - b); // lerp param [0,1]
         ctx.beginPath();
         for (let iy = 0; iy < rows; iy++) {
+            const y0 = scy[iy], y1 = scy[iy + 1]; // y0 = screen-bottom (larger y), y1 = screen-top
+            let runStart = -1; // run-length batch for fully-interior k=15 cells
             for (let ix = 0; ix < cols; ix++) {
                 const vBL = grid[iy][ix], vBR = grid[iy][ix + 1];
                 const vTL = grid[iy + 1][ix], vTR = grid[iy + 1][ix + 1];
                 const k = (vBL > 0 ? 1 : 0) | (vBR > 0 ? 2 : 0) | (vTR > 0 ? 4 : 0) | (vTL > 0 ? 8 : 0);
+                if (k === 15) { if (runStart < 0) runStart = ix; continue; }
+                // flush any pending interior run before handling this cell
+                if (runStart >= 0) { ctx.rect(scx[runStart], y1, scx[ix] - scx[runStart], y0 - y1); runStart = -1; }
                 if (k === 0) continue;
                 const x0 = scx[ix], x1 = scx[ix + 1];
-                const y0 = scy[iy], y1 = scy[iy + 1]; // y0 = screen-bottom (larger y), y1 = screen-top
-                if (k === 15) { ctx.rect(x0, y1, x1 - x0, y0 - y1); continue; }
                 const cbx = x0 + li(vBL, vBR) * (x1 - x0);        // bottom edge crossing x
                 const cry = y0 + li(vBR, vTR) * (y1 - y0);         // right  edge crossing y
                 const tpx = x0 + li(vTL, vTR) * (x1 - x0);        // top    edge crossing x
@@ -3823,6 +3826,8 @@ class Komplexiti {
                     case 14: ctx.moveTo(x0,cly); ctx.lineTo(x0,y1);   ctx.lineTo(x1,y1);   ctx.lineTo(x1,y0); ctx.lineTo(cbx,y0); ctx.closePath(); break;
                 }
             }
+            // flush any run that reached the end of the row
+            if (runStart >= 0) { ctx.rect(scx[runStart], y1, scx[cols] - scx[runStart], y0 - y1); }
         }
         ctx.fill();
     }
