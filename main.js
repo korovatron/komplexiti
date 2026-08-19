@@ -4069,10 +4069,9 @@ class Komplexiti {
                 if (!sg) {
                     sg = this._buildLocusShadeGrid(c.locus, c.equationVar, c.id);
                     if (!sg) continue;
-                    // Cache so subsequent frames don't trigger a full rebuild every frame
-                    const vp = this.viewport;
-                    c._locusCache = { segments: c._locusCache?.segments ?? null, shadeGrid: sg,
-                                      minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                    // Only update an existing cache; if no cache yet, leave null so the
+                    // per-expression loop builds it with segments without interference.
+                    if (c._locusCache) c._locusCache = { ...c._locusCache, shadeGrid: sg };
                 } else {
                     // Stale cache: use the existing grid this frame, rebuild after panning settles
                     const { minX, maxX, minY, maxY } = this.viewport;
