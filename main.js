@@ -2687,6 +2687,105 @@ class Komplexiti {
         return segments;
     }
 
+    // Extract the inner expression of "arg(...)" when it occupies the entire expr string.
+    _extractArgInner(expr) {
+        const e = expr.replace(/\s+/g, '');
+        if (!e.startsWith('arg(')) return null;
+        let depth = 0, closeIdx = -1;
+        for (let i = 3; i < e.length; i++) {
+            if (e[i] === '(') depth++;
+            else if (e[i] === ')') { depth--; if (depth === 0) { closeIdx = i; break; } }
+        }
+        return closeIdx === e.length - 1 ? e.slice(4, closeIdx) : null;
+    }
+
+    // Match "A/B" (slash at depth 0) where A and B are each affine in varName.
+    _tryExtractLinearFraction(inner, varName, scope) {
+        let e = inner.replace(/\s+/g, '');
+        // Strip outer matched-paren wrappers so "((z-1)/(z+1))" → "(z-1)/(z+1)"
+        while (e.startsWith('(') && e.endsWith(')')) {
+            let d = 0, wraps = true;
+            for (let k = 0; k < e.length - 1; k++) {
+                if (e[k] === '(') d++;
+                else if (e[k] === ')') { d--; if (d === 0) { wraps = false; break; } }
+            }
+            if (!wraps) break;
+            e = e.slice(1, -1);
+        }
+        let depth = 0, slashAt = -1;
+        for (let i = 0; i < e.length; i++) {
+            if (e[i] === '(') depth++;
+            else if (e[i] === ')') depth--;
+            else if (e[i] === '/' && depth === 0) { slashAt = i; break; }
+        }
+        if (slashAt < 0) return null;
+        const wrap = s => (s.startsWith('(') && s.endsWith(')')) ? s : `(${s})`;
+        const linA = this._parseLinearVarOffset(wrap(e.slice(0, slashAt)), varName, scope);
+        const linB = this._parseLinearVarOffset(wrap(e.slice(slashAt + 1)), varName, scope);
+        if (!linA || !linB) return null;
+        return { a: { re: -linA.offset.re, im: -linA.offset.im }, b: { re: -linB.offset.re, im: -linB.offset.im } };
+    }
+
+    // Match "arg(A) - arg(B)" where A and B are each affine in varName.
+    _tryExtractArgDifferencePair(expr, varName, scope) {
+        const e = expr.replace(/\s+/g, '');
+        if (!e.startsWith('arg(')) return null;
+        let depth = 1, i = 4;
+        for (; i < e.length && depth > 0; i++) {
+            if (e[i] === '(') depth++; else if (e[i] === ')') depth--;
+        }
+        const innerA = e.slice(4, i - 1);
+        const rest = e.slice(i);
+        if (!rest.startsWith('-arg(') || !rest.endsWith(')')) return null;
+        const argBStr = rest.slice(1);
+        let d2 = 1, closeB = -1;
+        for (let j = 4; j < argBStr.length; j++) {
+            if (argBStr[j] === '(') d2++;
+            else if (argBStr[j] === ')') { d2--; if (d2 === 0) { closeB = j; break; } }
+        }
+        if (closeB !== argBStr.length - 1) return null;
+        const innerB = argBStr.slice(4, closeB);
+        const wrap = s => (s.startsWith('(') && s.endsWith(')')) ? s : `(${s})`;
+        const linA = this._parseLinearVarOffset(wrap(innerA), varName, scope);
+        const linB = this._parseLinearVarOffset(wrap(innerB), varName, scope);
+        if (!linA || !linB) return null;
+        return { a: { re: -linA.offset.re, im: -linA.offset.im }, b: { re: -linB.offset.re, im: -linB.offset.im } };
+    }
+
+    // Build inscribed-arc fast path for arg(z-a) - arg(z-b) = theta.
+    // Center and radius are derived from the inscribed-angle theorem.
+    _buildInscribedArcFastPath(a, b, theta, lhs, rhs) {
+        const dx = a.re - b.re, dy = a.im - b.im;
+        const chordLen = Math.hypot(dx, dy);
+        if (chordLen < 1e-9) return null;
+        const sinTheta = Math.sin(theta);
+        if (Math.abs(sinTheta) < 1e-9) return null; // theta = 0 or ±π: degenerate
+        const mid = { re: (a.re + b.re) / 2, im: (a.im + b.im) / 2 };
+        // C = midpoint + cot(theta)/2 * left_normal(a-b), left_normal(dx,dy) = (-dy, dx)
+        const cotFactor = Math.cos(theta) / (2 * sinTheta);
+        const center = { re: mid.re + cotFactor * (-dy), im: mid.im + cotFactor * dx };
+        const radius  = chordLen / (2 * Math.abs(sinTheta));
+        return { lhs, rhs, angular: true, scalar: true,
+            fastPath: { kind: 'inscribed-arc', a, b, theta, center, radius } };
+    }
+
+    // Detect arg(z-a) - arg(z-b) = theta  and  arg((z-a)/(z-b)) = theta.
+    _tryBuildInscribedArcLocus(lhs, rhs, varName, scope) {
+        for (const [side, thetaSide] of [[lhs, rhs], [rhs, lhs]]) {
+            const theta = this._evaluateRealExpr(thetaSide, scope);
+            if (theta === null || !isFinite(theta) || Math.abs(theta) < 1e-9
+                    || Math.abs(Math.abs(theta) - Math.PI) < 1e-9) continue;
+            const diffPair = this._tryExtractArgDifferencePair(side, varName, scope);
+            if (diffPair) return this._buildInscribedArcFastPath(diffPair.a, diffPair.b, theta, lhs, rhs);
+            const argInner = this._extractArgInner(side);
+            if (argInner) {
+                const fracPair = this._tryExtractLinearFraction(argInner, varName, scope);
+                if (fracPair) return this._buildInscribedArcFastPath(fracPair.a, fracPair.b, theta, lhs, rhs);
+            }
+        }
+        return null;
+    }
+
     _tryBuildFastLocus(lhs, rhs, varName, scope) {
         const canonical = this._canonicaliseAffineArgEquation(lhs, rhs, varName, scope);
         if (canonical) {
@@ -2855,6 +2954,9 @@ class Komplexiti {
                 };
             }
         }
+
+        const inscribedArc = this._tryBuildInscribedArcLocus(lhs, rhs, varName, scope);
+        if (inscribedArc) return inscribedArc;
 
         const joukowski = this._matchJoukowskiLocus(lhs, rhs, varName, scope);
         if (joukowski) return joukowski;
@@ -3223,7 +3325,7 @@ class Komplexiti {
                     // Fast-path loci need a shade grid rebuild only (segments come from geometry)
                     if (!c.locus.inequality) continue;
                     const fpKind = c.locus.fastPath.kind;
-                    if (fpKind === 'circle' || fpKind === 'apollonius' || fpKind === 'ray' || fpKind === 'line') continue;
+                    if (fpKind === 'circle' || fpKind === 'apollonius' || fpKind === 'ray' || fpKind === 'line' || fpKind === 'inscribed-arc') continue;
                     c._locusCache = {
                         segments: null,
                         shadeGrid: this._buildLocusShadeGrid(c.locus, c.equationVar, c.id),
@@ -3340,6 +3442,25 @@ class Komplexiti {
 
         if (fp.kind === 'joukowski') {
             return this._traceJoukowskiSegments(fp);
+        }
+
+        if (fp.kind === 'inscribed-arc') {
+            const { b, theta, center, radius } = fp;
+            // Arc span = 2π - 2|theta|; direction: CW in world for theta>0, CCW for theta<0
+            const arcAngle = 2 * Math.PI - 2 * Math.abs(theta);
+            const steps = Math.max(60, Math.round(arcAngle / (2 * Math.PI) * 240));
+            const alphaB = Math.atan2(b.im - center.im, b.re - center.re);
+            const dir = theta > 0 ? -1 : 1;
+            const segments = [];
+            for (let k = 0; k < steps; k++) {
+                const ang0 = alphaB + dir * (k / steps) * arcAngle;
+                const ang1 = alphaB + dir * ((k + 1) / steps) * arcAngle;
+                segments.push([
+                    { x: center.re + radius * Math.cos(ang0), y: center.im + radius * Math.sin(ang0) },
+                    { x: center.re + radius * Math.cos(ang1), y: center.im + radius * Math.sin(ang1) }
+                ]);
+            }
+            return segments;
         }
 
         return null;
@@ -4864,7 +4985,7 @@ class Komplexiti {
                     // For fast-path inequality loci, build/cache shade grid where needed
                     if (c.locus.inequality) {
                         const fpKind = fp?.kind;
-                        if (fpKind !== 'circle' && fpKind !== 'apollonius' && fpKind !== 'ray' && fpKind !== 'line') {
+                        if (fpKind !== 'circle' && fpKind !== 'apollonius' && fpKind !== 'ray' && fpKind !== 'line' && fpKind !== 'inscribed-arc') {
                             const vp = this.viewport;
                             const cached = c._locusCache;
                             const fresh = cached && cached.minX === vp.minX && cached.maxX === vp.maxX &&
@@ -4967,7 +5088,7 @@ class Komplexiti {
                     if (fastSegs !== null) {
                         segs = fastSegs;
                         const fpKind = part.locus.fastPath?.kind;
-                        if (fpKind !== 'circle' && fpKind !== 'apollonius' && fpKind !== 'ray' && fpKind !== 'line') {
+                        if (fpKind !== 'circle' && fpKind !== 'apollonius' && fpKind !== 'ray' && fpKind !== 'line' && fpKind !== 'inscribed-arc') {
                             const vp = this.viewport;
                             const cc = part._locusCache;
                             const fresh = cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY;
