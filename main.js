@@ -3738,7 +3738,9 @@ class Komplexiti {
         if (!segments?.length) return [];
         const n = segments.length;
         const used = new Uint8Array(n);
-        const key = p => `${p.x},${p.y}`;
+        // Round to 9 d.p. to absorb the 1-ULP float mismatch between shared-edge
+        // crossing points computed from opposite sides of adjacent cells.
+        const key = p => `${p.x.toFixed(9)},${p.y.toFixed(9)}`;
 
         // Map endpoint key → packed list of (segIdx<<1 | ptIdx)
         const map = new Map();
@@ -5109,19 +5111,34 @@ class Komplexiti {
                 ctx.strokeStyle = c.color;
                 ctx.lineWidth = Math.max(2, strokeWidth - 0.5);
                 ctx.globalAlpha = 0.95;
-                if (c.locus.inequality?.strict) ctx.setLineDash([8, 5]);
                 const chains = this._stitchSegmentsToChains(segments);
-                ctx.beginPath();
-                for (const chain of chains) {
-                    if (!chain.length) continue;
-                    const p0 = this.worldToScreen(chain[0].x, chain[0].y);
-                    ctx.moveTo(p0.x, p0.y);
-                    for (let ci = 1; ci < chain.length; ci++) {
-                        const pt = this.worldToScreen(chain[ci].x, chain[ci].y);
-                        ctx.lineTo(pt.x, pt.y);
+                if (c.locus.inequality?.strict) {
+                    ctx.setLineDash([8, 5]);
+                    let dashAcc = 0;
+                    for (const chain of chains) {
+                        if (!chain.length) continue;
+                        const pts = chain.map(p => this.worldToScreen(p.x, p.y));
+                        ctx.lineDashOffset = dashAcc % 13;
+                        ctx.beginPath();
+                        ctx.moveTo(pts[0].x, pts[0].y);
+                        for (let ci = 1; ci < pts.length; ci++) ctx.lineTo(pts[ci].x, pts[ci].y);
+                        ctx.stroke();
+                        for (let ci = 1; ci < pts.length; ci++)
+                            dashAcc += Math.hypot(pts[ci].x - pts[ci - 1].x, pts[ci].y - pts[ci - 1].y);
                     }
+                } else {
+                    ctx.beginPath();
+                    for (const chain of chains) {
+                        if (!chain.length) continue;
+                        const p0 = this.worldToScreen(chain[0].x, chain[0].y);
+                        ctx.moveTo(p0.x, p0.y);
+                        for (let ci = 1; ci < chain.length; ci++) {
+                            const pt = this.worldToScreen(chain[ci].x, chain[ci].y);
+                            ctx.lineTo(pt.x, pt.y);
+                        }
+                    }
+                    ctx.stroke();
                 }
-                ctx.stroke();
                 ctx.restore();
 
                 // Draw F₁/F₂ foci if the locus has focus points and they are enabled
@@ -5202,19 +5219,34 @@ class Komplexiti {
                     ctx.strokeStyle = c.color;
                     ctx.lineWidth = Math.max(2, strokeWidth - 0.5);
                     ctx.globalAlpha = 0.95;
-                    if (part.locus.inequality?.strict) ctx.setLineDash([8, 5]);
                     const chains = this._stitchSegmentsToChains(segs);
-                    ctx.beginPath();
-                    for (const chain of chains) {
-                        if (!chain.length) continue;
-                        const p0 = this.worldToScreen(chain[0].x, chain[0].y);
-                        ctx.moveTo(p0.x, p0.y);
-                        for (let ci = 1; ci < chain.length; ci++) {
-                            const pt = this.worldToScreen(chain[ci].x, chain[ci].y);
-                            ctx.lineTo(pt.x, pt.y);
+                    if (part.locus.inequality?.strict) {
+                        ctx.setLineDash([8, 5]);
+                        let dashAcc = 0;
+                        for (const chain of chains) {
+                            if (!chain.length) continue;
+                            const pts = chain.map(p => this.worldToScreen(p.x, p.y));
+                            ctx.lineDashOffset = dashAcc % 13;
+                            ctx.beginPath();
+                            ctx.moveTo(pts[0].x, pts[0].y);
+                            for (let ci = 1; ci < pts.length; ci++) ctx.lineTo(pts[ci].x, pts[ci].y);
+                            ctx.stroke();
+                            for (let ci = 1; ci < pts.length; ci++)
+                                dashAcc += Math.hypot(pts[ci].x - pts[ci - 1].x, pts[ci].y - pts[ci - 1].y);
                         }
+                    } else {
+                        ctx.beginPath();
+                        for (const chain of chains) {
+                            if (!chain.length) continue;
+                            const p0 = this.worldToScreen(chain[0].x, chain[0].y);
+                            ctx.moveTo(p0.x, p0.y);
+                            for (let ci = 1; ci < chain.length; ci++) {
+                                const pt = this.worldToScreen(chain[ci].x, chain[ci].y);
+                                ctx.lineTo(pt.x, pt.y);
+                            }
+                        }
+                        ctx.stroke();
                     }
-                    ctx.stroke();
                     ctx.restore();
                 }
                 continue;
