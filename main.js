@@ -4466,6 +4466,7 @@ class Komplexiti {
         dropdown.style.top   = (rect.bottom + 4) + 'px';
         dropdown.style.left  = rect.left + 'px';
         dropdown.style.width = rect.width + 'px';
+        dropdown.scrollTop = 0;
         dropdown.classList.add('show');
     }
 
