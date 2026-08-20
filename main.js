@@ -4651,10 +4651,8 @@ class Komplexiti {
 
     _fastPathIntersections() {
         const shapes = [];
-        for (const c of this.expressions) {
-            if (!c.enabled) continue;
-            const fp = c.locus?.fastPath;
-            if (!fp) continue;
+        const addFp = fp => {
+            if (!fp) return;
             if (fp.kind === 'circle' || fp.kind === 'apollonius') {
                 shapes.push({ kind: 'circular', cx: fp.center.re, cy: fp.center.im, r: fp.radius });
             } else if (fp.kind === 'inscribed-arc') {
@@ -4663,6 +4661,14 @@ class Komplexiti {
                 shapes.push({ kind: 'linear', px: fp.point.re, py: fp.point.im, dx: fp.direction.re, dy: fp.direction.im, tMin: -Infinity });
             } else if (fp.kind === 'ray') {
                 shapes.push({ kind: 'linear', px: fp.origin.re, py: fp.origin.im, dx: Math.cos(fp.angle), dy: Math.sin(fp.angle), tMin: 0 });
+            }
+        };
+        for (const c of this.expressions) {
+            if (!c.enabled) continue;
+            if (c.type === 'compound-locus' && c.compoundParts) {
+                for (const part of c.compoundParts) addFp(part.locus?.fastPath);
+            } else {
+                addFp(c.locus?.fastPath);
             }
         }
         const pts = [];
