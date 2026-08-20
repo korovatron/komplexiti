@@ -2168,7 +2168,7 @@ class Komplexiti {
 
         if (!hasLoaded) {
             // No saved data (first run or all deleted): seed with defaults
-            for (const latex of ['a=1+\\sqrt{3}i', '\\left|z-a\\right|=3', 'z^3=1']) {
+            for (const latex of ['a=\\sqrt{2}\\left(1-i\\right)', 'z^3=1', '\\left|z-\\sqrt{2}\\left(1+i\\right)\\right|=1']) {
                 this.addExpression({ skipFocus: true });
                 this.expressions[this.expressions.length - 1].latex = latex;
             }
