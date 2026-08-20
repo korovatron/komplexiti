@@ -4765,7 +4765,10 @@ class Komplexiti {
         } else {
             html = `z = ${reStr} ${im < 0 ? '-' : '+'} ${imStr}i`;
         }
-        badge.innerHTML = html;
+        badge.innerHTML    = html;
+        badge.style.transition = 'none';
+        badge.style.opacity    = '0';
+        badge.style.display    = 'block';
         const bw = badge.offsetWidth || 180;
         let x = screenX + 16;
         let y = screenY - 44;
@@ -4774,8 +4777,6 @@ class Komplexiti {
         badge.style.left       = x + 'px';
         badge.style.top        = y + 'px';
         badge.style.opacity    = '1';
-        badge.style.transition = 'none';
-        badge.style.display    = 'block';
         clearTimeout(this._intersectionBadgeTimeout);
         this._intersectionBadgeTimeout = setTimeout(() => {
             badge.style.transition = 'opacity 2.5s ease';
