@@ -5834,7 +5834,7 @@ class Komplexiti {
         const ipts = this._fastPathIntersections();
         if (ipts.length) {
             const iDotR = strokeWidth / 2;
-            const iEdge = 1.5;
+            const iEdge = 2.5;
             const hitR  = Math.max(14, iDotR + iEdge + 6);
             const outerFill = isLight ? '#000000' : '#ffffff';
             const innerFill = isLight ? '#ffffff' : '#000000';
