@@ -1542,6 +1542,22 @@
             font-size: 12.5px;
         }
 
+        #extrema-tooltip {
+            position: fixed;
+            background: rgba(16, 26, 40, 0.95);
+            color: #E8F4FD;
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 7px 11px;
+            border-radius: 7px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            max-width: 230px;
+            pointer-events: none;
+            display: none;
+            z-index: 200;
+            box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+        }
+
     </style>
 </head>
 <body>
@@ -1679,6 +1695,12 @@
                                 <strong>Inequalities</strong>
                             </div>
                             <div class="example-description">Compound arg inequality, strict circle, strict perpendicular bisector half-plane</div>
+                        </div>
+                        <div class="demo-set-item" data-demo-set="extrema">
+                            <div class="example-formula">
+                                <strong>Extrema</strong>
+                            </div>
+                            <div class="example-description">Circle with exact integer modulus extrema and exact arg extrema at 15&deg; and 75&deg;</div>
                         </div>
                     </div>
                 </div>
@@ -1864,6 +1886,7 @@
 
             <!-- end ui-overlay -->
         </div>
+        <div id="extrema-tooltip"></div>
     </div>
 
     <script src="https://unpkg.com/mathlive"></script>

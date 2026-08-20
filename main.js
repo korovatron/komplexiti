@@ -1220,6 +1220,32 @@ class Komplexiti {
             if (this.currentState !== this.states.APP) return;
             this.handleTouchEnd(e);
         }, { passive: true });
+
+        this.canvas.addEventListener('mousemove', (e) => {
+            if (this.currentState !== this.states.APP) return;
+            const tooltip = document.getElementById('extrema-tooltip');
+            if (!tooltip || !this._extremaHitTargets?.length) { if (tooltip) tooltip.style.display = 'none'; return; }
+            const rect = this.canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            const hit = this._extremaHitTargets.find(t => Math.hypot(mx - t.x, my - t.y) < t.r);
+            if (hit) {
+                tooltip.textContent = hit.text;
+                const pad = 16, tw = 250;
+                let tx = e.clientX + pad;
+                let ty = e.clientY - pad - 40;
+                if (tx + tw > window.innerWidth)  tx = e.clientX - tw - pad;
+                if (ty < 4) ty = e.clientY + pad;
+                tooltip.style.left    = tx + 'px';
+                tooltip.style.top     = ty + 'px';
+                tooltip.style.display = 'block';
+            } else {
+                tooltip.style.display = 'none';
+            }
+        });
+        this.canvas.addEventListener('mouseleave', () => {
+            const tooltip = document.getElementById('extrema-tooltip');
+            if (tooltip) tooltip.style.display = 'none';
+        });
     }
 
     // =========================================================================
@@ -4502,6 +4528,9 @@ class Komplexiti {
                 '\\frac{\\pi}{6}\\le\\arg\\left(w+2i\\right)\\le\\frac{\\pi}{3}',
                 '\\left|z-\\left(1-i\\right)\\right|<2',
                 '\\left|z+i\\right|<\\left|z-2\\right|'
+            ],
+            'extrema': [
+                '\\left|z-\\sqrt{2}\\left(1+i\\right)\\right|=1'
             ]
         };
 
@@ -5025,6 +5054,29 @@ class Komplexiti {
                 }
             }
         }
+        // Try integer + rational*√k forms: e.g. √2-1, 1+√2, 3+2√3
+        for (const k of [2, 3, 5, 6, 7, 10, 11, 13, 14, 15]) {
+            const sqK = Math.sqrt(k);
+            for (let ai = -8; ai <= 8; ai++) {
+                if (ai === 0) continue;
+                const residual = value - ai;
+                if (Math.abs(residual) < tol) continue;
+                const ratio = residual / sqK;
+                for (let d = 1; d <= 6; d++) {
+                    const n = Math.round(ratio * d);
+                    if (n === 0 || Math.abs(ratio - n / d) > tol) continue;
+                    const g = this._gcd(Math.abs(n), d); const sn = n / g, sd = d / g;
+                    if (sd > 6) continue;
+                    const absN = Math.abs(sn);
+                    const sqrtFrac = sd === 1
+                        ? (absN === 1 ? `\\sqrt{${k}}` : `${absN}\\sqrt{${k}}`)
+                        : (absN === 1 ? `\\frac{\\sqrt{${k}}}{${sd}}` : `\\frac{${absN}\\sqrt{${k}}}{${sd}}`);
+                    if (ai < 0 && sn > 0) return `${sqrtFrac}${ai}`;
+                    if (ai > 0 && sn > 0) return `${ai}+${sqrtFrac}`;
+                    return `${ai}${sn > 0 ? '+' : '-'}${sqrtFrac}`;
+                }
+            }
+        }
         return null;
     }
 
@@ -5225,6 +5277,7 @@ class Komplexiti {
 
     drawExpressions() {
         if (!this.expressions.length) return;
+        this._extremaHitTargets = [];
         const ctx     = this.ctx;
         const isLight = document.documentElement.getAttribute('data-theme') === 'light';
         const fSize       = this.sizeMode === 'xlarge' ? 26 : this.sizeMode === 'large' ? 22 : 18;
@@ -5437,7 +5490,7 @@ class Komplexiti {
                         const markerR = Math.max(2.5, dotR - 2);
                         const org     = this.worldToScreen(0, 0);
                         const near    = (p1, p2) => p1 && p2 && Math.hypot(p1.re - p2.re, p1.im - p2.im) < 1e-6;
-                        const drawExtrema = (pt, label) => {
+                        const drawExtrema = (pt, label, isArg, tooltipText) => {
                             if (!pt) return;
                             const sp = this.worldToScreen(pt.re, pt.im);
                             ctx.save();
@@ -5450,23 +5503,30 @@ class Komplexiti {
                             ctx.lineTo(sp.x, sp.y);
                             ctx.stroke();
                             ctx.setLineDash([]);
-                            ctx.fillStyle   = c.color;
                             ctx.globalAlpha = 0.9;
                             ctx.beginPath();
                             ctx.arc(sp.x, sp.y, markerR, 0, Math.PI * 2);
-                            ctx.fill();
+                            if (isArg) {
+                                ctx.strokeStyle = c.color;
+                                ctx.lineWidth   = 1.5;
+                                ctx.stroke();
+                            } else {
+                                ctx.fillStyle = c.color;
+                                ctx.fill();
+                            }
                             ctx.font      = `${fSize - 4}px Arial`;
                             ctx.fillStyle = c.color;
                             ctx.fillText(label, sp.x + markerR + 3, sp.y - markerR - 1);
                             ctx.restore();
+                            if (tooltipText) this._extremaHitTargets.push({ x: sp.x, y: sp.y, r: markerR + 8, text: tooltipText });
                         };
-                        drawExtrema(ex.modMinPt, '|z| min');
-                        if (!near(ex.modMaxPt, ex.modMinPt)) drawExtrema(ex.modMaxPt, '|z| max');
+                        drawExtrema(ex.modMinPt, '|z| min', false, 'Closest point to the origin on this locus - the minimum value of |z|.');
+                        if (!near(ex.modMaxPt, ex.modMinPt)) drawExtrema(ex.modMaxPt, '|z| max', false, 'Farthest point from the origin on this locus - the maximum value of |z|.');
                         if (!ex.fullArgRange) {
                             if (!near(ex.argMinPt, ex.modMinPt) && !near(ex.argMinPt, ex.modMaxPt))
-                                drawExtrema(ex.argMinPt, 'arg min');
+                                drawExtrema(ex.argMinPt, 'arg min', true, 'Tangent point from the origin - the ray from O at this angle just grazes the locus from below. All other points on this locus have a larger argument.');
                             if (!near(ex.argMaxPt, ex.modMinPt) && !near(ex.argMaxPt, ex.modMaxPt) && !near(ex.argMaxPt, ex.argMinPt))
-                                drawExtrema(ex.argMaxPt, 'arg max');
+                                drawExtrema(ex.argMaxPt, 'arg max', true, 'Tangent point from the origin - the ray from O at this angle just grazes the locus from above. All other points on this locus have a smaller argument.');
                         }
                     }
                 }
