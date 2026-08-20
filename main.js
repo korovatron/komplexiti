@@ -4047,7 +4047,14 @@ class Komplexiti {
         const cw = this.canvas.width, ch = this.canvas.height;
         const o  = fp.origin;
         const rayHits    = this._clipInfiniteLine(o, { re: Math.cos(fp.angle), im: Math.sin(fp.angle) });
-        if (!rayHits || rayHits.length < 2) return false;
+        if (!rayHits || rayHits.length < 2) {
+            // Line misses viewport entirely: whole viewport is in one half-plane of the ray.
+            const nx = -Math.sin(fp.angle), ny = Math.cos(fp.angle);
+            const { minX, minY } = this.getVisibleWorldBounds();
+            const cornerDot = (minX - o.re) * nx + (minY - o.im) * ny;
+            if ((ineqDir > 0) === (cornerDot > 0)) targetCtx.fillRect(0, 0, cw, ch);
+            return true;
+        }
 
         const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
         const originInViewport = o.re >= minX - 1e-6 && o.re <= maxX + 1e-6 &&
