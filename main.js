@@ -15,6 +15,9 @@ class Komplexiti {
         this.currentState = this.states.TITLE;
         this.panelOpen = false;
 
+        // ---- Temporary session flag (set when loaded from a shared link) ----
+        this.tempSession = false;
+
         // ---- Argand diagram viewport (world coords: Re = x, Im = y) ----
         this.viewport = {
             width:   0,
@@ -99,6 +102,7 @@ class Komplexiti {
         this.resizeCanvas();
         this.showLoadedState();
         this.registerServiceWorker();
+        this.checkAndApplySharedState();
     }
 
     // -------------------------------------------------------------------------
@@ -729,6 +733,16 @@ class Komplexiti {
                 );
                 this.updateComplexInfoPanel();
             });
+        });
+
+        this.setupShareMenu();
+
+        window.addEventListener('hashchange', () => {
+            const state = this.checkForSharedState();
+            if (!state) return;
+            this.tempSession = true;
+            if (this.currentState !== this.states.APP) this.launchApp();
+            this.applySharedState(state);
         });
     }
 
@@ -2105,6 +2119,7 @@ class Komplexiti {
     }
 
     saveExpressions() {
+        if (this.tempSession) return; // never overwrite saved state during a shared session
         const data = {
             nextId:    this.nextExpressionId,
             expressions: this.expressions
@@ -5676,6 +5691,300 @@ class Komplexiti {
                 ctx.fillText(c.name, lx, ly);
                 ctx.restore();
             }
+        }
+    }
+
+    // =========================================================================
+    // Sharing
+    // =========================================================================
+
+    encodeShareState() {
+        const state = {
+            v: 1,
+            expressions: this.expressions
+                .filter(c => c.latex && c.latex.trim() !== '')
+                .map(c => ({
+                    latex:       c.latex,
+                    color:       c.color,
+                    cardRootFmt: c.cardRootFmt || 'cartesian'
+                }))
+        };
+        return JSON.stringify(state);
+    }
+
+    decodeShareState(compressed) {
+        try {
+            const json  = LZString.decompressFromEncodedURIComponent(compressed);
+            const state = JSON.parse(json);
+            if (state.v !== 1) return null;
+            return state;
+        } catch {
+            return null;
+        }
+    }
+
+    checkForSharedState() {
+        const hash = window.location.hash;
+        if (!hash.startsWith('#v=')) return null;
+        return this.decodeShareState(hash.slice(3));
+    }
+
+    checkAndApplySharedState() {
+        const state = this.checkForSharedState();
+        if (!state) return;
+        this.tempSession = true;
+        // Auto-launch directly into the app, bypassing the title screen
+        requestAnimationFrame(() => {
+            this.launchApp();
+            this.applySharedState(state);
+        });
+    }
+
+    applySharedState(state) {
+        // Replace all expressions with the shared ones (enabled=true, metadata toggles at defaults)
+        this.expressions = [];
+        this.nextExpressionId = 1;
+        if (this.expressionsContainer) this.expressionsContainer.innerHTML = '';
+
+        const exprs = Array.isArray(state.expressions) ? state.expressions : [];
+        for (const item of exprs) {
+            if (!item.latex || !item.latex.trim()) continue;
+            const id    = this.nextExpressionId++;
+            const color = item.color || this.expressionColors[(id - 1) % this.expressionColors.length];
+            const c     = {
+                id, color, enabled: true, latex: item.latex,
+                cardRootFmt: item.cardRootFmt || 'cartesian',
+                name: null, re: null, im: null, type: 'value',
+                roots: null, equationVar: null, locus: null, hasParseError: false
+            };
+            this.expressions.push(c);
+            this.createExpressionUI(c, { skipFocus: true });
+        }
+
+        // Ensure there is always a blank tile at the bottom
+        if (!this.expressions.some(c => !c.latex || c.latex.trim() === '')) {
+            this.addExpression({ skipFocus: true });
+        }
+
+        this.cascadeEvaluate(null);
+        this.updateAllCardMetadata();
+        this.resetAxes();
+        if (this.currentState === this.states.APP) this.drawCanvas();
+        this.showTempSessionBanner();
+    }
+
+    showTempSessionBanner() {
+        const banner = document.getElementById('temp-session-banner');
+        if (!banner) return;
+        banner.style.display = 'block';
+        banner.onclick = () => {
+            window.location.hash = '';
+            window.location.reload();
+        };
+    }
+
+    async shareGraphLink() {
+        try {
+            if (typeof LZString === 'undefined') {
+                alert('Compression library not loaded. Please refresh the page.');
+                return;
+            }
+            const compressed = LZString.compressToEncodedURIComponent(this.encodeShareState());
+            const baseUrl  = window.location.origin + window.location.pathname;
+            const shareUrl = `${baseUrl}#v=${compressed}`;
+
+            const isIOS    = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+            const isIPad   = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+            const isMobile = isIOS || isIPad || /Android/i.test(navigator.userAgent);
+
+            if (isMobile && navigator.share) {
+                try {
+                    await navigator.share({ url: shareUrl });
+                    this._showShareTooltipNearButton('Link shared');
+                    return;
+                } catch (err) {
+                    if (err.name === 'AbortError') return;
+                    // fall through to clipboard
+                }
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                try {
+                    await navigator.clipboard.writeText(shareUrl);
+                    this._showShareTooltipNearButton('Link copied to clipboard');
+                    return;
+                } catch {
+                    // fall through
+                }
+            }
+
+            // Last resort: prompt
+            const result = prompt('Copy this link to share your expressions:', shareUrl);
+            if (result !== null) this._showShareTooltipNearButton('Link ready to copy');
+        } catch (err) {
+            console.error('Failed to share link:', err);
+            alert('Failed to share link. Please try again.');
+        }
+    }
+
+    async shareQRCode() {
+        try {
+            if (typeof QRious === 'undefined') {
+                alert('QR code library not loaded. Please refresh the page.');
+                return;
+            }
+            if (typeof LZString === 'undefined') {
+                alert('Compression library not loaded. Please refresh the page.');
+                return;
+            }
+            const compressed = LZString.compressToEncodedURIComponent(this.encodeShareState());
+            const baseUrl  = window.location.origin + window.location.pathname;
+            const shareUrl = `${baseUrl}#v=${compressed}`;
+
+            const qr  = new QRious({ value: shareUrl, size: 512, level: 'M' });
+            const blob = await new Promise((resolve, reject) => {
+                qr.canvas.toBlob(b => b ? resolve(b) : reject(new Error('Failed to create QR image')), 'image/png');
+            });
+
+            const isIOS    = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+            const isIPad   = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+            const isMobile = isIOS || isIPad || /Android/i.test(navigator.userAgent);
+
+            if (isMobile && navigator.share && navigator.canShare) {
+                const file = new File([blob], 'komplexiti-qr.png', { type: 'image/png' });
+                if (navigator.canShare({ files: [file] })) {
+                    try {
+                        await navigator.share({ files: [file] });
+                        this._showShareTooltipNearButton('QR code shared');
+                        return;
+                    } catch (err) {
+                        if (err.name === 'AbortError') return;
+                        // fall through
+                    }
+                }
+            }
+
+            if (navigator.clipboard && navigator.clipboard.write) {
+                try {
+                    const item = new ClipboardItem({ 'image/png': blob });
+                    await navigator.clipboard.write([item]);
+                    this._showShareTooltipNearButton('QR code copied to clipboard');
+                    return;
+                } catch {
+                    // fall through to download
+                }
+            }
+
+            // Fallback: download the QR image
+            const url = URL.createObjectURL(blob);
+            const a   = document.createElement('a');
+            a.href     = url;
+            a.download = 'komplexiti-qr.png';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            this._showShareTooltipNearButton('QR code downloaded');
+        } catch (err) {
+            console.error('Failed to share QR code:', err);
+            alert('Failed to share QR code. Please try again.');
+        }
+    }
+
+    _showShareTooltipNearButton(text) {
+        const btn = document.getElementById('share-button');
+        if (!btn) return;
+        const rect   = btn.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top;
+        this.showShareTooltip(text, centerX, centerY);
+    }
+
+    showShareTooltip(text, x, y) {
+        const tooltip = document.createElement('div');
+        tooltip.textContent = text;
+        tooltip.style.cssText = `
+            position: fixed;
+            left: ${x}px;
+            top: ${y - 50}px;
+            transform: translateX(-50%);
+            font-size: 13px;
+            font-family: Inter, system-ui, sans-serif;
+            background: rgba(42, 63, 90, 0.95);
+            color: #E8F4FD;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid rgba(74, 144, 226, 0.5);
+            z-index: 10000;
+            pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            animation: shareTooltipFade 2s ease-in-out;
+            white-space: nowrap;
+        `;
+        if (!document.getElementById('share-tooltip-style')) {
+            const style = document.createElement('style');
+            style.id = 'share-tooltip-style';
+            style.textContent = `
+                @keyframes shareTooltipFade {
+                    0%   { opacity: 0; transform: translate(-50%, -5px); }
+                    15%  { opacity: 1; transform: translate(-50%, 0); }
+                    85%  { opacity: 1; transform: translate(-50%, 0); }
+                    100% { opacity: 0; transform: translate(-50%, -5px); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        document.body.appendChild(tooltip);
+        setTimeout(() => tooltip.remove(), 2000);
+    }
+
+    setupShareMenu() {
+        const shareButton = document.getElementById('share-button');
+        const shareMenu   = document.getElementById('share-menu');
+        const menuLink    = document.getElementById('share-menu-link');
+        const menuQR      = document.getElementById('share-menu-qr');
+
+        if (!shareButton || !shareMenu) return;
+
+        const closeMenu = () => {
+            shareMenu.style.display = 'none';
+            shareButton.setAttribute('aria-expanded', 'false');
+        };
+        const openMenu = () => {
+            shareMenu.style.display = 'block';
+            shareButton.setAttribute('aria-expanded', 'true');
+        };
+        this.closeShareMenu = closeMenu;
+
+        // On touch devices a single tap should share directly rather than open a sub-menu
+        shareButton.addEventListener('touchend', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeMenu();
+            try { await this.shareGraphLink(); } catch (err) { console.error(err); }
+        }, { passive: false });
+
+        shareButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            shareMenu.style.display === 'block' ? closeMenu() : openMenu();
+        });
+
+        shareMenu.addEventListener('click', (e) => e.stopPropagation());
+
+        document.addEventListener('click', closeMenu);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+
+        if (menuLink) {
+            menuLink.addEventListener('click', async () => {
+                closeMenu();
+                try { await this.shareGraphLink(); } catch (err) { console.error(err); }
+            });
+        }
+        if (menuQR) {
+            menuQR.addEventListener('click', async () => {
+                closeMenu();
+                try { await this.shareQRCode(); } catch (err) { console.error(err); }
+            });
         }
     }
 }
