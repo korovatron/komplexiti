@@ -1880,6 +1880,13 @@ class Komplexiti {
                     <div class="foci-info-title">Foci</div>
                 </div>
                 <div class="foci-equation-list"></div>
+            </div>
+            <div class="extrema-info-container">
+                <div class="metadata-title-row">
+                    <button class="metadata-visibility-toggle extrema-visibility-toggle" aria-label="Toggle extrema" title="Toggle extrema on diagram" tabindex="-1"></button>
+                    <div class="extrema-info-title">Extrema</div>
+                </div>
+                <div class="extrema-info-list"></div>
             </div>`;
 
         const mathField = card.querySelector('math-field');
@@ -1970,6 +1977,13 @@ class Komplexiti {
         const fociToggleBtn = card.querySelector('.foci-visibility-toggle');
         fociToggleBtn.addEventListener('click', () => {
             c.showFoci = (c.showFoci !== false) ? false : true;
+            this.updateCardMetadata(c);
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        });
+
+        const extremaToggleBtn = card.querySelector('.extrema-visibility-toggle');
+        extremaToggleBtn.addEventListener('click', () => {
+            c.showExtrema = (c.showExtrema !== false) ? false : true;
             this.updateCardMetadata(c);
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -3381,7 +3395,10 @@ class Komplexiti {
                 }
                 retraced = true;
             }
-            if (retraced && this.currentState === this.states.APP) this.drawCanvas();
+            if (retraced) {
+                this.updateAllCardMetadata();
+                if (this.currentState === this.states.APP) this.drawCanvas();
+            }
         }, 200);
     }
 
@@ -4533,6 +4550,114 @@ class Komplexiti {
     // Card metadata
     // =========================================================================
 
+    _computeLocusExtrema(c) {
+        if (c.type !== 'locus' || !c.locus) return null;
+        const fp = c.locus.fastPath;
+
+        if (fp?.kind === 'circle' || fp?.kind === 'apollonius') {
+            const { center, radius } = fp;
+            const cMod = Math.hypot(center.re, center.im);
+            const modMin = Math.abs(cMod - radius);
+            const modMax = cMod + radius;
+            let modMinPt, modMaxPt;
+            if (cMod < 1e-10) {
+                modMinPt = modMaxPt = { re: radius, im: 0 };
+            } else {
+                const ux = center.re / cMod, uy = center.im / cMod;
+                modMinPt = { re: center.re - radius * ux, im: center.im - radius * uy };
+                modMaxPt = { re: center.re + radius * ux, im: center.im + radius * uy };
+            }
+            const originInside = cMod < radius - 1e-9;
+            let argMin = null, argMax = null, argMinPt = null, argMaxPt = null;
+            if (!originInside && cMod > 1e-10) {
+                const phi  = Math.atan2(center.im, center.re);
+                const delta = Math.acos(Math.max(-1, Math.min(1, -radius / cMod)));
+                const t1 = phi + delta, t2 = phi - delta;
+                const pt1 = { re: center.re + radius * Math.cos(t1), im: center.im + radius * Math.sin(t1) };
+                const pt2 = { re: center.re + radius * Math.cos(t2), im: center.im + radius * Math.sin(t2) };
+                const a1 = Math.atan2(pt1.im, pt1.re), a2 = Math.atan2(pt2.im, pt2.re);
+                if (a1 <= a2) { argMin = a1; argMinPt = pt1; argMax = a2; argMaxPt = pt2; }
+                else           { argMin = a2; argMinPt = pt2; argMax = a1; argMaxPt = pt1; }
+            }
+            return { modMin, modMax, modMinPt, modMaxPt, argMin, argMax, argMinPt, argMaxPt, fullArgRange: originInside, approximate: false };
+        }
+
+        if (fp?.kind === 'inscribed-arc') {
+            const { a, b, theta, center, radius } = fp;
+            const alphaB   = Math.atan2(b.im - center.im, b.re - center.re);
+            const arcAngle = 2 * Math.PI - 2 * Math.abs(theta);
+            const dir      = theta > 0 ? -1 : 1;
+            const TWO_PI   = 2 * Math.PI;
+            // True if the angle `ang` (around center) lies on the arc
+            const isOnArc  = (ang) => {
+                const delta = (((ang - alphaB) * dir) % TWO_PI + TWO_PI) % TWO_PI;
+                return delta <= arcAngle + 1e-9;
+            };
+            // Candidates: always the two endpoints, plus any circle-level geometric extrema that land on the arc
+            const candidates = [];
+            const addPt = (pt) => { if (Math.hypot(pt.re, pt.im) >= 1e-9) candidates.push(pt); };
+            addPt(a); addPt(b);
+            const cMod = Math.hypot(center.re, center.im);
+            if (cMod > 1e-10) {
+                const ux = center.re / cMod, uy = center.im / cMod;
+                // Circle's closest/farthest points from origin
+                const pNear = { re: center.re - radius * ux, im: center.im - radius * uy };
+                const pFar  = { re: center.re + radius * ux, im: center.im + radius * uy };
+                if (isOnArc(Math.atan2(pNear.im - center.im, pNear.re - center.re))) addPt(pNear);
+                if (isOnArc(Math.atan2(pFar.im  - center.im, pFar.re  - center.re))) addPt(pFar);
+                // Circle's arg-extremal tangent points from origin (only when origin is outside circle)
+                if (cMod > radius + 1e-9) {
+                    const phi   = Math.atan2(center.im, center.re);
+                    const delta = Math.acos(Math.max(-1, Math.min(1, -radius / cMod)));
+                    for (const sign of [-1, 1]) {
+                        const t  = phi + sign * delta;
+                        const pt = { re: center.re + radius * Math.cos(t), im: center.im + radius * Math.sin(t) };
+                        if (isOnArc(t)) addPt(pt);
+                    }
+                }
+            }
+            let modMin = Infinity, modMax = -Infinity, argMin = Infinity, argMax = -Infinity;
+            let modMinPt = null, modMaxPt = null, argMinPt = null, argMaxPt = null;
+            for (const pt of candidates) {
+                const m = Math.hypot(pt.re, pt.im), ag = Math.atan2(pt.im + 0, pt.re);
+                if (m  < modMin) { modMin = m;  modMinPt = pt; }
+                if (m  > modMax) { modMax = m;  modMaxPt = pt; }
+                if (ag < argMin) { argMin = ag; argMinPt = pt; }
+                if (ag > argMax) { argMax = ag; argMaxPt = pt; }
+            }
+            if (!modMinPt) return null;
+            return { modMin, modMax, modMinPt, modMaxPt, argMin: isFinite(argMin) ? argMin : null, argMax: isFinite(argMax) ? argMax : null, argMinPt, argMaxPt, fullArgRange: false, approximate: false };
+        }
+
+        if (fp?.kind === 'line' && fp.perpBisector) {
+            const { point, direction } = fp;
+            const dx = direction.re, dy = direction.im;
+            const dLen2 = dx * dx + dy * dy;
+            if (dLen2 < 1e-18) return null;
+            const t = (-point.re * dx - point.im * dy) / dLen2;
+            const foot = { re: point.re + t * dx, im: point.im + t * dy };
+            return { modMin: Math.hypot(foot.re, foot.im), modMax: null, modMinPt: foot, modMaxPt: null, argMin: null, argMax: null, argMinPt: null, argMaxPt: null, fullArgRange: false, approximate: false };
+        }
+
+        // General numeric locus: approximate extrema from cached segment endpoints
+        const segs = c._locusCache?.segments;
+        if (!segs?.length) return null;
+        let modMin = Infinity, modMax = -Infinity, argMin = Infinity, argMax = -Infinity;
+        let modMinPt = null, modMaxPt = null, argMinPt = null, argMaxPt = null;
+        for (const seg of segs) {
+            for (const { x: re, y: im } of seg) {
+                if (Math.hypot(re, im) < 1e-9) continue;
+                const m = Math.hypot(re, im), ag = Math.atan2(im, re);
+                if (m  < modMin) { modMin = m;  modMinPt = { re, im }; }
+                if (m  > modMax) { modMax = m;  modMaxPt = { re, im }; }
+                if (ag < argMin) { argMin = ag; argMinPt = { re, im }; }
+                if (ag > argMax) { argMax = ag; argMaxPt = { re, im }; }
+            }
+        }
+        if (!modMinPt) return null;
+        return { modMin, modMax, modMinPt, modMaxPt, argMin: isFinite(argMin) ? argMin : null, argMax: isFinite(argMax) ? argMax : null, argMinPt, argMaxPt, fullArgRange: false, approximate: true };
+    }
+
     getContrastingTextColor(hex) {
         if (!hex || typeof hex !== 'string') return '#fff';
         const h = hex.replace('#', '');
@@ -4563,8 +4688,12 @@ class Komplexiti {
         const fociList      = card.querySelector('.foci-equation-list');
         const fociToggle    = card.querySelector('.foci-visibility-toggle');
         const hideFoci = () => { if (fociContainer) fociContainer.classList.remove('visible'); if (fociList) fociList.innerHTML = ''; };
+        const extremaContainer = card.querySelector('.extrema-info-container');
+        const extremaList      = card.querySelector('.extrema-info-list');
+        const extremaToggle    = card.querySelector('.extrema-visibility-toggle');
+        const hideExtrema = () => { if (extremaContainer) extremaContainer.classList.remove('visible'); if (extremaList) extremaList.innerHTML = ''; };
 
-        const hide = () => { container.classList.remove('visible'); hideFoci(); };
+        const hide = () => { container.classList.remove('visible'); hideFoci(); hideExtrema(); };
 
         if (!c.latex || !c.latex.trim()) { hide(); return; }
         if (!c.enabled) { hide(); return; }
@@ -4593,7 +4722,7 @@ class Komplexiti {
         };
 
         if (c.type === 'equation' && c.roots?.length) {
-            hideFoci();
+            hideFoci(); hideExtrema();
             container.classList.add('is-equation');
             const fmt = c.cardRootFmt || 'cartesian';
             const fmtNames  = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
@@ -4642,7 +4771,7 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             valueEl.textContent    = 'region';
-            hideFoci();
+            hideFoci(); hideExtrema();
             container.classList.add('visible');
 
         } else if (c.type === 'locus' && c.locus) {
@@ -4673,10 +4802,31 @@ class Komplexiti {
             } else {
                 hideFoci();
             }
+            const extrema = this._computeLocusExtrema(c);
+            if (extrema) {
+                if (extremaContainer) extremaContainer.classList.add('visible');
+                if (extremaToggle) extremaToggle.classList.toggle('is-hidden', c.showExtrema === false);
+                if (extremaList) extremaList.innerHTML = '';
+                const ap = extrema.approximate ? '\\approx ' : '';
+                const fmtVal = v => ap + (this.niceRealLatex(v) ?? this.formatNumberShort(v));
+                if (extrema.modMin !== null && extremaList)
+                    extremaList.appendChild(makeMF(`|z|_{\\min}=${fmtVal(extrema.modMin)}`, 15));
+                if (extrema.modMax !== null && extremaList)
+                    extremaList.appendChild(makeMF(`|z|_{\\max}=${fmtVal(extrema.modMax)}`, 15));
+                if (extrema.fullArgRange && extremaList) {
+                    extremaList.appendChild(makeMF('\\arg(z)\\in(-\\pi,\\,\\pi]', 15));
+                } else if (extrema.argMin !== null && extrema.argMax !== null && extremaList) {
+                    const amin = this.niceAngleLatex(extrema.argMin) ?? this.formatNumberShort(extrema.argMin);
+                    const amax = this.niceAngleLatex(extrema.argMax) ?? this.formatNumberShort(extrema.argMax);
+                    extremaList.appendChild(makeMF(`\\arg(z)\\in[${ap}${amin},\\,${ap}${amax}]`, 15));
+                }
+            } else {
+                hideExtrema();
+            }
             container.classList.add('visible');
 
         } else if (c.type === 'value' && c.re !== null && c.im !== null) {
-            hideFoci();
+            hideFoci(); hideExtrema(); hideExtrema();
             container.classList.remove('is-equation');
             badge.textContent      = 'Constant';
             valueEl.style.display  = '';
@@ -5198,6 +5348,46 @@ class Komplexiti {
                         const sub = idx === 1 ? '\u2081' : '\u2082';
                         ctx.fillText(`F${sub}`, fp2.x + fDotR + 3, fp2.y - fDotR - 2);
                         ctx.restore();
+                    }
+                }
+
+                if (c.showExtrema !== false) {
+                    const ex = this._computeLocusExtrema(c);
+                    if (ex) {
+                        const markerR = Math.max(2.5, dotR - 2);
+                        const org     = this.worldToScreen(0, 0);
+                        const near    = (p1, p2) => p1 && p2 && Math.hypot(p1.re - p2.re, p1.im - p2.im) < 1e-6;
+                        const drawExtrema = (pt, label) => {
+                            if (!pt) return;
+                            const sp = this.worldToScreen(pt.re, pt.im);
+                            ctx.save();
+                            ctx.strokeStyle = c.color;
+                            ctx.lineWidth   = 1;
+                            ctx.globalAlpha = 0.6;
+                            ctx.setLineDash([4, 4]);
+                            ctx.beginPath();
+                            ctx.moveTo(org.x, org.y);
+                            ctx.lineTo(sp.x, sp.y);
+                            ctx.stroke();
+                            ctx.setLineDash([]);
+                            ctx.fillStyle   = c.color;
+                            ctx.globalAlpha = 0.9;
+                            ctx.beginPath();
+                            ctx.arc(sp.x, sp.y, markerR, 0, Math.PI * 2);
+                            ctx.fill();
+                            ctx.font      = `${fSize - 4}px Arial`;
+                            ctx.fillStyle = c.color;
+                            ctx.fillText(label, sp.x + markerR + 3, sp.y - markerR - 1);
+                            ctx.restore();
+                        };
+                        drawExtrema(ex.modMinPt, '|z| min');
+                        if (!near(ex.modMaxPt, ex.modMinPt)) drawExtrema(ex.modMaxPt, '|z| max');
+                        if (!ex.fullArgRange) {
+                            if (!near(ex.argMinPt, ex.modMinPt) && !near(ex.argMinPt, ex.modMaxPt))
+                                drawExtrema(ex.argMinPt, 'arg min');
+                            if (!near(ex.argMaxPt, ex.modMinPt) && !near(ex.argMaxPt, ex.modMaxPt) && !near(ex.argMaxPt, ex.argMinPt))
+                                drawExtrema(ex.argMaxPt, 'arg max');
+                        }
                     }
                 }
 
