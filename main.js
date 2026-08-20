@@ -5060,12 +5060,13 @@ class Komplexiti {
                 if (extremaContainer) extremaContainer.classList.add('visible');
                 if (extremaToggle) extremaToggle.classList.toggle('is-hidden', c.showExtrema === false);
                 if (extremaList) extremaList.innerHTML = '';
-                const ap = extrema.approximate ? '\\approx ' : '';
-                const fmtVal = v => ap + (this.niceRealLatex(v) ?? this.formatNumberShort(v));
+                const ap  = extrema.approximate ? '\\approx ' : '';
+                const rel = extrema.approximate ? '\\approx ' : '=';
+                const fmtVal = v => this.niceRealLatex(v) ?? this.formatNumberShort(v);
                 if (extrema.modMin !== null && extremaList)
-                    extremaList.appendChild(makeMF(`|z|_{\\min}=${fmtVal(extrema.modMin)}`, 15));
+                    extremaList.appendChild(makeMF(`|z|_{\\min}${rel}${fmtVal(extrema.modMin)}`, 15));
                 if (extrema.modMax !== null && extremaList)
-                    extremaList.appendChild(makeMF(`|z|_{\\max}=${fmtVal(extrema.modMax)}`, 15));
+                    extremaList.appendChild(makeMF(`|z|_{\\max}${rel}${fmtVal(extrema.modMax)}`, 15));
                 if (extrema.fullArgRange && extremaList) {
                     extremaList.appendChild(makeMF('\\arg(z)\\in(-\\pi,\\,\\pi]', 15));
                 } else if (extrema.argMin !== null && extrema.argMax !== null && extremaList) {
@@ -5567,6 +5568,9 @@ class Komplexiti {
                             ? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id)
                             : null;
                         c._locusCache = { segments, shadeGrid, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                        // Cache just built for the first time: refresh card metadata so extrema appear
+                        clearTimeout(this._metadataRefreshTimer);
+                        this._metadataRefreshTimer = setTimeout(() => this.updateAllCardMetadata(), 0);
                     }
                 }
                 // Draw shading before the boundary so the curve renders on top
