@@ -4784,7 +4784,7 @@ class Komplexiti {
             const lineLabel = fp?.kind === 'line' ? (fp.perpBisector ? 'perpendicular bisector' : 'line') : null;
             const kinds = { circle: 'circle', line: lineLabel, ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski', 'inscribed-arc': 'inscribed arc' };
             valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
-            const hasFoci = !!(fp?.focusA && fp?.focusB && fp?.perpBisector);
+            const hasFoci = !!(fp?.focusA && fp?.focusB && (fp?.perpBisector || fp?.kind === 'apollonius'));
             if (hasFoci) {
                 fociContainer.classList.add('visible');
                 if (fociToggle) fociToggle.classList.toggle('is-hidden', c.showFoci === false);
@@ -4797,6 +4797,12 @@ class Komplexiti {
                 for (const focus of [fp.focusA, fp.focusB]) {
                     const wrapper = document.createElement('div');
                     wrapper.appendChild(makeMF(fmtCoord(focus), 17));
+                    fociList.appendChild(wrapper);
+                }
+                if (fp.kind === 'apollonius' && fp.ratio != null) {
+                    const kStr = this.niceRealLatex(fp.ratio) ?? this.formatNumberShort(fp.ratio);
+                    const wrapper = document.createElement('div');
+                    wrapper.appendChild(makeMF(`k=${kStr}`, 17));
                     fociList.appendChild(wrapper);
                 }
             } else {
@@ -5329,7 +5335,7 @@ class Komplexiti {
                 ctx.restore();
 
                 // Draw F₁/F₂ foci if the locus has focus points and they are enabled
-                if (c.showFoci !== false && fp?.perpBisector && fp?.focusA && fp?.focusB) {
+                if (c.showFoci !== false && fp?.focusA && fp?.focusB && (fp?.perpBisector || fp?.kind === 'apollonius')) {
                     const fDotR = Math.max(3, dotR - 1.5);
                     for (const [idx, focus] of [[1, fp.focusA], [2, fp.focusB]]) {
                         const fp2 = this.worldToScreen(focus.re, focus.im);
