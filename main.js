@@ -1237,10 +1237,13 @@ class Komplexiti {
 
         this.canvas.addEventListener('mousemove', (e) => {
             if (this.currentState !== this.states.APP) return;
-            const tooltip = document.getElementById('extrema-tooltip');
-            if (!tooltip || !this._extremaHitTargets?.length) { if (tooltip) tooltip.style.display = 'none'; return; }
             const rect = this.canvas.getBoundingClientRect();
             const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            // Cursor: pointer when hovering an intersection dot
+            const onDot = this._locusIntersectionHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
+            this.canvas.style.cursor = onDot ? 'pointer' : '';
+            const tooltip = document.getElementById('extrema-tooltip');
+            if (!tooltip || !this._extremaHitTargets?.length) { if (tooltip) tooltip.style.display = 'none'; return; }
             const hit = this._extremaHitTargets.find(t => Math.hypot(mx - t.x, my - t.y) < t.r);
             if (hit) {
                 tooltip.textContent = hit.text;
@@ -1259,6 +1262,7 @@ class Komplexiti {
         this.canvas.addEventListener('mouseleave', () => {
             const tooltip = document.getElementById('extrema-tooltip');
             if (tooltip) tooltip.style.display = 'none';
+            this.canvas.style.cursor = '';
         });
     }
 
@@ -1325,6 +1329,14 @@ class Komplexiti {
         const idleMs = performance.now() - this.input.mouse.lastMoveTime;
         if (this.input.viewportPanActive && speed > 1e-6 && idleMs < 120) {
             this.startMousePanInertia();
+        }
+        if (!this.input.dragging && this._locusIntersectionHits?.length) {
+            const mx = this.input.mouse.x, my = this.input.mouse.y;
+            const hit = this._locusIntersectionHits.find(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
+            if (hit) {
+                const rect = this.canvas.getBoundingClientRect();
+                this._showIntersectionBadge(rect.left + hit.x, rect.top + hit.y, hit);
+            }
         }
         this.input.mouse.down        = false;
         this.input.dragging          = false;
@@ -4635,6 +4647,130 @@ class Komplexiti {
     // Card metadata
     // =========================================================================
 
+    // ---- Locus intersection geometry ----------------------------------------
+
+    _fastPathIntersections() {
+        const shapes = [];
+        for (const c of this.expressions) {
+            if (!c.enabled) continue;
+            const fp = c.locus?.fastPath;
+            if (!fp) continue;
+            if (fp.kind === 'circle' || fp.kind === 'apollonius') {
+                shapes.push({ kind: 'circular', cx: fp.center.re, cy: fp.center.im, r: fp.radius });
+            } else if (fp.kind === 'inscribed-arc') {
+                shapes.push({ kind: 'arc', cx: fp.center.re, cy: fp.center.im, r: fp.radius, fp });
+            } else if (fp.kind === 'line') {
+                shapes.push({ kind: 'linear', px: fp.point.re, py: fp.point.im, dx: fp.direction.re, dy: fp.direction.im, tMin: -Infinity });
+            } else if (fp.kind === 'ray') {
+                shapes.push({ kind: 'linear', px: fp.origin.re, py: fp.origin.im, dx: Math.cos(fp.angle), dy: Math.sin(fp.angle), tMin: 0 });
+            }
+        }
+        const pts = [];
+        for (let i = 0; i < shapes.length - 1; i++) {
+            for (let j = i + 1; j < shapes.length; j++) {
+                for (const p of this._intersectShapes(shapes[i], shapes[j])) {
+                    if (pts.every(q => Math.hypot(q.re - p.re, q.im - p.im) > 1e-6)) pts.push(p);
+                }
+            }
+        }
+        return pts;
+    }
+
+    _intersectShapes(a, b) {
+        const aC = a.kind === 'circular' || a.kind === 'arc';
+        const bC = b.kind === 'circular' || b.kind === 'arc';
+        let pts;
+        if (aC && bC)        pts = this._circleCircleIntersect(a, b);
+        else if (aC && !bC)  pts = this._circleLineIntersect(a, b);
+        else if (!aC && bC)  pts = this._circleLineIntersect(b, a);
+        else                 pts = this._lineLineIntersect(a, b);
+        if (a.kind === 'arc') pts = pts.filter(p => this._isOnArc(p, a.fp));
+        if (b.kind === 'arc') pts = pts.filter(p => this._isOnArc(p, b.fp));
+        return pts;
+    }
+
+    _isOnArc({ re, im }, { b, theta, center, radius }) {
+        if (Math.abs(Math.hypot(re - center.re, im - center.im) - radius) > radius * 1e-4 + 1e-9) return false;
+        const alphaB   = Math.atan2(b.im - center.im, b.re - center.re);
+        const dir       = theta > 0 ? -1 : 1;
+        const arcAngle  = 2 * Math.PI - 2 * Math.abs(theta);
+        const alphaP    = Math.atan2(im - center.im, re - center.re);
+        const dAngle    = ((dir * (alphaP - alphaB)) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+        return dAngle <= arcAngle + 1e-9;
+    }
+
+    _circleCircleIntersect({ cx: cx1, cy: cy1, r: r1 }, { cx: cx2, cy: cy2, r: r2 }) {
+        const dx = cx2 - cx1, dy = cy2 - cy1;
+        const d  = Math.hypot(dx, dy);
+        if (d < 1e-9 || d > r1 + r2 + 1e-9 || d < Math.abs(r1 - r2) - 1e-9) return [];
+        const a  = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
+        const h  = Math.sqrt(Math.max(0, r1 * r1 - a * a));
+        const mx = cx1 + a * dx / d, my = cy1 + a * dy / d;
+        const px = -dy / d * h,      py =  dx / d * h;
+        if (h < 1e-9) return [{ re: mx, im: my }];
+        return [{ re: mx + px, im: my + py }, { re: mx - px, im: my - py }];
+    }
+
+    _circleLineIntersect({ cx, cy, r }, { px, py, dx, dy, tMin }) {
+        const len2 = dx * dx + dy * dy;
+        if (len2 < 1e-18) return [];
+        const vx = cx - px, vy = cy - py;
+        const tC  = (vx * dx + vy * dy) / len2;
+        const dist2 = vx * vx + vy * vy - tC * tC * len2;
+        if (dist2 > r * r + 1e-9) return [];
+        const dt = Math.sqrt(Math.max(0, r * r - dist2)) / Math.sqrt(len2);
+        return (dt < 1e-9 ? [tC] : [tC - dt, tC + dt])
+            .filter(t => t >= tMin - 1e-9)
+            .map(t => ({ re: px + t * dx, im: py + t * dy }));
+    }
+
+    _lineLineIntersect({ px: p1x, py: p1y, dx: d1x, dy: d1y, tMin: tMin1 },
+                       { px: p2x, py: p2y, dx: d2x, dy: d2y, tMin: tMin2 }) {
+        const cross = d1x * d2y - d1y * d2x;
+        if (Math.abs(cross) < 1e-12) return [];
+        const rx = p2x - p1x, ry = p2y - p1y;
+        const t1 = (rx * d2y - ry * d2x) / cross;
+        const t2 = (rx * d1y - ry * d1x) / cross;
+        if (t1 < tMin1 - 1e-9 || t2 < tMin2 - 1e-9) return [];
+        return [{ re: p1x + t1 * d1x, im: p1y + t1 * d1y }];
+    }
+
+    // ---- Intersection badge (temporary click-popup) --------------------------
+
+    _showIntersectionBadge(screenX, screenY, { re, im }) {
+        const badge = document.getElementById('intersection-badge');
+        if (!badge) return;
+        const tol = 1e-9;
+        const reStr  = this.niceRealHTML(re)            ?? this.formatNumberShort(re);
+        const imAbs  = Math.abs(im);
+        const imStr  = this.niceRealHTML(imAbs)          ?? this.formatNumberShort(imAbs);
+        let html;
+        if (Math.abs(im) < tol) {
+            html = `z = ${reStr}`;
+        } else if (Math.abs(re) < tol) {
+            html = `z = ${im < 0 ? '-' : ''}${imStr}i`;
+        } else {
+            html = `z = ${reStr} ${im < 0 ? '-' : '+'} ${imStr}i`;
+        }
+        badge.innerHTML = html;
+        const bw = badge.offsetWidth || 180;
+        let x = screenX + 16;
+        let y = screenY - 44;
+        if (x + bw > window.innerWidth) x = screenX - bw - 16;
+        if (y < 4) y = screenY + 16;
+        badge.style.left       = x + 'px';
+        badge.style.top        = y + 'px';
+        badge.style.opacity    = '1';
+        badge.style.transition = 'none';
+        badge.style.display    = 'block';
+        clearTimeout(this._intersectionBadgeTimeout);
+        this._intersectionBadgeTimeout = setTimeout(() => {
+            badge.style.transition = 'opacity 2.5s ease';
+            badge.style.opacity    = '0';
+            setTimeout(() => { badge.style.display = 'none'; }, 2500);
+        }, 2000);
+    }
+
     _computeLocusExtrema(c) {
         if (c.type !== 'locus' || !c.locus) return null;
         const fp = c.locus.fastPath;
@@ -5292,7 +5428,8 @@ class Komplexiti {
 
     drawExpressions() {
         if (!this.expressions.length) return;
-        this._extremaHitTargets = [];
+        this._extremaHitTargets    = [];
+        this._locusIntersectionHits = [];
         const ctx     = this.ctx;
         const isLight = document.documentElement.getAttribute('data-theme') === 'light';
         const fSize       = this.sizeMode === 'xlarge' ? 26 : this.sizeMode === 'large' ? 22 : 18;
@@ -5690,6 +5827,30 @@ class Komplexiti {
                 ctx.fillStyle = c.color;
                 ctx.fillText(c.name, lx, ly);
                 ctx.restore();
+            }
+        }
+
+        // Draw intersection dots for all enabled fast-path loci pairs
+        const ipts = this._fastPathIntersections();
+        if (ipts.length) {
+            const iDotR = strokeWidth / 2;
+            const iEdge = 1.5;
+            const hitR  = Math.max(14, iDotR + iEdge + 6);
+            const outerFill = isLight ? '#000000' : '#ffffff';
+            const innerFill = isLight ? '#ffffff' : '#000000';
+            for (const p of ipts) {
+                const sp = this.worldToScreen(p.re, p.im);
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(sp.x, sp.y, iDotR + iEdge, 0, Math.PI * 2);
+                ctx.fillStyle = outerFill;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(sp.x, sp.y, iDotR, 0, Math.PI * 2);
+                ctx.fillStyle = innerFill;
+                ctx.fill();
+                ctx.restore();
+                this._locusIntersectionHits.push({ x: sp.x, y: sp.y, re: p.re, im: p.im, hitR });
             }
         }
     }
