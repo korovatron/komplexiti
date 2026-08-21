@@ -203,7 +203,7 @@ class Komplexiti {
                                 [
                                     { latex: 'i', label: 'i' },
                                     { latex: '\\pi', label: 'π' },
-                                    { latex: '=', label: '=' },
+                                    { latex: 'z', label: 'z' },
                                     { label: '[backspace]', width: 1 },
                                     '[separator]',
                                     { latex: '7', label: '7' },
@@ -227,8 +227,14 @@ class Komplexiti {
                                     { latex: '\\cdot', label: '×' }
                                 ],
                                 [
-                                    { latex: '(', label: '(' },
-                                    { latex: ')', label: ')' },
+                                    {
+                                        latex: '<', label: '<',
+                                        shift: { latex: '\\leq', label: '≤' }
+                                    },
+                                    {
+                                        latex: '>', label: '>',
+                                        shift: { latex: '\\geq', label: '≥' }
+                                    },
                                     { latex: '\\left|#?\\right|', label: '|z|' },
                                     { latex: '\\overline{#?}', label: 'z̅' },
                                     '[separator]',
@@ -244,9 +250,9 @@ class Komplexiti {
                                     '[separator]',
                                     { latex: '0', label: '0' },
                                     {
-                                        latex: '.',
-                                        label: '.',
-                                        shift: { latex: ',', label: ',' }
+                                        latex: '=',
+                                        label: '=',
+                                        shift: { latex: '.', label: '.' }
                                     },
                                     { label: '[shift]', width: 1 },
                                     { latex: '-', label: '-' }
