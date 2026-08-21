@@ -2114,6 +2114,12 @@ class Komplexiti {
         // Apply theme after DOM insertion so MathLive's connectedCallback fires first
         requestAnimationFrame(() => {
             this.applyMathFieldTheme(mathField);
+            mathField.inlineShortcuts = {
+                ...mathField.inlineShortcuts,
+                abs:  { mode: 'math', value: '\\left|#?\\right|' },
+                mod:  { mode: 'math', value: '\\left|#?\\right|' },
+                conj: { mode: 'math', value: '\\overline{#?}' }
+            };
             if (!c.enabled) mathField.style.opacity = '0.4';
             if (c.latex) {
                 mathField.value = c.latex;
@@ -5255,10 +5261,11 @@ class Komplexiti {
     formatCartesianLatex(re, im) {
         const aStr = this.niceRealLatex(re)          ?? this.formatNumberShort(re);
         const bAbs = this.niceRealLatex(Math.abs(im)) ?? this.formatNumberShort(Math.abs(im));
+        const bStr = bAbs === '1' ? '' : bAbs;
         if (Math.abs(im) < 1e-10) return aStr;
-        if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${bAbs}i` : `${bAbs}i`;
+        if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${bStr}i` : `${bStr}i`;
         const sign = im < -1e-10 ? '-' : '+';
-        return `${aStr}${sign}${bAbs}i`;
+        return `${aStr}${sign}${bStr}i`;
     }
 
     // ---- Nice-number helpers (adapted from Graphiti) ----
@@ -5434,10 +5441,11 @@ class Komplexiti {
     formatCartesianHTML(re, im) {
         const aStr = this.niceRealHTML(re)          ?? this.formatNumber(re);
         const bAbs = this.niceRealHTML(Math.abs(im)) ?? this.formatNumber(Math.abs(im));
+        const bStr = bAbs === '1' ? '' : bAbs;
         if (Math.abs(im) < 1e-10) return aStr;
-        if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${bAbs}i` : `${bAbs}i`;
+        if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${bStr}i` : `${bStr}i`;
         const sign = im < -1e-10 ? ' - ' : ' + ';
-        return `${aStr}${sign}${bAbs}i`;
+        return `${aStr}${sign}${bStr}i`;
     }
 
     formatArgument(theta) {
