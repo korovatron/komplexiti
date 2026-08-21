@@ -1989,7 +1989,7 @@ class Komplexiti {
                     hasError = parsed === null;
                     c.errorMessage = hasError ? 'Cannot evaluate expression' : '';
                 }
-            } else if (raw.includes('=') || /[<>]/.test(raw) || /\\le|\\ge|\\lt|\\gt/.test(raw)) {
+            } else if (raw.includes('=') || /[<>]/.test(raw) || /\\leq|\\geq|\\le(?![a-zA-Z])|\\ge(?![a-zA-Z])|\\lt(?![a-zA-Z])|\\gt(?![a-zA-Z])/.test(raw)) {
                 // Not a simple name=value assignment — try to solve as an equation or inequality
                 c.name = null;
                 c.re   = null;
@@ -2275,7 +2275,7 @@ class Komplexiti {
                     c.im = parsed !== null ? parsed.im : null;
                     c.hasParseError = parsed === null;
                     c.errorMessage  = parsed === null ? 'Cannot evaluate expression' : '';
-                } else if (!assignment && (raw.includes('=') || /[<>]/.test(raw) || /\\le|\\ge|\\lt|\\gt/.test(raw))) {
+                } else if (!assignment && (raw.includes('=') || /[<>]/.test(raw) || /\\leq|\\geq|\\le(?![a-zA-Z])|\\ge(?![a-zA-Z])|\\lt(?![a-zA-Z])|\\gt(?![a-zA-Z])/.test(raw))) {
                     const eq = this.parseEquation(raw, c.id);
                     if (eq) {
                         c.type = eq.type;
