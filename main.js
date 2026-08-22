@@ -4803,13 +4803,14 @@ class Komplexiti {
         const color      = '#D63384';
         const outline    = '#852052'; // #D63384 * 0.62
         const textClr    = this.getContrastingTextColor(color);
-        const fontSize   = 16;
+        const fontSize   = this.sizeMode === 'xlarge' ? 24 : this.sizeMode === 'large' ? 20 : 16;
+        const fontWeight = this.sizeMode === 'normal' ? 'normal' : 'bold';
         const padding    = 6;
         const closeSize  = 16;
         const closeMargin = 6;
 
         ctx.save();
-        ctx.font = `${fontSize}px Arial, sans-serif`;
+        ctx.font = `${fontWeight} ${fontSize}px Arial, sans-serif`;
 
         for (const badge of this._intersectionBadges) {
             const sp        = this.worldToScreen(badge.re, badge.im);
