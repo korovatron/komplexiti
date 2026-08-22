@@ -874,6 +874,7 @@ class Komplexiti {
         this.drawAxes();
         this.drawAxisLabels();
         this.drawExpressions();
+        this._drawIntersectionBadges(ctx);
     }
 
     // -------------------------------------------------------------------------
@@ -1245,9 +1246,12 @@ class Komplexiti {
             if (this.currentState !== this.states.APP) return;
             const rect = this.canvas.getBoundingClientRect();
             const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-            // Cursor: pointer when hovering an intersection dot
-            const onDot = this._locusIntersectionHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
-            this.canvas.style.cursor = onDot ? 'pointer' : '';
+            // Cursor: pointer when hovering an intersection dot or badge close button
+            const onDot   = this._locusIntersectionHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
+            const onClose = this._intersectionBadges?.some(b => b.closeBtn &&
+                mx >= b.closeBtn.x && mx <= b.closeBtn.x + b.closeBtn.w &&
+                my >= b.closeBtn.y && my <= b.closeBtn.y + b.closeBtn.h);
+            this.canvas.style.cursor = (onDot || onClose) ? 'pointer' : '';
             const tooltip = document.getElementById('extrema-tooltip');
             if (!tooltip || !this._extremaHitTargets?.length) { if (tooltip) tooltip.style.display = 'none'; return; }
             const hit = this._extremaHitTargets.find(t => Math.hypot(mx - t.x, my - t.y) < t.r);
@@ -1336,14 +1340,28 @@ class Komplexiti {
         if (this.input.viewportPanActive && speed > 1e-6 && idleMs < 120) {
             this.startMousePanInertia();
         }
-        if (!this.input.dragging && this._locusIntersectionHits?.length) {
+        if (!this.input.dragging) {
             const mx = this.input.mouse.x, my = this.input.mouse.y;
-            const hit = this._locusIntersectionHits.find(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
-            if (hit) {
-                const key = `${hit.re.toFixed(10)},${hit.im.toFixed(10)}`;
-                if (!this._activeBadgeKeys?.has(key)) {
-                    const rect = this.canvas.getBoundingClientRect();
-                    this._showIntersectionBadge(rect.left + hit.x, rect.top + hit.y, hit);
+            // Close button hit takes priority
+            if (this._intersectionBadges?.length) {
+                const closeHit = this._intersectionBadges.find(b => b.closeBtn &&
+                    mx >= b.closeBtn.x && mx <= b.closeBtn.x + b.closeBtn.w &&
+                    my >= b.closeBtn.y && my <= b.closeBtn.y + b.closeBtn.h);
+                if (closeHit) {
+                    this._intersectionBadges = this._intersectionBadges.filter(b => b !== closeHit);
+                    this.input.mouse.down = false;
+                    this.input.dragging = false;
+                    this.input.viewportPanActive = false;
+                    this.drawCanvas();
+                    return;
+                }
+            }
+            // Toggle badge on intersection dot click
+            if (this._locusIntersectionHits?.length) {
+                const hit = this._locusIntersectionHits.find(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
+                if (hit) {
+                    this._showIntersectionBadge(hit.re, hit.im);
+                    this.drawCanvas();
                 }
             }
         }
@@ -4763,49 +4781,85 @@ class Komplexiti {
         return [{ re: p1x + t1 * d1x, im: p1y + t1 * d1y }];
     }
 
-    // ---- Intersection badge (temporary click-popup) --------------------------
+    // ---- Intersection badges (canvas-drawn, persistent, graphiti-style) ------
 
-    _showIntersectionBadge(screenX, screenY, { re, im }) {
-        const tol = 1e-9;
-        const key  = `${re.toFixed(10)},${im.toFixed(10)}`;
-        if (!this._activeBadgeKeys) this._activeBadgeKeys = new Set();
-        this._activeBadgeKeys.add(key);
-
-        const reStr = this.niceRealHTML(re)        ?? this.formatNumberShort(re);
-        const imAbs = Math.abs(im);
-        const imStr = this.niceRealHTML(imAbs)      ?? this.formatNumberShort(imAbs);
-        let html;
-        if (Math.abs(im) < tol) {
-            html = `z = ${reStr}`;
-        } else if (Math.abs(re) < tol) {
-            html = `z = ${im < 0 ? '-' : ''}${imStr}i`;
+    _showIntersectionBadge(re, im) {
+        if (!this._intersectionBadges) this._intersectionBadges = [];
+        const key = `${re.toFixed(10)},${im.toFixed(10)}`;
+        const idx = this._intersectionBadges.findIndex(b => b.key === key);
+        if (idx !== -1) {
+            this._intersectionBadges.splice(idx, 1); // toggle off
         } else {
-            html = `z = ${reStr} ${im < 0 ? '-' : '+'} ${imStr}i`;
+            this._intersectionBadges.push({ re, im, key, closeBtn: null });
         }
+    }
 
-        const badge = document.createElement('div');
-        badge.className = 'intersection-badge';
-        badge.innerHTML = html;
-        badge.style.opacity = '0';
-        document.body.appendChild(badge);
+    _drawIntersectionBadges(ctx) {
+        if (!this._intersectionBadges?.length) return;
+        const color      = '#D63384';
+        const outline    = '#852052'; // #D63384 * 0.62
+        const textClr    = this.getContrastingTextColor(color);
+        const fontSize   = 16;
+        const padding    = 6;
+        const closeSize  = 16;
+        const closeMargin = 6;
 
-        const bw = badge.offsetWidth || 180;
-        let x = screenX + 16;
-        let y = screenY - 44;
-        if (x + bw > window.innerWidth) x = screenX - bw - 16;
-        if (y < 4) y = screenY + 16;
-        badge.style.left    = x + 'px';
-        badge.style.top     = y + 'px';
-        badge.style.opacity = '1';
+        ctx.save();
+        ctx.font = `${fontSize}px Arial, sans-serif`;
 
-        setTimeout(() => {
-            badge.style.transition = 'opacity 2.5s ease';
-            badge.style.opacity    = '0';
-            setTimeout(() => {
-                badge.remove();
-                this._activeBadgeKeys.delete(key);
-            }, 2500);
-        }, 2000);
+        for (const badge of this._intersectionBadges) {
+            const sp        = this.worldToScreen(badge.re, badge.im);
+            const labelText = `z = ${this.formatComplexPlain(badge.re, badge.im, 'cartesian')}`;
+            const tw        = ctx.measureText(labelText).width;
+            const th        = fontSize;
+            const labelX    = sp.x + 15;
+            const labelY    = sp.y - 10;
+            const totalW    = tw + 2 * padding + closeSize + closeMargin + 4;
+            const boxH      = th + 2 * padding;
+            const boxY      = labelY - th - padding;
+
+            // Background
+            ctx.fillStyle   = color;
+            ctx.strokeStyle = outline;
+            ctx.lineWidth   = 1.4;
+            ctx.beginPath();
+            ctx.roundRect(labelX - padding, boxY, totalW, boxH, 3);
+            ctx.fill();
+            ctx.stroke();
+
+            // Label text
+            ctx.fillStyle    = textClr;
+            ctx.textAlign    = 'left';
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillText(labelText, labelX, boxY + boxH * 0.7);
+
+            // Close button
+            const closeX  = labelX + tw + padding + closeMargin;
+            const closeY  = labelY - th;
+            const closeCX = closeX + closeSize / 2;
+            const closeCY = closeY + closeSize / 2;
+
+            ctx.fillStyle   = 'rgba(0,0,0,0.15)';
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth   = 1;
+            ctx.beginPath();
+            ctx.roundRect(closeX, closeY, closeSize, closeSize, 2);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.strokeStyle = textClr;
+            ctx.lineWidth   = 2;
+            const xH = 5;
+            ctx.beginPath();
+            ctx.moveTo(closeCX - xH, closeCY - xH);
+            ctx.lineTo(closeCX + xH, closeCY + xH);
+            ctx.moveTo(closeCX + xH, closeCY - xH);
+            ctx.lineTo(closeCX - xH, closeCY + xH);
+            ctx.stroke();
+
+            badge.closeBtn = { x: closeX, y: closeY, w: closeSize, h: closeSize };
+        }
+        ctx.restore();
     }
 
     _computeLocusExtrema(c) {
