@@ -1360,7 +1360,7 @@ class Komplexiti {
             if (this._locusIntersectionHits?.length) {
                 const hit = this._locusIntersectionHits.find(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
                 if (hit) {
-                    this._showIntersectionBadge(hit.re, hit.im);
+                    this._showIntersectionBadge(hit.re, hit.im, hit.exprIds);
                     this.drawCanvas();
                 }
             }
@@ -2048,6 +2048,7 @@ class Komplexiti {
             this._refreshDuplicateNameErrors();
             this.updateAllCardMetadata();
             this.saveExpressions();
+            this._intersectionBadges = [];
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
@@ -2073,6 +2074,7 @@ class Komplexiti {
             mathField.style.opacity = c.enabled ? '1' : '0.4';
             this.updateCardMetadata(c);
             this.saveExpressions();
+            this._intersectionBadges = (this._intersectionBadges || []).filter(b => !b.exprIds?.includes(c.id));
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
@@ -2160,6 +2162,7 @@ class Komplexiti {
         this.cascadeEvaluate(null);
         this._refreshDuplicateNameErrors();
         this.saveExpressions();
+        this._intersectionBadges = [];
         if (this.currentState === this.states.APP) this.drawCanvas();
     }
 
@@ -4691,31 +4694,32 @@ class Komplexiti {
 
     _fastPathIntersections() {
         const shapes = [];
-        const addFp = fp => {
+        const addFp = (fp, exprId) => {
             if (!fp) return;
             if (fp.kind === 'circle' || fp.kind === 'apollonius') {
-                shapes.push({ kind: 'circular', cx: fp.center.re, cy: fp.center.im, r: fp.radius });
+                shapes.push({ kind: 'circular', cx: fp.center.re, cy: fp.center.im, r: fp.radius, exprId });
             } else if (fp.kind === 'inscribed-arc') {
-                shapes.push({ kind: 'arc', cx: fp.center.re, cy: fp.center.im, r: fp.radius, fp });
+                shapes.push({ kind: 'arc', cx: fp.center.re, cy: fp.center.im, r: fp.radius, fp, exprId });
             } else if (fp.kind === 'line') {
-                shapes.push({ kind: 'linear', px: fp.point.re, py: fp.point.im, dx: fp.direction.re, dy: fp.direction.im, tMin: -Infinity });
+                shapes.push({ kind: 'linear', px: fp.point.re, py: fp.point.im, dx: fp.direction.re, dy: fp.direction.im, tMin: -Infinity, exprId });
             } else if (fp.kind === 'ray') {
-                shapes.push({ kind: 'linear', px: fp.origin.re, py: fp.origin.im, dx: Math.cos(fp.angle), dy: Math.sin(fp.angle), tMin: 0 });
+                shapes.push({ kind: 'linear', px: fp.origin.re, py: fp.origin.im, dx: Math.cos(fp.angle), dy: Math.sin(fp.angle), tMin: 0, exprId });
             }
         };
         for (const c of this.expressions) {
             if (!c.enabled) continue;
             if (c.type === 'compound-locus' && c.compoundParts) {
-                for (const part of c.compoundParts) addFp(part.locus?.fastPath);
+                for (const part of c.compoundParts) addFp(part.locus?.fastPath, c.id);
             } else {
-                addFp(c.locus?.fastPath);
+                addFp(c.locus?.fastPath, c.id);
             }
         }
         const pts = [];
         for (let i = 0; i < shapes.length - 1; i++) {
             for (let j = i + 1; j < shapes.length; j++) {
                 for (const p of this._intersectShapes(shapes[i], shapes[j])) {
-                    if (pts.every(q => Math.hypot(q.re - p.re, q.im - p.im) > 1e-6)) pts.push(p);
+                    if (pts.every(q => Math.hypot(q.re - p.re, q.im - p.im) > 1e-6))
+                        pts.push({ ...p, exprIds: [shapes[i].exprId, shapes[j].exprId] });
                 }
             }
         }
@@ -4783,14 +4787,14 @@ class Komplexiti {
 
     // ---- Intersection badges (canvas-drawn, persistent, graphiti-style) ------
 
-    _showIntersectionBadge(re, im) {
+    _showIntersectionBadge(re, im, exprIds) {
         if (!this._intersectionBadges) this._intersectionBadges = [];
         const key = `${re.toFixed(10)},${im.toFixed(10)}`;
         const idx = this._intersectionBadges.findIndex(b => b.key === key);
         if (idx !== -1) {
             this._intersectionBadges.splice(idx, 1); // toggle off
         } else {
-            this._intersectionBadges.push({ re, im, key, closeBtn: null });
+            this._intersectionBadges.push({ re, im, key, exprIds: exprIds ?? [], closeBtn: null });
         }
     }
 
@@ -5947,7 +5951,7 @@ class Komplexiti {
                 ctx.fillStyle = innerFill;
                 ctx.fill();
                 ctx.restore();
-                this._locusIntersectionHits.push({ x: sp.x, y: sp.y, re: p.re, im: p.im, hitR });
+                this._locusIntersectionHits.push({ x: sp.x, y: sp.y, re: p.re, im: p.im, hitR, exprIds: p.exprIds });
             }
         }
     }
