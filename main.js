@@ -1340,8 +1340,11 @@ class Komplexiti {
             const mx = this.input.mouse.x, my = this.input.mouse.y;
             const hit = this._locusIntersectionHits.find(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
             if (hit) {
-                const rect = this.canvas.getBoundingClientRect();
-                this._showIntersectionBadge(rect.left + hit.x, rect.top + hit.y, hit);
+                const key = `${hit.re.toFixed(10)},${hit.im.toFixed(10)}`;
+                if (!this._activeBadgeKeys?.has(key)) {
+                    const rect = this.canvas.getBoundingClientRect();
+                    this._showIntersectionBadge(rect.left + hit.x, rect.top + hit.y, hit);
+                }
             }
         }
         this.input.mouse.down        = false;
@@ -4763,12 +4766,14 @@ class Komplexiti {
     // ---- Intersection badge (temporary click-popup) --------------------------
 
     _showIntersectionBadge(screenX, screenY, { re, im }) {
-        const badge = document.getElementById('intersection-badge');
-        if (!badge) return;
         const tol = 1e-9;
-        const reStr  = this.niceRealHTML(re)            ?? this.formatNumberShort(re);
-        const imAbs  = Math.abs(im);
-        const imStr  = this.niceRealHTML(imAbs)          ?? this.formatNumberShort(imAbs);
+        const key  = `${re.toFixed(10)},${im.toFixed(10)}`;
+        if (!this._activeBadgeKeys) this._activeBadgeKeys = new Set();
+        this._activeBadgeKeys.add(key);
+
+        const reStr = this.niceRealHTML(re)        ?? this.formatNumberShort(re);
+        const imAbs = Math.abs(im);
+        const imStr = this.niceRealHTML(imAbs)      ?? this.formatNumberShort(imAbs);
         let html;
         if (Math.abs(im) < tol) {
             html = `z = ${reStr}`;
@@ -4777,23 +4782,29 @@ class Komplexiti {
         } else {
             html = `z = ${reStr} ${im < 0 ? '-' : '+'} ${imStr}i`;
         }
-        badge.innerHTML    = html;
-        badge.style.transition = 'none';
-        badge.style.opacity    = '0';
-        badge.style.display    = 'block';
+
+        const badge = document.createElement('div');
+        badge.className = 'intersection-badge';
+        badge.innerHTML = html;
+        badge.style.opacity = '0';
+        document.body.appendChild(badge);
+
         const bw = badge.offsetWidth || 180;
         let x = screenX + 16;
         let y = screenY - 44;
         if (x + bw > window.innerWidth) x = screenX - bw - 16;
         if (y < 4) y = screenY + 16;
-        badge.style.left       = x + 'px';
-        badge.style.top        = y + 'px';
-        badge.style.opacity    = '1';
-        clearTimeout(this._intersectionBadgeTimeout);
-        this._intersectionBadgeTimeout = setTimeout(() => {
+        badge.style.left    = x + 'px';
+        badge.style.top     = y + 'px';
+        badge.style.opacity = '1';
+
+        setTimeout(() => {
             badge.style.transition = 'opacity 2.5s ease';
             badge.style.opacity    = '0';
-            setTimeout(() => { badge.style.display = 'none'; }, 2500);
+            setTimeout(() => {
+                badge.remove();
+                this._activeBadgeKeys.delete(key);
+            }, 2500);
         }, 2000);
     }
 
