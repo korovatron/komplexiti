@@ -1831,7 +1831,7 @@ class Komplexiti {
             if (darkIcon)  darkIcon.style.opacity  = '0.3';
             localStorage.setItem('komplexiti-theme', 'light');
         }
-        document.querySelectorAll('.expr-card math-field').forEach(f => this.applyMathFieldTheme(f));
+        document.querySelectorAll('.expr-card math-field:not(.asymptote-equation-field)').forEach(f => this.applyMathFieldTheme(f));
         this.updateCanvasBackground();
         if (this.currentState === this.states.APP) this.drawCanvas();
     }
