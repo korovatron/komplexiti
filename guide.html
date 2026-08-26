@@ -164,28 +164,31 @@
             justify-content: center;
             min-width: 180px;
             padding: 12px 30px;
-            border: 1px solid #555;
+            border: 1px solid rgba(82, 218, 103, 0.9);
             border-radius: 8px;
-            background: #2A3F5A;
-            color: var(--text-primary);
+            background: #198A42;
+            color: #FFFFFF;
             text-decoration: none;
-            font-size: 1em;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-            transition: filter 0.2s, box-shadow 0.2s;
+            font-size: 1.1em;
+            font-weight: 800;
+            box-shadow: 0 8px 22px rgba(53, 224, 88, 0.18), 0 2px 8px rgba(0, 0, 0, 0.35);
+            transition: filter 0.2s, box-shadow 0.2s, transform 0.2s;
         }
 
         .launch-link:hover {
-            color: var(--text-primary);
-            filter: brightness(1.15);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            color: #FFFFFF;
+            filter: brightness(1.05);
+            transform: translateY(-1px);
+            box-shadow: 0 10px 28px rgba(53, 224, 88, 0.28), 0 4px 12px rgba(0, 0, 0, 0.4);
         }
 
         .launch-link:active {
             filter: brightness(1.1);
         }
 
-        .launch-link-short {
-            display: none;
+        .launch-link:focus-visible {
+            outline: 3px solid rgba(255, 255, 255, 0.9);
+            outline-offset: 3px;
         }
 
         header {
@@ -361,14 +364,6 @@
             .launch-link {
                 padding-inline: 14px;
             }
-
-            .launch-link-long {
-                display: none;
-            }
-
-            .launch-link-short {
-                display: inline;
-            }
         }
     </style>
 </head>
@@ -378,7 +373,7 @@
             <a class="brand-link" href="./" aria-label="Return to Komplexiti">
                 <img src="images/komplexitiTitle.png" alt="Komplexiti">
             </a>
-            <a class="launch-link" href="./" aria-label="Launch Komplexiti complex number tool"><span class="launch-link-long">Launch Komplexiti</span><span class="launch-link-short">Launch</span></a>
+            <a class="launch-link" href="./" aria-label="Launch Komplexiti complex number tool">Launch</a>
         </nav>
 
         <header>
