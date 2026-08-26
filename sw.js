@@ -1,4 +1,4 @@
-const CACHE_NAME = 'komplexiti-v1.0.78';
+const CACHE_NAME = 'komplexiti-v1.0.79';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -9,6 +9,9 @@ const ASSETS_TO_CACHE = [
     './images/icon-192.png',
     './images/icon-512.png',
     './images/icon.svg',
+    './images/screenshots/mobileKomplexiti.png',
+    './images/screenshots/extrema.png',
+    './images/screenshots/complexInequalities.png',
     'https://unpkg.com/mathlive@0.110.0',
     'https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js',
