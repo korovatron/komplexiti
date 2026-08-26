@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <script data-goatcounter="https://korovatron.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#1A2F42">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Komplexiti Guide | Complex Numbers &amp; Argand Diagram Tool for A Level Further Maths</title>
+    <meta name="description" content="Komplexiti is a free interactive complex number tool for A Level Further Maths. Learn how to visualise numbers on the Argand diagram, explore forms, solve polynomial equations and plot loci.">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+    <link rel="icon" href="./images/icon.svg" type="image/svg+xml">
+    <link rel="icon" href="./images/icon-192.png" type="image/png" sizes="192x192">
+    <link rel="apple-touch-icon" sizes="192x192" href="./images/icon-192.png">
+    <link rel="canonical" href="https://www.korovatron.co.uk/komplexiti/guide.html">
+
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Komplexiti Guide | Complex Numbers &amp; Argand Diagram Tool">
+    <meta property="og:description" content="Learn how Komplexiti helps with complex numbers, Argand diagrams, modulus-argument form, polynomial roots and loci for A Level Further Maths.">
+    <meta property="og:url" content="https://www.korovatron.co.uk/komplexiti/guide.html">
+    <meta property="og:image" content="https://www.korovatron.co.uk/komplexiti/images/komplexitiShareImage.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:alt" content="Komplexiti showing complex numbers and loci on the Argand diagram">
+    <meta property="og:site_name" content="Korovatron">
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:title" content="Komplexiti Guide | Complex Numbers &amp; Argand Diagram Tool">
+    <meta property="twitter:description" content="Explore complex numbers, Argand diagrams, polynomial roots and loci with Komplexiti.">
+    <meta property="twitter:image" content="https://www.korovatron.co.uk/komplexiti/images/komplexitiShareImage.png">
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "BreadcrumbList",
+                "@id": "https://www.korovatron.co.uk/komplexiti/guide.html#breadcrumb",
+                "itemListElement": [
+                    {
+                        "@type": "ListItem",
+                        "position": 1,
+                        "name": "Korovatron",
+                        "item": "https://www.korovatron.co.uk/"
+                    },
+                    {
+                        "@type": "ListItem",
+                        "position": 2,
+                        "name": "Komplexiti",
+                        "item": "https://www.korovatron.co.uk/komplexiti/"
+                    },
+                    {
+                        "@type": "ListItem",
+                        "position": 3,
+                        "name": "Guide",
+                        "item": "https://www.korovatron.co.uk/komplexiti/guide.html"
+                    }
+                ]
+            },
+            {
+                "@type": "ItemPage",
+                "@id": "https://www.korovatron.co.uk/komplexiti/guide.html#webpage",
+                "name": "Komplexiti Guide | Complex Numbers &amp; Argand Diagram Tool for A Level Further Maths",
+                "description": "Comprehensive guide to Komplexiti, including the Argand diagram, complex number forms, polynomial root solving, and loci including circles, perpendicular bisectors, half-lines and spirals.",
+                "url": "https://www.korovatron.co.uk/komplexiti/guide.html",
+                "inLanguage": "en-GB",
+                "mainEntity": {
+                    "@id": "https://www.korovatron.co.uk/komplexiti/#webapplication"
+                },
+                "author": {
+                    "@type": "Person",
+                    "name": "Neil Kendall",
+                    "url": "https://www.korovatron.co.uk"
+                },
+                "publisher": {
+                    "@id": "https://www.korovatron.co.uk/#organization"
+                },
+                "breadcrumb": {
+                    "@id": "https://www.korovatron.co.uk/komplexiti/guide.html#breadcrumb"
+                }
+            }
+        ]
+    }
+    </script>
+
+    <style>
+        :root {
+            --page-bg: #1A2F42;
+            --panel-bg: #1A2F42;
+            --panel-strong: #213B55;
+            --text-primary: #E8F4FD;
+            --text-secondary: #B8D2E8;
+            --accent: #4A90E2;
+            --accent-bright: #8EC5FF;
+            --border: rgba(142, 197, 255, 0.22);
+            --shadow: rgba(0, 0, 0, 0.35);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            background: var(--page-bg);
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--page-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        a {
+            color: var(--accent-bright);
+        }
+
+        a:hover {
+            color: #C7E5FF;
+        }
+
+        .page-shell {
+            width: min(1080px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 28px 0 56px;
+        }
+
+        @media (display-mode: standalone), (display-mode: fullscreen) {
+            .page-shell {
+                padding-top: calc(28px + env(safe-area-inset-top, 0px));
+            }
+        }
+
+        .top-nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 34px;
+        }
+
+        .brand-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        .brand-link img {
+            width: 260px;
+            max-width: 68vw;
+            height: auto;
+        }
+
+        .launch-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 180px;
+            padding: 12px 30px;
+            border: 1px solid #555;
+            border-radius: 8px;
+            background: #2A3F5A;
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 1em;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            transition: filter 0.2s, box-shadow 0.2s;
+        }
+
+        .launch-link:hover {
+            color: var(--text-primary);
+            filter: brightness(1.15);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .launch-link:active {
+            filter: brightness(1.1);
+        }
+
+        .launch-link-short {
+            display: none;
+        }
+
+        header {
+            display: grid;
+            grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+            gap: 28px;
+            align-items: center;
+            margin-bottom: 28px;
+        }
+
+        .hero-copy h1 {
+            margin: 0 0 14px;
+            font-size: clamp(2rem, 4vw, 3.6rem);
+            line-height: 1.08;
+            letter-spacing: 0;
+        }
+
+        .hero-copy p {
+            margin: 0 0 18px;
+            color: var(--text-secondary);
+            font-size: 1.08rem;
+        }
+
+        .featured-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 2px;
+        }
+
+        .featured-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.035);
+            color: var(--accent-bright);
+            text-decoration: none;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .featured-link:hover {
+            color: #C7E5FF;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .hero-image {
+            margin: 0 auto;
+            max-width: 200px;
+            border: none;
+            border-radius: 0;
+            overflow: hidden;
+            background: transparent;
+            box-shadow: none;
+        }
+
+        .hero-image img {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .hero-image figcaption {
+            margin-top: 10px;
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            text-align: center;
+            font-style: italic;
+        }
+
+        .content-section {
+            margin-bottom: 28px;
+        }
+
+        .content-section h2 {
+            margin: 0 0 14px;
+            font-size: clamp(1.35rem, 2vw, 1.8rem);
+        }
+
+        details {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: rgba(26, 47, 66, 0.8);
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+
+        summary {
+            cursor: pointer;
+            padding: 16px 18px;
+            font-weight: 700;
+            color: #FFFFFF;
+            background: rgba(255, 255, 255, 0.035);
+        }
+
+        details[open] summary {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .answer {
+            padding: 16px 18px 18px;
+            color: var(--text-secondary);
+        }
+
+        .answer p:first-child {
+            margin-top: 0;
+        }
+
+        .answer p:last-child {
+            margin-bottom: 0;
+        }
+
+        .feature-list {
+            margin: 12px 0 0;
+            padding-left: 20px;
+        }
+
+        .feature-list li {
+            margin: 6px 0;
+        }
+
+        .screenshot-figure {
+            margin: 16px 0 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        .screenshot-figure img {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        footer {
+            margin-top: 34px;
+            padding-top: 22px;
+            border-top: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        @media (max-width: 820px) {
+            header {
+                grid-template-columns: 1fr;
+            }
+
+            .top-nav {
+                gap: 10px;
+            }
+
+            .brand-link img {
+                width: 220px;
+                max-width: 52vw;
+            }
+
+            .launch-link {
+                min-width: 0;
+                padding: 10px 16px;
+                white-space: nowrap;
+            }
+        }
+
+        @media (max-width: 420px) {
+            .brand-link img {
+                max-width: 50vw;
+            }
+
+            .launch-link {
+                padding-inline: 14px;
+            }
+
+            .launch-link-long {
+                display: none;
+            }
+
+            .launch-link-short {
+                display: inline;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-shell">
+        <nav class="top-nav" aria-label="Page navigation">
+            <a class="brand-link" href="./" aria-label="Return to Komplexiti">
+                <img src="images/komplexitiTitle.png" alt="Komplexiti">
+            </a>
+            <a class="launch-link" href="./" aria-label="Launch Komplexiti complex number tool"><span class="launch-link-long">Launch Komplexiti</span><span class="launch-link-short">Launch</span></a>
+        </nav>
+
+        <header>
+            <div class="hero-copy">
+                <h1>Komplexiti guide</h1>
+                <p>Komplexiti is a free online complex number tool for A Level Further Maths. It lets you plot and explore complex numbers interactively on the Argand diagram, switch between Cartesian, modulus-argument and exponential forms, solve polynomial equations for complex roots, and draw loci.</p>
+                <p>It is designed to make the abstract ideas in complex number work visible: numbers become points or vectors, operations update the diagram in real time, and loci are drawn as you type.</p>
+            </div>
+            <figure class="hero-image">
+                <img src="images/screenshots/mobileKomplexiti.png" alt="Komplexiti complex number tool showing the Argand diagram on mobile">
+                <figcaption>Install as a PWA on mobile for true full-screen and offline use</figcaption>
+            </figure>
+        </header>
+
+        <main>
+            <section class="content-section" id="argand-diagram">
+                <h2>The Argand diagram</h2>
+                <details>
+                    <summary>Plotting and manipulating complex numbers</summary>
+                    <div class="answer">
+                        <p>Komplexiti places each complex number you add as a labelled point on the interactive Argand diagram. You can enter numbers in Cartesian form (a + bi), and the diagram updates immediately as you type.</p>
+                        <p>Points can be displayed as arrows from the origin or as dots, depending on whether you want a vector or point interpretation. The display mode can be toggled at any time and applies to the whole diagram.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Multiple numbers and dynamic updates</summary>
+                    <div class="answer">
+                        <p>You can add as many complex numbers as you need. Each is given a distinct colour and label. When you change the value of a number, its position and any associated loci update instantly, which makes it easy to show the effect of changing a parameter or moving a point.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Light and dark themes</summary>
+                    <div class="answer">
+                        <p>Komplexiti includes both a dark theme and a light theme. The dark theme is the default and suits most screens well. The light theme is suitable for projected lessons, printing and use in bright conditions. The theme can be switched from the panel at any time.</p>
+                    </div>
+                </details>
+            </section>
+
+            <section class="content-section" id="complex-forms">
+                <h2>Complex number forms</h2>
+                <details>
+                    <summary>Cartesian form (a + bi)</summary>
+                    <div class="answer">
+                        <p>Numbers can be entered and displayed in Cartesian form. The real part is read from the horizontal axis and the imaginary part from the vertical axis, matching the standard Argand diagram layout taught at A Level.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Modulus-argument (polar) form</summary>
+                    <div class="answer">
+                        <p>Komplexiti can display each complex number's modulus and argument alongside its Cartesian coordinates. This helps connect the algebraic form r(cos θ + i sin θ) to the geometric picture of a distance from the origin and an angle from the positive real axis.</p>
+                        <p>The argument is given in radians and expressed as a multiple of π where possible, which is consistent with how answers are expected in A Level Further Maths.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Exponential form</summary>
+                    <div class="answer">
+                        <p>The exponential form re<sup>iθ</sup> is also available. This is useful when students have covered Euler's formula and need to see all three representations of the same number side by side.</p>
+                    </div>
+                </details>
+                <figure class="screenshot-figure">
+                    <img src="images/screenshots/extrema.png" alt="Komplexiti showing complex number forms and the Argand diagram">
+                </figure>
+            </section>
+
+            <section class="content-section" id="polynomial-roots">
+                <h2>Polynomial equations and roots</h2>
+                <details>
+                    <summary>Solving polynomial equations</summary>
+                    <div class="answer">
+                        <p>Komplexiti can find the roots of polynomial equations. You enter the equation and the app calculates all roots, including any complex ones, and plots them on the Argand diagram.</p>
+                        <p>This is useful for demonstrating the conjugate root theorem: if the polynomial has real coefficients, complex roots always appear in conjugate pairs, which is immediately visible on the diagram.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Roots of unity and geometric patterns</summary>
+                    <div class="answer">
+                        <p>Finding the nth roots of a complex number produces a set of equally spaced points around a circle centred at the origin. Komplexiti plots all these roots simultaneously so students can see the regular polygon pattern that emerges, connecting the algebra to the geometry.</p>
+                    </div>
+                </details>
+            </section>
+
+            <section class="content-section" id="loci">
+                <h2>Loci in the complex plane</h2>
+                <details>
+                    <summary>Circles: |z − a| = r</summary>
+                    <div class="answer">
+                        <p>A circle locus represents all points z a fixed distance r from a given complex number a. Komplexiti draws this as a circle on the Argand diagram. You can specify the centre and radius directly, and the circle updates as values change.</p>
+                        <p>This covers one of the most common locus types in A Level Further Maths and helps students see why the condition |z − a| = r is the complex plane equivalent of a circle equation.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Perpendicular bisectors: |z − a| = |z − b|</summary>
+                    <div class="answer">
+                        <p>The locus of points equidistant from two complex numbers a and b is the perpendicular bisector of the line segment joining them. Komplexiti draws this line, which can help students verify algebraic working and see the geometric meaning of the condition.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Half-lines: arg(z − a) = θ</summary>
+                    <div class="answer">
+                        <p>A half-line locus represents all points z from which the direction to a fixed point a is a given angle θ. Komplexiti draws the half-line starting from the fixed point at the specified argument, which is a key locus type for A Level Further Maths.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Cartesian lines, spirals, conjugate and algebraic loci</summary>
+                    <div class="answer">
+                        <p>Komplexiti also supports Cartesian line loci, spiral loci, conjugate loci and algebraic loci entered symbolically. This broader range covers the less common locus types that appear in Further Maths examinations and extends beyond the standard set.</p>
+                        <p>Multiple loci can be active on the same diagram at once. This makes it straightforward to show intersections of loci and the regions that satisfy combinations of conditions.</p>
+                    </div>
+                </details>
+                <figure class="screenshot-figure">
+                    <img src="images/screenshots/complexInequalities.png" alt="Komplexiti showing shaded regions defined by complex inequalities and loci">
+                </figure>
+            </section>
+
+            <section class="content-section" id="classroom">
+                <h2>Teaching and practical use</h2>
+                <details>
+                    <summary>A Level Further Maths</summary>
+                    <div class="answer">
+                        <p>Komplexiti is built specifically for A Level Further Maths complex number topics. It covers the content taught across the major examination boards, including Cartesian and polar forms, conjugates, modulus and argument, polynomial roots and loci.</p>
+                        <p>It is particularly useful for locus problems where a static diagram makes the construction harder to follow, and for polynomial work where the conjugate root theorem can be demonstrated visually rather than just stated.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Classroom display and explanation</summary>
+                    <div class="answer">
+                        <p>The interactive diagram works well on a projector or interactive whiteboard. Adding a number and watching it appear on the Argand diagram, or adding a locus condition and seeing the curve drawn immediately, gives a live demonstration that is harder to achieve with static slides.</p>
+                        <p>Switching between number forms while a point is plotted helps students see that Cartesian, modulus-argument and exponential forms all describe exactly the same number from different angles.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Access, devices and offline use</summary>
+                    <div class="answer">
+                        <p>Komplexiti runs in the browser on desktop, tablet and mobile devices. On smaller screens the layout adapts to keep the Argand diagram and controls accessible, and touch input is fully supported for panning and zooming the diagram.</p>
+                        <p>On supported devices, Komplexiti can be installed as a Progressive Web App. Once its files have loaded and been cached, it can continue to open and work without a network connection, which is useful in classrooms and places with unreliable Wi-Fi.</p>
+                        <p>On iPhone and iPad, open Komplexiti in Safari, tap the Share button, then choose Add to Home Screen. On Android and desktop browsers, installation is usually available from the browser menu or address bar when supported.</p>
+                    </div>
+                </details>
+            </section>
+        </main>
+
+        <footer>
+            <p>Komplexiti is part of Korovatron, a collection of classroom-ready maths and computer science tools.</p>
+            <p><a href="https://www.korovatron.co.uk/">Korovatron</a> | <a href="./">Launch Komplexiti</a></p>
+        </footer>
+    </div>
+</body>
+</html>
