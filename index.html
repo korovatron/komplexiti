@@ -2272,8 +2272,20 @@
                     <label><input id="export-include-axes" type="checkbox" checked> Include axes</label>
                 </div>
 
-                <div id="export-axis-labels-group" class="export-group export-checkbox-row export-svg-only export-sub-option">
+                <div id="export-axis-ticks-group" class="export-group export-checkbox-row export-svg-only export-sub-option">
+                    <label><input id="export-include-axis-ticks" type="checkbox" checked> Include tick marks</label>
+                </div>
+
+                <div class="export-group export-checkbox-row export-svg-only">
                     <label><input id="export-include-axis-labels" type="checkbox" checked> Include axis numbers and labels</label>
+                </div>
+
+                <div id="export-axis-label-density-group" class="export-group export-svg-only export-sub-option">
+                    <div class="export-label">Axis label density</div>
+                    <div class="export-radio-row">
+                        <label><input type="radio" name="export-axis-label-density" value="all" checked> All labels/ticks</label>
+                        <label><input type="radio" name="export-axis-label-density" value="reduced"> Every other (less crowded)</label>
+                    </div>
                 </div>
 
                 <div class="export-group export-checkbox-row export-svg-only">

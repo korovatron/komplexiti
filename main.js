@@ -760,7 +760,9 @@ class Komplexiti {
             exportOverlay.addEventListener('change', (e) => {
                 const target = e.target;
                 if (!target?.matches('input, select')) return;
-                if (target.name === 'export-format' || target.id === 'export-include-axes') {
+                if (target.name === 'export-format' ||
+                    target.id === 'export-include-axes' ||
+                    target.id === 'export-include-axis-labels') {
                     this.updateExportFormatUI();
                 } else {
                     this.requestExportPreviewUpdate();
@@ -6332,16 +6334,23 @@ class Komplexiti {
         const format = this.getSelectedExportFormat();
         const svgOnlyGroups = document.querySelectorAll('.export-svg-only');
         const generateButton = document.getElementById('export-generate-button');
-        const includeAxesInput = document.getElementById('export-include-axes');
-        const axisLabelsGroup = document.getElementById('export-axis-labels-group');
+        const includeAxesInput   = document.getElementById('export-include-axes');
+        const includeLabelsInput = document.getElementById('export-include-axis-labels');
+        const axisTicksGroup     = document.getElementById('export-axis-ticks-group');
+        const axisLabelDensityGroup = document.getElementById('export-axis-label-density-group');
 
         for (const group of svgOnlyGroups) {
             group.classList.toggle('export-hidden', format !== 'svg');
         }
 
-        if (axisLabelsGroup) {
+        if (axisTicksGroup) {
             const show = format === 'svg' && (!includeAxesInput || includeAxesInput.checked);
-            axisLabelsGroup.classList.toggle('export-hidden', !show);
+            axisTicksGroup.classList.toggle('export-hidden', !show);
+        }
+
+        if (axisLabelDensityGroup) {
+            const show = format === 'svg' && (!includeLabelsInput || includeLabelsInput.checked);
+            axisLabelDensityGroup.classList.toggle('export-hidden', !show);
         }
 
         if (generateButton) {
@@ -6517,8 +6526,10 @@ class Komplexiti {
         const textSizeInput      = document.getElementById('export-text-size');
         const lineWidthInput     = document.getElementById('export-line-width');
         const frameShapeInput    = document.getElementById('export-frame-shape');
-        const includeAxesInput   = document.getElementById('export-include-axes');
-        const includeLabelsInput = document.getElementById('export-include-axis-labels');
+        const includeAxesInput        = document.getElementById('export-include-axes');
+        const includeAxisTicksInput  = document.getElementById('export-include-axis-ticks');
+        const includeLabelsInput     = document.getElementById('export-include-axis-labels');
+        const axisLabelDensityInput  = document.querySelector('input[name="export-axis-label-density"]:checked');
         const includeExtremaInput       = document.getElementById('export-include-extrema');
         const includeIntersectionsInput = document.getElementById('export-include-intersections');
         return {
@@ -6528,8 +6539,10 @@ class Komplexiti {
             textSize:             textSizeInput      ? textSizeInput.value      : 'large',
             strokeWidth:          lineWidthInput     ? lineWidthInput.value     : 'small',
             frameShape:           frameShapeInput    ? frameShapeInput.value    : 'original',
-            includeAxes:          includeAxesInput   ? includeAxesInput.checked : true,
-            includeAxisLabels:    includeLabelsInput ? includeLabelsInput.checked : true,
+            includeAxes:          includeAxesInput      ? includeAxesInput.checked      : true,
+            includeAxisTicks:     includeAxisTicksInput ? includeAxisTicksInput.checked : true,
+            includeAxisLabels:    includeLabelsInput    ? includeLabelsInput.checked    : true,
+            axisLabelDensity:     axisLabelDensityInput ? axisLabelDensityInput.value   : 'all',
             includeExtrema:       includeExtremaInput       ? includeExtremaInput.checked       : true,
             includeIntersections: includeIntersectionsInput ? includeIntersectionsInput.checked : true
         };
@@ -6694,22 +6707,39 @@ class Komplexiti {
             }
         }
 
-        // Axis labels
+        // Axis labels and ticks
         if (options.includeAxes && options.includeAxisLabels) {
-            const labelSpacing = this.getLabelSpacing();
+            const labelSpacing  = this.getLabelSpacing();
+            const includeTicks  = options.includeAxisTicks !== false;
+            const reducedDensity = options.axisLabelDensity === 'reduced';
+            const tickLen       = includeTicks ? 7 : 0;
+            const tickSW        = 2.1;
+            const xLabelOffY    = tickLen + fSize + 4;
+            const yLabelOffX    = includeTicks ? tickLen + 4 : 7;
             const tLines = [];
             const fontAttr = `font-family="Arial, sans-serif" font-size="${fSize}px" font-weight="bold"`;
+
+            // Skip every other label when reduced density is selected
+            const shouldRender = (v, spacing) => {
+                if (!reducedDensity) return true;
+                const nearest = Math.round(v / spacing);
+                return Math.abs(nearest % 2) === 0;
+            };
 
             if (this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
                 const axisY = this.worldToScreen(0, 0).y;
                 const x0 = Math.floor(this.viewport.minX / labelSpacing) * labelSpacing;
                 for (let x = x0; x <= this.viewport.maxX; x += labelSpacing) {
                     if (Math.abs(x) < 1e-9) continue;
+                    if (!shouldRender(x, labelSpacing)) continue;
                     const sp = this.worldToScreen(x, 0);
                     if (sp.x < 20 || sp.x > W - 20) continue;
-                    const ly = axisY + 5;
-                    if (ly < H - 15) {
-                        tLines.push(`<text x="${sn(sp.x)}" y="${sn(ly)}" fill="${labelColor}" ${fontAttr} text-anchor="middle" dominant-baseline="hanging">${this.formatNumber(x)}</text>`);
+                    if (includeTicks) {
+                        tLines.push(`<line x1="${sn(sp.x)}" y1="${sn(axisY)}" x2="${sn(sp.x)}" y2="${sn(axisY + tickLen)}" stroke="${axisColor}" stroke-width="${tickSW}" vector-effect="non-scaling-stroke"/>`);
+                    }
+                    const ly = axisY + xLabelOffY;
+                    if (ly < H - 6) {
+                        tLines.push(`<text x="${sn(sp.x)}" y="${sn(ly)}" fill="${labelColor}" ${fontAttr} text-anchor="middle" dominant-baseline="alphabetic">${this.formatNumber(x)}</text>`);
                     }
                 }
             }
@@ -6719,9 +6749,13 @@ class Komplexiti {
                 const y0 = Math.floor(this.viewport.minY / labelSpacing) * labelSpacing;
                 for (let y = y0; y <= this.viewport.maxY; y += labelSpacing) {
                     if (Math.abs(y) < 1e-9) continue;
+                    if (!shouldRender(y, labelSpacing)) continue;
                     const sp = this.worldToScreen(0, y);
                     if (sp.y < 20 || sp.y > H - 20) continue;
-                    const lx = axisX - 5;
+                    if (includeTicks) {
+                        tLines.push(`<line x1="${sn(axisX)}" y1="${sn(sp.y)}" x2="${sn(axisX - tickLen)}" y2="${sn(sp.y)}" stroke="${axisColor}" stroke-width="${tickSW}" vector-effect="non-scaling-stroke"/>`);
+                    }
+                    const lx = axisX - yLabelOffX;
                     if (lx > 15) {
                         tLines.push(`<text x="${sn(lx)}" y="${sn(sp.y)}" fill="${labelColor}" ${fontAttr} text-anchor="end" dominant-baseline="middle">${this.formatNumber(y)}</text>`);
                     }
@@ -6731,7 +6765,7 @@ class Komplexiti {
             if (this.viewport.minX <= 0 && this.viewport.maxX >= 0 &&
                 this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
                 const o = this.worldToScreen(0, 0);
-                tLines.push(`<text x="${sn(o.x - 5)}" y="${sn(o.y + 5)}" fill="${labelColor}" ${fontAttr} text-anchor="end" dominant-baseline="hanging">0</text>`);
+                tLines.push(`<text x="${sn(o.x - yLabelOffX)}" y="${sn(o.y + xLabelOffY)}" fill="${labelColor}" ${fontAttr} text-anchor="end" dominant-baseline="alphabetic">0</text>`);
             }
 
             const titleFontAttr = `font-family="Arial, sans-serif" font-size="${fSize - 2}px" font-weight="bold"`;
