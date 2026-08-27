@@ -6648,6 +6648,8 @@ class Komplexiti {
         const dotR       = baseStroke * 2.2;
         const headLen    = baseStroke * 4;
         const locusW     = Math.max(2, baseStroke - 0.5);
+        // Dash/gap scale with stroke width so gaps remain visible at all sizes
+        const strictDash = `${sw(Math.max(8, locusW * 3.2))} ${sw(Math.max(5, locusW * 2))}`;
 
         const exprColor = (c) => allBlack ? '#000000' : c.color;
 
@@ -6932,7 +6934,7 @@ class Komplexiti {
                 if (segs?.length) {
                     const d = chainsToDPath(this._stitchSegmentsToChains(segs));
                     if (d) {
-                        const dashAttr = c.locus.inequality?.strict ? ` stroke-dasharray="${sw(8)} ${sw(5)}"` : '';
+                        const dashAttr = c.locus.inequality?.strict ? ` stroke-dasharray="${strictDash}"` : '';
                         lines.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="${sw(locusW)}"${dashAttr} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity="0.95"/>`);
                     }
                 }
@@ -6994,7 +6996,7 @@ class Komplexiti {
                     if (!segs?.length) continue;
                     const d = chainsToDPath(this._stitchSegmentsToChains(segs));
                     if (d) {
-                        const dashAttr = part.locus?.inequality?.strict ? ` stroke-dasharray="${sw(8)} ${sw(5)}"` : '';
+                        const dashAttr = part.locus?.inequality?.strict ? ` stroke-dasharray="${strictDash}"` : '';
                         lines.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="${sw(locusW)}"${dashAttr} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity="0.95"/>`);
                     }
                 }
