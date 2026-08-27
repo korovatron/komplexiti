@@ -743,6 +743,39 @@ class Komplexiti {
 
         this.setupShareMenu();
 
+        // Export overlay controls
+        const exportOverlay = document.getElementById('export-overlay');
+        const exportCancelButton = document.getElementById('export-cancel-button');
+        const exportGenerateButton = document.getElementById('export-generate-button');
+        const exportImageBtn = document.getElementById('export-image-btn');
+
+        if (exportImageBtn) {
+            exportImageBtn.addEventListener('click', () => this.toggleExportOverlay(true));
+        }
+
+        if (exportOverlay) {
+            exportOverlay.addEventListener('click', (e) => {
+                if (e.target === exportOverlay) this.toggleExportOverlay(false);
+            });
+            exportOverlay.addEventListener('change', (e) => {
+                const target = e.target;
+                if (!target?.matches('input, select')) return;
+                if (target.name === 'export-format' || target.id === 'export-include-axes') {
+                    this.updateExportFormatUI();
+                } else {
+                    this.requestExportPreviewUpdate();
+                }
+            });
+        }
+
+        if (exportCancelButton) {
+            exportCancelButton.addEventListener('click', () => this.toggleExportOverlay(false));
+        }
+
+        if (exportGenerateButton) {
+            exportGenerateButton.addEventListener('click', () => this.exportCurrentViewFromModal());
+        }
+
         window.addEventListener('hashchange', () => {
             const state = this.checkForSharedState();
             if (!state) return;
@@ -829,6 +862,7 @@ class Komplexiti {
         this.currentState = this.states.TITLE;
         this.stopAnimationLoop();
         this.hideHelpModal();
+        this.toggleExportOverlay(false);
 
         this.closePanel();
 
@@ -1468,6 +1502,11 @@ class Komplexiti {
             const dropdown = document.getElementById('add-dropdown');
             if (dropdown?.classList.contains('show')) {
                 dropdown.classList.remove('show');
+                return;
+            }
+            const exportOverlay = document.getElementById('export-overlay');
+            if (exportOverlay?.classList.contains('show')) {
+                this.toggleExportOverlay(false);
                 return;
             }
             if (this.shortcutsOverlay?.classList.contains('show')) {
@@ -6249,6 +6288,841 @@ class Komplexiti {
                 try { await this.shareQRCode(); } catch (err) { console.error(err); }
             });
         }
+    }
+
+    // =========================================================================
+    // Export
+    // =========================================================================
+
+    toggleExportOverlay(forceOpen = null) {
+        const overlay = document.getElementById('export-overlay');
+        if (!overlay) return;
+        const shouldOpen = forceOpen === null
+            ? !overlay.classList.contains('show')
+            : !!forceOpen;
+        if (shouldOpen) {
+            overlay.classList.add('show');
+            this.applyDefaultExportFormat();
+            this.updateExportFormatUI();
+        } else {
+            overlay.classList.remove('show');
+            this.cancelExportPreviewUpdate();
+            if (document.activeElement) document.activeElement.blur();
+        }
+    }
+
+    isTouchExportDevice() {
+        const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches;
+        const hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        return this.isMobileDevice?.() || (coarsePointer && hasTouch);
+    }
+
+    getSelectedExportFormat() {
+        const formatInput = document.querySelector('input[name="export-format"]:checked');
+        return formatInput ? formatInput.value : 'svg';
+    }
+
+    applyDefaultExportFormat() {
+        const defaultFormat = this.isTouchExportDevice() ? 'png' : 'svg';
+        const defaultInput = document.querySelector(`input[name="export-format"][value="${defaultFormat}"]`);
+        if (defaultInput) defaultInput.checked = true;
+    }
+
+    updateExportFormatUI() {
+        const format = this.getSelectedExportFormat();
+        const svgOnlyGroups = document.querySelectorAll('.export-svg-only');
+        const generateButton = document.getElementById('export-generate-button');
+        const includeAxesInput = document.getElementById('export-include-axes');
+        const axisLabelsGroup = document.getElementById('export-axis-labels-group');
+
+        for (const group of svgOnlyGroups) {
+            group.classList.toggle('export-hidden', format !== 'svg');
+        }
+
+        if (axisLabelsGroup) {
+            const show = format === 'svg' && (!includeAxesInput || includeAxesInput.checked);
+            axisLabelsGroup.classList.toggle('export-hidden', !show);
+        }
+
+        if (generateButton) {
+            generateButton.textContent = format === 'png'
+                ? (this.isTouchExportDevice() ? 'Share PNG' : 'Download PNG')
+                : 'Download SVG';
+        }
+
+        this.requestExportPreviewUpdate();
+    }
+
+    exportCurrentViewFromModal() {
+        const format = this.getSelectedExportFormat();
+        if (format === 'png') {
+            this.exportCurrentViewAsPNG();
+        } else {
+            this.exportCurrentViewAsSVG();
+        }
+    }
+
+    requestExportPreviewUpdate() {
+        if (this.exportPreviewFrameRequestId) return;
+        this.exportPreviewFrameRequestId = requestAnimationFrame(() => {
+            this.exportPreviewFrameRequestId = null;
+            const overlay = document.getElementById('export-overlay');
+            if (!overlay?.classList.contains('show')) return;
+            this.updateExportFramePreview();
+        });
+    }
+
+    cancelExportPreviewUpdate() {
+        if (this.exportPreviewFrameRequestId) {
+            cancelAnimationFrame(this.exportPreviewFrameRequestId);
+            this.exportPreviewFrameRequestId = null;
+        }
+        if (this.exportPreviewSvgUrl) {
+            URL.revokeObjectURL(this.exportPreviewSvgUrl);
+            this.exportPreviewSvgUrl = null;
+        }
+    }
+
+    getExportFrameRect(sourceWidth, sourceHeight, frameShape = 'original') {
+        const width  = Math.max(1, Math.round(sourceWidth));
+        const height = Math.max(1, Math.round(sourceHeight));
+        let targetRatio = null;
+        if (frameShape === '1:1')  targetRatio = 1;
+        if (frameShape === '4:3')  targetRatio = 4 / 3;
+        if (frameShape === '16:9') targetRatio = 16 / 9;
+        if (!targetRatio) return { x: 0, y: 0, width, height, ratioLabel: 'Original' };
+
+        const sourceRatio = width / height;
+        let cropWidth, cropHeight;
+        if (sourceRatio > targetRatio) {
+            cropHeight = height;
+            cropWidth  = Math.round(height * targetRatio);
+        } else {
+            cropWidth  = width;
+            cropHeight = Math.round(width / targetRatio);
+        }
+        cropWidth  = Math.max(1, Math.min(width,  cropWidth));
+        cropHeight = Math.max(1, Math.min(height, cropHeight));
+        return {
+            x: Math.round((width  - cropWidth)  / 2),
+            y: Math.round((height - cropHeight) / 2),
+            width:  cropWidth,
+            height: cropHeight,
+            ratioLabel: frameShape
+        };
+    }
+
+    updateExportFramePreview() {
+        const previewStage   = document.getElementById('export-preview-stage');
+        const previewCanvas  = document.getElementById('export-preview-canvas');
+        const previewSvg     = document.getElementById('export-preview-svg');
+        const previewFrame   = document.getElementById('export-preview-frame');
+        const previewCaption = document.getElementById('export-preview-caption');
+        const shapeInput     = document.getElementById('export-frame-shape');
+        if (!previewStage || !previewCanvas || !previewSvg || !previewFrame || !shapeInput) return;
+
+        const format = this.getSelectedExportFormat();
+        const sourceWidth  = Math.max(1, Math.round(this.viewport.width  || this.canvas.width  || 1));
+        const sourceHeight = Math.max(1, Math.round(this.viewport.height || this.canvas.height || 1));
+        const frame = this.getExportFrameRect(sourceWidth, sourceHeight, shapeInput.value || 'original');
+
+        const stageBounds = previewStage.getBoundingClientRect();
+        const stageWidth  = Math.max(1, stageBounds.width);
+        const maxPreviewH = 150;
+        const sourceRatio = sourceWidth / sourceHeight;
+
+        let pw = stageWidth;
+        let ph = pw / sourceRatio;
+        if (ph > maxPreviewH) { ph = maxPreviewH; pw = ph * sourceRatio; }
+
+        const stageHeight = Math.max(120, ph);
+        previewStage.style.height = `${stageHeight}px`;
+
+        const surfaceOffX = Math.max(0, (stageWidth - pw) / 2);
+        const surfaceOffY = Math.max(0, (stageHeight - ph) / 2);
+        const scaleX = pw / sourceWidth;
+        const scaleY = ph / sourceHeight;
+
+        previewFrame.style.left      = `${surfaceOffX + frame.x * scaleX}px`;
+        previewFrame.style.top       = `${surfaceOffY + frame.y * scaleY}px`;
+        previewFrame.style.width     = `${frame.width  * scaleX}px`;
+        previewFrame.style.height    = `${frame.height * scaleY}px`;
+        previewFrame.style.boxShadow = '0 0 0 9999px rgba(0, 0, 0, 0.38)';
+
+        if (format === 'svg') {
+            previewCanvas.classList.add('export-hidden');
+            previewSvg.classList.remove('export-hidden');
+            previewSvg.style.left   = `${surfaceOffX}px`;
+            previewSvg.style.top    = `${surfaceOffY}px`;
+            previewSvg.style.width  = `${pw}px`;
+            previewSvg.style.height = `${ph}px`;
+            try {
+                const svgOptions = this.getExportOptionsFromModal();
+                svgOptions.previewStrokeScale = Math.min(pw / sourceWidth, ph / sourceHeight);
+                const svgString  = this.buildSVGExport({ ...svgOptions, frameShape: 'original' });
+                if (svgString) {
+                    const blob    = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+                    const nextUrl = URL.createObjectURL(blob);
+                    if (this.exportPreviewSvgUrl) URL.revokeObjectURL(this.exportPreviewSvgUrl);
+                    this.exportPreviewSvgUrl = nextUrl;
+                    previewSvg.src = nextUrl;
+                }
+            } catch (e) {
+                console.error('SVG preview failed:', e);
+            }
+            if (previewCaption) {
+                previewCaption.textContent = `Live SVG preview - ${frame.ratioLabel} (${frame.width}\u00d7${frame.height})`;
+            }
+            return;
+        }
+
+        previewSvg.classList.add('export-hidden');
+        previewCanvas.classList.remove('export-hidden');
+        if (this.exportPreviewSvgUrl) {
+            URL.revokeObjectURL(this.exportPreviewSvgUrl);
+            this.exportPreviewSvgUrl = null;
+        }
+
+        previewCanvas.style.left   = `${surfaceOffX}px`;
+        previewCanvas.style.top    = `${surfaceOffY}px`;
+        previewCanvas.style.width  = `${pw}px`;
+        previewCanvas.style.height = `${ph}px`;
+
+        const dpr = window.devicePixelRatio || 1;
+        const pixW = Math.max(1, Math.round(pw * dpr));
+        const pixH = Math.max(1, Math.round(ph * dpr));
+        if (previewCanvas.width !== pixW || previewCanvas.height !== pixH) {
+            previewCanvas.width  = pixW;
+            previewCanvas.height = pixH;
+        }
+
+        const ctx = previewCanvas.getContext('2d');
+        if (ctx) {
+            ctx.save();
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, pw, ph);
+            ctx.drawImage(this.canvas, 0, 0, sourceWidth, sourceHeight, 0, 0, pw, ph);
+            ctx.restore();
+        }
+
+        if (previewCaption) {
+            previewCaption.textContent = `${frame.ratioLabel} - ${frame.width}\u00d7${frame.height}`;
+        }
+    }
+
+    getExportOptionsFromModal() {
+        const formatInput        = document.querySelector('input[name="export-format"]:checked');
+        const colorModeInput     = document.querySelector('input[name="export-color-mode"]:checked');
+        const gridModeInput      = document.getElementById('export-grid-mode');
+        const textSizeInput      = document.getElementById('export-text-size');
+        const lineWidthInput     = document.getElementById('export-line-width');
+        const frameShapeInput    = document.getElementById('export-frame-shape');
+        const includeAxesInput   = document.getElementById('export-include-axes');
+        const includeLabelsInput = document.getElementById('export-include-axis-labels');
+        const includeExtremaInput       = document.getElementById('export-include-extrema');
+        const includeIntersectionsInput = document.getElementById('export-include-intersections');
+        return {
+            format:               formatInput        ? formatInput.value        : 'svg',
+            colorMode:            colorModeInput     ? colorModeInput.value     : 'keep',
+            gridMode:             gridModeInput      ? gridModeInput.value      : 'both',
+            textSize:             textSizeInput      ? textSizeInput.value      : 'large',
+            strokeWidth:          lineWidthInput     ? lineWidthInput.value     : 'small',
+            frameShape:           frameShapeInput    ? frameShapeInput.value    : 'original',
+            includeAxes:          includeAxesInput   ? includeAxesInput.checked : true,
+            includeAxisLabels:    includeLabelsInput ? includeLabelsInput.checked : true,
+            includeExtrema:       includeExtremaInput       ? includeExtremaInput.checked       : true,
+            includeIntersections: includeIntersectionsInput ? includeIntersectionsInput.checked : true
+        };
+    }
+
+    async exportCurrentViewAsPNG() {
+        try {
+            const options      = this.getExportOptionsFromModal();
+            const sourceWidth  = Math.max(1, Math.round(this.viewport.width  || this.canvas.width  || 1));
+            const sourceHeight = Math.max(1, Math.round(this.viewport.height || this.canvas.height || 1));
+            const frame = this.getExportFrameRect(sourceWidth, sourceHeight, options.frameShape || 'original');
+
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width  = frame.width;
+            cropCanvas.height = frame.height;
+            const cropCtx = cropCanvas.getContext('2d');
+            if (!cropCtx) throw new Error('Could not prepare PNG export canvas');
+
+            cropCtx.drawImage(
+                this.canvas,
+                frame.x, frame.y, frame.width, frame.height,
+                0, 0, frame.width, frame.height
+            );
+
+            const blob = await new Promise((resolve, reject) => {
+                cropCanvas.toBlob((b) => { if (b) resolve(b); else reject(new Error('Failed to create PNG')); }, 'image/png');
+            });
+
+            if (this.isTouchExportDevice() && navigator.share) {
+                try {
+                    const file = new File([blob], 'komplexiti-diagram.png', { type: 'image/png' });
+                    if (navigator.canShare?.({ files: [file] })) {
+                        await navigator.share({ files: [file], title: 'Komplexiti Diagram' });
+                        this.toggleExportOverlay(false);
+                        return;
+                    }
+                } catch (shareError) {
+                    if (shareError.name === 'AbortError') return;
+                }
+            }
+
+            const url  = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href     = url;
+            link.download = 'komplexiti-diagram.png';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            this.toggleExportOverlay(false);
+        } catch (error) {
+            console.error('PNG export failed:', error);
+            alert('PNG export failed: ' + error.message);
+        }
+    }
+
+    exportCurrentViewAsSVG() {
+        try {
+            const options   = this.getExportOptionsFromModal();
+            const svgString = this.buildSVGExport(options);
+            if (!svgString) throw new Error('Could not generate SVG');
+
+            const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+            const url  = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href     = url;
+            link.download = 'komplexiti-diagram.svg';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            this.toggleExportOverlay(false);
+        } catch (error) {
+            console.error('SVG export failed:', error);
+            alert('SVG export failed: ' + error.message);
+        }
+    }
+
+    // Build a complete SVG string for the current viewport state.
+    buildSVGExport(options) {
+        const sn = v => parseFloat(v.toFixed(2)).toString();
+        const W = this.viewport.width;
+        const H = this.viewport.height;
+        const exportFrame = this.getExportFrameRect(W, H, options.frameShape || 'original');
+
+        const allBlack = options.colorMode === 'black';
+
+        const bgColor        = '#FDFDFD';
+        const axisColor      = '#000000';
+        const majorGridColor = allBlack ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.18)';
+        const minorGridColor = allBlack ? 'rgba(0,0,0,0.1)'  : 'rgba(0,0,0,0.08)';
+        const labelColor     = '#000000';
+        const titleColor     = allBlack ? '#000000' : '#1566c0';
+        const dotOutline     = 'rgba(255,255,255,0.9)';
+
+        const fontSizeMap    = { small: 12, medium: 16, large: 20, xl: 24, xxl: 28 };
+        const strokeWidthMap = { small: 2.5, medium: 3.5, large: 4.5, xl: 5.5 };
+        const fSize      = fontSizeMap[options.textSize]    || 20;
+        const baseStroke = strokeWidthMap[options.strokeWidth] || 2.5;
+        const prevScale  = (Number.isFinite(options.previewStrokeScale) && options.previewStrokeScale > 0)
+            ? options.previewStrokeScale : 1;
+        const sw         = (w) => sn(w * prevScale);
+        const dotR       = baseStroke * 2.2;
+        const headLen    = baseStroke * 4;
+        const locusW     = Math.max(2, baseStroke - 0.5);
+
+        const exprColor = (c) => allBlack ? '#000000' : c.color;
+
+        const lines = [];
+        const defs  = [];
+
+        lines.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${sn(exportFrame.width)}" height="${sn(exportFrame.height)}" viewBox="${sn(exportFrame.x)} ${sn(exportFrame.y)} ${sn(exportFrame.width)} ${sn(exportFrame.height)}">`);
+        lines.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="${bgColor}"/>`);
+
+        // Grid
+        if (options.gridMode !== 'none') {
+            const labelSpacing = this.getLabelSpacing();
+            const subdiv       = 5;
+            const minorSpacing = labelSpacing / subdiv;
+            const drawMinor    = options.gridMode !== 'major' && (minorSpacing * this.viewport.scale) >= 9;
+
+            if (drawMinor) {
+                const mLines = [];
+                const sx0 = Math.floor(this.viewport.minX / minorSpacing) * minorSpacing;
+                for (let x = sx0; x <= this.viewport.maxX + minorSpacing * 0.5; x += minorSpacing) {
+                    if (Math.abs(x / labelSpacing - Math.round(x / labelSpacing)) < 1e-6) continue;
+                    const cx = this.worldToScreen(x, 0).x;
+                    mLines.push(`<line x1="${sn(cx)}" y1="0" x2="${sn(cx)}" y2="${H}" stroke="${minorGridColor}" stroke-width="1" vector-effect="non-scaling-stroke" opacity="0.58"/>`);
+                }
+                const sy0 = Math.floor(this.viewport.minY / minorSpacing) * minorSpacing;
+                for (let y = sy0; y <= this.viewport.maxY + minorSpacing * 0.5; y += minorSpacing) {
+                    if (Math.abs(y / labelSpacing - Math.round(y / labelSpacing)) < 1e-6) continue;
+                    const cy = this.worldToScreen(0, y).y;
+                    mLines.push(`<line x1="0" y1="${sn(cy)}" x2="${W}" y2="${sn(cy)}" stroke="${minorGridColor}" stroke-width="1" vector-effect="non-scaling-stroke" opacity="0.58"/>`);
+                }
+                if (mLines.length) lines.push(mLines.join('\n'));
+            }
+
+            const MLines = [];
+            const mx0 = Math.floor(this.viewport.minX / labelSpacing) * labelSpacing;
+            for (let x = mx0; x <= this.viewport.maxX + labelSpacing * 0.5; x += labelSpacing) {
+                const cx = this.worldToScreen(x, 0).x;
+                MLines.push(`<line x1="${sn(cx)}" y1="0" x2="${sn(cx)}" y2="${H}" stroke="${majorGridColor}" stroke-width="1.15" vector-effect="non-scaling-stroke"/>`);
+            }
+            const my0 = Math.floor(this.viewport.minY / labelSpacing) * labelSpacing;
+            for (let y = my0; y <= this.viewport.maxY + labelSpacing * 0.5; y += labelSpacing) {
+                const cy = this.worldToScreen(0, y).y;
+                MLines.push(`<line x1="0" y1="${sn(cy)}" x2="${W}" y2="${sn(cy)}" stroke="${majorGridColor}" stroke-width="1.15" vector-effect="non-scaling-stroke"/>`);
+            }
+            if (MLines.length) lines.push(MLines.join('\n'));
+        }
+
+        // Axes
+        if (options.includeAxes) {
+            if (this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
+                const y = this.worldToScreen(0, 0).y;
+                lines.push(`<line x1="0" y1="${sn(y)}" x2="${W}" y2="${sn(y)}" stroke="${axisColor}" stroke-width="2.2" vector-effect="non-scaling-stroke"/>`);
+            }
+            if (this.viewport.minX <= 0 && this.viewport.maxX >= 0) {
+                const x = this.worldToScreen(0, 0).x;
+                lines.push(`<line x1="${sn(x)}" y1="0" x2="${sn(x)}" y2="${H}" stroke="${axisColor}" stroke-width="2.2" vector-effect="non-scaling-stroke"/>`);
+            }
+        }
+
+        // Axis labels
+        if (options.includeAxes && options.includeAxisLabels) {
+            const labelSpacing = this.getLabelSpacing();
+            const tLines = [];
+            const fontAttr = `font-family="Arial, sans-serif" font-size="${fSize}px" font-weight="bold"`;
+
+            if (this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
+                const axisY = this.worldToScreen(0, 0).y;
+                const x0 = Math.floor(this.viewport.minX / labelSpacing) * labelSpacing;
+                for (let x = x0; x <= this.viewport.maxX; x += labelSpacing) {
+                    if (Math.abs(x) < 1e-9) continue;
+                    const sp = this.worldToScreen(x, 0);
+                    if (sp.x < 20 || sp.x > W - 20) continue;
+                    const ly = axisY + 5;
+                    if (ly < H - 15) {
+                        tLines.push(`<text x="${sn(sp.x)}" y="${sn(ly)}" fill="${labelColor}" ${fontAttr} text-anchor="middle" dominant-baseline="hanging">${this.formatNumber(x)}</text>`);
+                    }
+                }
+            }
+
+            if (this.viewport.minX <= 0 && this.viewport.maxX >= 0) {
+                const axisX = this.worldToScreen(0, 0).x;
+                const y0 = Math.floor(this.viewport.minY / labelSpacing) * labelSpacing;
+                for (let y = y0; y <= this.viewport.maxY; y += labelSpacing) {
+                    if (Math.abs(y) < 1e-9) continue;
+                    const sp = this.worldToScreen(0, y);
+                    if (sp.y < 20 || sp.y > H - 20) continue;
+                    const lx = axisX - 5;
+                    if (lx > 15) {
+                        tLines.push(`<text x="${sn(lx)}" y="${sn(sp.y)}" fill="${labelColor}" ${fontAttr} text-anchor="end" dominant-baseline="middle">${this.formatNumber(y)}</text>`);
+                    }
+                }
+            }
+
+            if (this.viewport.minX <= 0 && this.viewport.maxX >= 0 &&
+                this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
+                const o = this.worldToScreen(0, 0);
+                tLines.push(`<text x="${sn(o.x - 5)}" y="${sn(o.y + 5)}" fill="${labelColor}" ${fontAttr} text-anchor="end" dominant-baseline="hanging">0</text>`);
+            }
+
+            const titleFontAttr = `font-family="Arial, sans-serif" font-size="${fSize - 2}px" font-weight="bold"`;
+            if (this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
+                const axisY = this.worldToScreen(0, 0).y;
+                tLines.push(`<text x="${sn(W - 6)}" y="${sn(axisY - 6)}" fill="${titleColor}" ${titleFontAttr} text-anchor="end" dominant-baseline="auto">Re</text>`);
+            }
+            if (this.viewport.minX <= 0 && this.viewport.maxX >= 0) {
+                const axisX = this.worldToScreen(0, 0).x;
+                tLines.push(`<text x="${sn(axisX + 6)}" y="${sn(6)}" fill="${titleColor}" ${titleFontAttr} text-anchor="start" dominant-baseline="hanging">Im</text>`);
+            }
+
+            if (tLines.length) lines.push(tLines.join('\n'));
+        }
+
+        // Helper: convert chains of world-coord points to SVG path d attribute
+        const chainsToDPath = (chains) => {
+            const parts = [];
+            for (const chain of chains) {
+                if (!chain.length) continue;
+                const pts = chain.map(p => this.worldToScreen(p.x, p.y));
+                parts.push(`M ${sn(pts[0].x)},${sn(pts[0].y)}`);
+                for (let i = 1; i < pts.length; i++) {
+                    parts.push(`L ${sn(pts[i].x)},${sn(pts[i].y)}`);
+                }
+            }
+            return parts.join(' ');
+        };
+
+        // Helper: get segment data for a locus expression (fast-path or cached)
+        const getSegs = (c) => {
+            const fast = this._traceFastLocusSegments(c.locus);
+            if (fast !== null) return fast;
+            return c._locusCache?.segments || null;
+        };
+
+        // Helper: add shading SVG for an inequality locus
+        const addLocusShade = (c, color) => {
+            const ineq = c.locus?.inequality;
+            if (!ineq) return;
+            const fp = c.locus.fastPath;
+            const ALPHA = 0.18;
+
+            if (fp?.kind === 'circle' || fp?.kind === 'apollonius') {
+                const sc = this.worldToScreen(fp.center.re, fp.center.im);
+                const se = this.worldToScreen(fp.center.re + fp.radius, fp.center.im);
+                const sr = Math.abs(se.x - sc.x);
+                if (ineq.dir < 0) {
+                    lines.push(`<circle cx="${sn(sc.x)}" cy="${sn(sc.y)}" r="${sn(sr)}" fill="${color}" fill-opacity="${ALPHA}"/>`);
+                } else {
+                    const mid = `mask-${defs.length}`;
+                    defs.push(`<mask id="${mid}"><rect x="0" y="0" width="${W}" height="${H}" fill="white"/><circle cx="${sn(sc.x)}" cy="${sn(sc.y)}" r="${sn(sr)}" fill="black"/></mask>`);
+                    lines.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="${color}" fill-opacity="${ALPHA}" mask="url(#${mid})"/>`);
+                }
+                return;
+            }
+
+            if (fp?.kind === 'line') {
+                const d = this._svgLineHalfPlane(fp, ineq.dir, W, H, sn);
+                if (d) lines.push(`<path d="${d}" fill="${color}" fill-opacity="${ALPHA}"/>`);
+                return;
+            }
+
+            if (fp?.kind === 'ray') {
+                const d = this._svgRayRegion(fp, ineq.dir, W, H, sn);
+                if (d) lines.push(`<path d="${d}" fill="${color}" fill-opacity="${ALPHA}"/>`);
+                return;
+            }
+
+            if (fp?.kind === 'inscribed-arc') {
+                const d = this._svgArcRegion(fp, ineq, W, H, sn);
+                if (d) lines.push(`<path d="${d}" fill="${color}" fill-opacity="${ALPHA}" fill-rule="evenodd"/>`);
+                return;
+            }
+
+            // Grid-based shade: rasterise to an off-screen canvas and embed as PNG
+            const sg = c._locusCache?.shadeGrid;
+            if (sg) {
+                const off = document.createElement('canvas');
+                off.width  = W;
+                off.height = H;
+                const octx = off.getContext('2d');
+                octx.fillStyle   = c.color;
+                octx.globalAlpha = ALPHA;
+                this._renderShadeGrid(sg, octx);
+                try {
+                    lines.push(`<image x="0" y="0" width="${W}" height="${H}" href="${off.toDataURL('image/png')}" preserveAspectRatio="none"/>`);
+                } catch { /* cross-origin guard */ }
+            }
+        };
+
+        // Collect enabled inequality loci (mirrors the canvas drawExpressions logic)
+        const ineqLoci = [];
+        for (const _c of this.expressions) {
+            if (!_c.enabled) continue;
+            if (_c.type === 'locus' && _c.locus?.inequality && _c.equationVar) {
+                ineqLoci.push(_c);
+            } else if (_c.type === 'compound-locus' && _c.compoundParts) {
+                for (const part of _c.compoundParts) {
+                    if (part.locus?.inequality) ineqLoci.push(part);
+                }
+            }
+        }
+
+        // Draw shading - use destination-in compositing for 2+ inequalities (matches canvas)
+        if (ineqLoci.length >= 2) {
+            try {
+                const tmp = document.createElement('canvas');
+                tmp.width  = W;
+                tmp.height = H;
+                this._drawInequalityIntersection(ineqLoci, tmp.getContext('2d'));
+                lines.push(`<image x="0" y="0" width="${W}" height="${H}" href="${tmp.toDataURL('image/png')}" preserveAspectRatio="none"/>`);
+            } catch { /* cross-origin guard */ }
+        } else {
+            for (const c of this.expressions) {
+                if (!c.enabled) continue;
+                const color = exprColor(c);
+                if (c.type === 'locus' && c.locus?.inequality && c.equationVar) {
+                    addLocusShade(c, color);
+                } else if (c.type === 'compound-locus' && c.compoundParts) {
+                    for (const part of c.compoundParts) {
+                        if (part.locus?.inequality) addLocusShade(part, color);
+                    }
+                }
+            }
+        }
+
+        // Draw expressions
+        const toSub = n => String(n).split('').map(d2 => '&#x208' + d2 + ';').join('');
+
+        for (const c of this.expressions) {
+            if (!c.enabled) continue;
+            const color = exprColor(c);
+
+            // Equation roots
+            if (c.type === 'equation' && c.roots?.length) {
+                const org = this.worldToScreen(0, 0);
+                for (let k = 0; k < c.roots.length; k++) {
+                    const root = c.roots[k];
+                    if (!isFinite(root.re) || !isFinite(root.im)) continue;
+                    const pt = this.worldToScreen(root.re, root.im);
+                    if (this.displayMode === 'arrow') {
+                        const dx = pt.x - org.x, dy = pt.y - org.y;
+                        const len = Math.hypot(dx, dy);
+                        if (len > dotR + 2) {
+                            const ang  = Math.atan2(dy, dx);
+                            const tipX = pt.x - dotR * Math.cos(ang);
+                            const tipY = pt.y - dotR * Math.sin(ang);
+                            lines.push(`<line x1="${sn(org.x)}" y1="${sn(org.y)}" x2="${sn(tipX)}" y2="${sn(tipY)}" stroke="${color}" stroke-width="${sw(baseStroke)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
+                            lines.push(`<polygon points="${sn(tipX)},${sn(tipY)} ${sn(tipX - headLen * Math.cos(ang - 0.38))},${sn(tipY - headLen * Math.sin(ang - 0.38))} ${sn(tipX - headLen * Math.cos(ang + 0.38))},${sn(tipY - headLen * Math.sin(ang + 0.38))}" fill="${color}"/>`);
+                        }
+                    }
+                    lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(dotR)}" fill="${color}" stroke="${dotOutline}" stroke-width="1.5"/>`);
+                    if (c.equationVar) {
+                        lines.push(`<text x="${sn(pt.x + dotR + 4)}" y="${sn(pt.y - dotR - 2)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize}px" font-style="italic" dominant-baseline="auto">${c.equationVar}${toSub(k + 1)}</text>`);
+                    }
+                }
+                continue;
+            }
+
+            // Locus
+            if (c.type === 'locus' && c.locus && c.equationVar) {
+                const segs = getSegs(c);
+                if (segs?.length) {
+                    const d = chainsToDPath(this._stitchSegmentsToChains(segs));
+                    if (d) {
+                        const dashAttr = c.locus.inequality?.strict ? ` stroke-dasharray="${sw(8)} ${sw(5)}"` : '';
+                        lines.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="${sw(locusW)}"${dashAttr} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity="0.95"/>`);
+                    }
+                }
+
+                const fp2 = c.locus.fastPath;
+
+                // Foci markers
+                if (c.showFoci !== false && fp2?.focusA && fp2?.focusB && (fp2?.perpBisector || fp2?.kind === 'apollonius')) {
+                    const fDotR = Math.max(3, dotR - 1.5);
+                    for (const [idx, focus] of [[1, fp2.focusA], [2, fp2.focusB]]) {
+                        const fs = this.worldToScreen(focus.re, focus.im);
+                        const sub = idx === 1 ? '\u2081' : '\u2082';
+                        lines.push(`<circle cx="${sn(fs.x)}" cy="${sn(fs.y)}" r="${sn(fDotR)}" fill="${color}" opacity="0.75" stroke="${dotOutline}" stroke-width="1.5"/>`);
+                        lines.push(`<text x="${sn(fs.x + fDotR + 3)}" y="${sn(fs.y - fDotR - 2)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize}px" font-style="italic" opacity="0.9" dominant-baseline="auto">F${sub}</text>`);
+                    }
+                }
+
+                // Centre marker
+                if (c.showFoci !== false && fp2?.center && (fp2.kind === 'circle' || fp2.kind === 'apollonius')) {
+                    const cPt   = this.worldToScreen(fp2.center.re, fp2.center.im);
+                    const cDotR = Math.max(3, dotR - 1.5);
+                    lines.push(`<circle cx="${sn(cPt.x)}" cy="${sn(cPt.y)}" r="${sn(cDotR)}" fill="${color}" opacity="0.75" stroke="${dotOutline}" stroke-width="1.5"/>`);
+                    lines.push(`<text x="${sn(cPt.x + cDotR + 3)}" y="${sn(cPt.y - cDotR - 2)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize}px" font-style="italic" opacity="0.9" dominant-baseline="auto">C</text>`);
+                }
+
+                // Extrema markers
+                if (options.includeExtrema && c.showExtrema !== false) {
+                    const ex  = this._computeLocusExtrema(c);
+                    if (ex) {
+                        const markerR = Math.max(2.5, dotR - 2);
+                        const org     = this.worldToScreen(0, 0);
+                        const near    = (p1, p2) => p1 && p2 && Math.hypot(p1.re - p2.re, p1.im - p2.im) < 1e-6;
+                        const addEx   = (pt, label, isArg) => {
+                            if (!pt) return;
+                            const sp = this.worldToScreen(pt.re, pt.im);
+                            lines.push(`<line x1="${sn(org.x)}" y1="${sn(org.y)}" x2="${sn(sp.x)}" y2="${sn(sp.y)}" stroke="${color}" stroke-width="${sw(1)}" vector-effect="non-scaling-stroke" opacity="0.6" stroke-dasharray="${sw(4)} ${sw(4)}"/>`);
+                            if (isArg) {
+                                lines.push(`<circle cx="${sn(sp.x)}" cy="${sn(sp.y)}" r="${sn(markerR)}" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.9"/>`);
+                            } else {
+                                lines.push(`<circle cx="${sn(sp.x)}" cy="${sn(sp.y)}" r="${sn(markerR)}" fill="${color}" opacity="0.9"/>`);
+                            }
+                            lines.push(`<text x="${sn(sp.x + markerR + 3)}" y="${sn(sp.y - markerR - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${Math.max(8, fSize - 4)}px" dominant-baseline="auto">${label}</text>`);
+                        };
+                        addEx(ex.modMinPt, '|z| min', false);
+                        if (!near(ex.modMaxPt, ex.modMinPt)) addEx(ex.modMaxPt, '|z| max', false);
+                        if (!ex.fullArgRange) {
+                            if (!near(ex.argMinPt, ex.modMinPt) && !near(ex.argMinPt, ex.modMaxPt)) addEx(ex.argMinPt, 'arg min', true);
+                            if (!near(ex.argMaxPt, ex.modMinPt) && !near(ex.argMaxPt, ex.modMaxPt) && !near(ex.argMaxPt, ex.argMinPt)) addEx(ex.argMaxPt, 'arg max', true);
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // Compound-locus
+            if (c.type === 'compound-locus' && c.compoundParts) {
+                for (const part of c.compoundParts) {
+                    const segs = getSegs(part);
+                    if (!segs?.length) continue;
+                    const d = chainsToDPath(this._stitchSegmentsToChains(segs));
+                    if (d) {
+                        const dashAttr = part.locus?.inequality?.strict ? ` stroke-dasharray="${sw(8)} ${sw(5)}"` : '';
+                        lines.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="${sw(locusW)}"${dashAttr} stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity="0.95"/>`);
+                    }
+                }
+                continue;
+            }
+
+            // Constant complex value
+            if (c.re === null || c.im === null || !isFinite(c.re) || !isFinite(c.im)) continue;
+            const pt  = this.worldToScreen(c.re, c.im);
+            const org = this.worldToScreen(0, 0);
+
+            if (this.displayMode === 'arrow') {
+                const dx = pt.x - org.x, dy = pt.y - org.y;
+                const len = Math.hypot(dx, dy);
+                if (len > dotR + 2) {
+                    const ang  = Math.atan2(dy, dx);
+                    const tipX = pt.x - dotR * Math.cos(ang);
+                    const tipY = pt.y - dotR * Math.sin(ang);
+                    lines.push(`<line x1="${sn(org.x)}" y1="${sn(org.y)}" x2="${sn(tipX)}" y2="${sn(tipY)}" stroke="${color}" stroke-width="${sw(baseStroke)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
+                    lines.push(`<polygon points="${sn(tipX)},${sn(tipY)} ${sn(tipX - headLen * Math.cos(ang - 0.38))},${sn(tipY - headLen * Math.sin(ang - 0.38))} ${sn(tipX - headLen * Math.cos(ang + 0.38))},${sn(tipY - headLen * Math.sin(ang + 0.38))}" fill="${color}"/>`);
+                }
+            }
+
+            lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(dotR)}" fill="${color}" stroke="${dotOutline}" stroke-width="1.5"/>`);
+            if (c.name) {
+                lines.push(`<text x="${sn(pt.x + dotR + 4)}" y="${sn(pt.y - dotR - 2)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize}px" font-style="italic" dominant-baseline="auto">${c.name}</text>`);
+            }
+        }
+
+        // Intersection dots
+        if (options.includeIntersections) {
+            const ipts   = this._fastPathIntersections();
+            const iDotR  = baseStroke / 2;
+            const iEdge  = 2.5;
+            const outer  = '#000000';
+            const inner  = '#ffffff';
+            for (const p of ipts) {
+                const sp = this.worldToScreen(p.re, p.im);
+                lines.push(`<circle cx="${sn(sp.x)}" cy="${sn(sp.y)}" r="${sn(iDotR + iEdge)}" fill="${outer}"/>`);
+                lines.push(`<circle cx="${sn(sp.x)}" cy="${sn(sp.y)}" r="${sn(iDotR)}" fill="${inner}"/>`);
+            }
+        }
+
+        if (defs.length > 0) {
+            lines.splice(1, 0, `<defs>${defs.join('')}</defs>`);
+        }
+
+        lines.push('</svg>');
+        return lines.join('\n');
+    }
+
+    // SVG path for a perpendicular-bisector (line) half-plane inequality.
+    _svgLineHalfPlane(fp, ineqDir, W, H, sn) {
+        const hits = this._clipInfiniteLine(fp.point, fp.direction);
+        if (!hits || hits.length < 2) {
+            const { minX, minY } = this.getVisibleWorldBounds();
+            const nx     = -fp.direction.im, ny = fp.direction.re;
+            const shade  = ineqDir < 0 ? fp.focusA : fp.focusB;
+            const cDot   = (minX - fp.point.re) * nx + (minY - fp.point.im) * ny;
+            const fDot   = (shade.re - fp.point.re) * nx + (shade.im - fp.point.im) * ny;
+            return (cDot * fDot > 0) ? `M0,0 H${W} V${H} H0 Z` : null;
+        }
+        const P1 = this.worldToScreen(hits[0].x, hits[0].y);
+        const P2 = this.worldToScreen(hits[1].x, hits[1].y);
+        const sf = ineqDir < 0 ? fp.focusA : fp.focusB;
+        const sp = this.worldToScreen(sf.re, sf.im);
+        const cross = (P2.x - P1.x) * (sp.y - P1.y) - (P2.y - P1.y) * (sp.x - P1.x);
+        return this._svgViewportPolygon([P1, P2], cross > 0, W, H, sn);
+    }
+
+    // SVG path for a ray-argument half-plane inequality.
+    _svgRayRegion(fp, ineqDir, W, H, sn) {
+        const o = fp.origin;
+        const rayHits = this._clipInfiniteLine(o, { re: Math.cos(fp.angle), im: Math.sin(fp.angle) });
+        if (!rayHits || rayHits.length < 2) {
+            const nx = -Math.sin(fp.angle), ny = Math.cos(fp.angle);
+            const { minX, minY } = this.getVisibleWorldBounds();
+            const cDot = (minX - o.re) * nx + (minY - o.im) * ny;
+            return ((ineqDir > 0) === (cDot > 0)) ? `M0,0 H${W} V${H} H0 Z` : null;
+        }
+        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
+        const inVP = o.re >= minX - 1e-6 && o.re <= maxX + 1e-6 && o.im >= minY - 1e-6 && o.im <= maxY + 1e-6;
+
+        if (inVP) {
+            const branchHits = this._clipInfiniteLine(o, { re: -1, im: 0 });
+            if (!branchHits || branchHits.length < 2 || rayHits[1].t < -1e-9) return null;
+            const P_r  = this.worldToScreen(rayHits[1].x, rayHits[1].y);
+            const P_b  = this.worldToScreen(branchHits[1].x, branchHits[1].y);
+            const org  = this.worldToScreen(o.re, o.im);
+            const cross = (P_r.x - org.x) * (P_b.y - org.y) - (P_r.y - org.y) * (P_b.x - org.x);
+            const pts  = [{ x: org.x, y: org.y }, { x: P_r.x, y: P_r.y }];
+            const tail = this._svgViewportWalk(P_r, P_b, (ineqDir > 0) !== (cross > 0), W, H);
+            tail.forEach(p => pts.push(p));
+            pts.push({ x: P_b.x, y: P_b.y });
+            return `M ${pts.map(p => `${sn(p.x)},${sn(p.y)}`).join(' L ')} Z`;
+        } else {
+            if (rayHits[0].t < -1e-9 || rayHits[1].t < -1e-9) {
+                const nx = -Math.sin(fp.angle), ny = Math.cos(fp.angle);
+                const { minX: mx, minY: my } = this.getVisibleWorldBounds();
+                const cDot = (mx - o.re) * nx + (my - o.im) * ny;
+                return ((ineqDir > 0) === (cDot > 0)) ? `M0,0 H${W} V${H} H0 Z` : null;
+            }
+            const E = this.worldToScreen(rayHits[0].x, rayHits[0].y);
+            const P = this.worldToScreen(rayHits[1].x, rayHits[1].y);
+            return this._svgViewportPolygon([E, P], ineqDir > 0, W, H, sn);
+        }
+    }
+
+    // SVG path for an inscribed-arc inequality region.
+    _svgArcRegion(fp, ineq, W, H, sn) {
+        const { a, b, theta, center, radius } = fp;
+        const sc  = this.worldToScreen(center.re, center.im);
+        const scE = this.worldToScreen(center.re + radius, center.im);
+        const sr  = Math.abs(scE.x - sc.x);
+        const sA  = this.worldToScreen(a.re, a.im);
+        const sB  = this.worldToScreen(b.re, b.im);
+        const angB = Math.atan2(sB.y - sc.y, sB.x - sc.x);
+        const angA = Math.atan2(sA.y - sc.y, sA.x - sc.x);
+        // arcCCW = theta < 0 in canvas; CW in canvas = sweep-flag 1 in SVG
+        const sweepFlag = theta > 0 ? 1 : 0;
+        // Angular span in the direction of travel (always kept positive)
+        let angSpan = sweepFlag === 1 ? (angA - angB) : (angB - angA);
+        while (angSpan < 0) angSpan += 2 * Math.PI;
+        const largeArc = angSpan > Math.PI ? 1 : 0;
+        const x1 = sc.x + sr * Math.cos(angB);
+        const y1 = sc.y + sr * Math.sin(angB);
+        const x2 = sc.x + sr * Math.cos(angA);
+        const y2 = sc.y + sr * Math.sin(angA);
+        const arcPath = `M ${sn(x1)},${sn(y1)} A ${sn(sr)},${sn(sr)} 0 ${largeArc} ${sweepFlag} ${sn(x2)},${sn(y2)} Z`;
+        const isSimple = (ineq.dir > 0) === (theta > 0);
+        return isSimple ? arcPath : `M0,0 H${W} V${H} H0 Z ${arcPath}`;
+    }
+
+    // Build an SVG path that encloses one side of a line defined by [startPt, endPt],
+    // walking the viewport boundary to close the polygon.
+    _svgViewportPolygon(edgePts, cwWalk, W, H, sn) {
+        const P1 = edgePts[0], P2 = edgePts[1];
+        const mid = this._svgViewportWalk(P2, P1, cwWalk, W, H);
+        const all = [P1, P2, ...mid];
+        return `M ${all.map(p => `${sn(p.x)},${sn(p.y)}`).join(' L ')} Z`;
+    }
+
+    // Walk the viewport boundary from point 'from' to point 'to', clockwise or anti-clockwise.
+    _svgViewportWalk(from, to, cwWalk, W, H) {
+        const eps = 0.5;
+        const vt  = (sx, sy) => {
+            if (sy <= eps)       return sx / W;
+            if (sx >= W - eps)   return 1 + sy / H;
+            if (sy >= H - eps)   return 2 + (W - sx) / W;
+            return 3 + (H - sy) / H;
+        };
+        const corners = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }];
+        const t0 = vt(from.x, from.y), t1 = vt(to.x, to.y);
+        const mid = [];
+        if (cwWalk) {
+            let te = t1; if (te <= t0) te += 4;
+            for (let ci = Math.floor(t0) + 1; ci <= Math.floor(te); ci++) mid.push(corners[ci % 4]);
+        } else {
+            let te = t1; if (te >= t0) te -= 4;
+            for (let ci = Math.floor(t0); ci > te; ci--) mid.push(corners[((ci % 4) + 4) % 4]);
+        }
+        return mid;
     }
 }
 

@@ -1646,6 +1646,190 @@
             border-color: rgba(74, 144, 226, 0.3);
         }
 
+        /* ------------------------------------------------------------------ */
+        /* Export overlay                                                        */
+        /* ------------------------------------------------------------------ */
+        .export-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.82);
+            backdrop-filter: blur(4px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            padding: calc(16px + var(--safe-area-top, 0px)) 16px calc(16px + var(--safe-area-bottom, 0px));
+            z-index: 10010;
+            animation: fadeInHelp 0.2s ease;
+        }
+
+        .export-overlay.show {
+            display: flex;
+        }
+
+        .export-content {
+            background: rgba(42, 63, 90, 0.95) !important;
+            border: 1px solid #555 !important;
+            color: #E8F4FD !important;
+            border-radius: 12px;
+            padding: 24px;
+            width: min(92vw, 460px);
+            max-height: calc(var(--actual-vh, 100vh) - 32px - var(--safe-area-top, 0px) - var(--safe-area-bottom, 0px));
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(142, 178, 216, 0.7) rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+        }
+
+        .export-content::-webkit-scrollbar { width: 10px; }
+
+        .export-content::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 999px;
+            margin: 10px 0;
+        }
+
+        .export-content::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, rgba(107, 163, 232, 0.92), rgba(74, 144, 226, 0.72));
+            border: 2px solid rgba(42, 63, 90, 0.95);
+            border-radius: 999px;
+        }
+
+        .export-content::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, rgba(132, 184, 239, 0.96), rgba(92, 157, 233, 0.84));
+        }
+
+        .export-content h2 {
+            margin: 0 0 16px 0;
+            font-size: 22px;
+            color: #ffffff !important;
+        }
+
+        .export-options {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+
+        .export-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .export-label {
+            color: #cfd8e3;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .export-radio-row {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .export-radio-row label,
+        .export-checkbox-row label {
+            color: #dbe7f3;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        .export-sub-option {
+            margin-left: 22px;
+            padding-left: 10px;
+            border-left: 1px solid rgba(255, 255, 255, 0.18);
+        }
+
+        .export-select {
+            background: #3A4F6A;
+            color: #E8F4FD;
+            border: 1px solid #555;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .export-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .export-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid #555;
+            background: #2A3F5A;
+            color: #E8F4FD;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .export-btn.primary {
+            background: #4A90E2;
+            border-color: #4A90E2;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        @media (hover: hover) {
+            .export-btn:hover { opacity: 0.85; }
+        }
+
+        .export-preview-wrap {
+            border: 1px solid #2A3F5A;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 10px;
+        }
+
+        .export-preview-stage {
+            position: relative;
+            width: 100%;
+            min-height: 120px;
+        }
+
+        .export-preview-canvas {
+            position: absolute;
+            display: block;
+            border-radius: 4px;
+        }
+
+        .export-preview-svg {
+            position: absolute;
+            display: block;
+            border-radius: 4px;
+        }
+
+        .export-preview-frame {
+            position: absolute;
+            border: 2px solid #4A90E2;
+            pointer-events: none;
+        }
+
+        .export-preview-caption {
+            margin-top: 8px;
+            text-align: center;
+            color: #888;
+            font-size: 12px;
+        }
+
+        .export-hidden {
+            display: none !important;
+        }
+
     </style>
 </head>
 <body>
@@ -1860,6 +2044,19 @@
                             </svg>
                         </button>
 
+                        <!-- Export button - full width row -->
+                        <button id="export-image-btn" class="panel-btn" style="grid-column: span 6; justify-content: center; gap: 8px;" title="Export as PNG or SVG" aria-label="Export diagram">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                                <polyline points="8 11 12 15 16 11"></polyline>
+                                <line x1="12" y1="2" x2="12" y2="15"></line>
+                            </svg>
+                            <span style="display: flex; flex-direction: column; align-items: flex-start; line-height: 1.25;">
+                                <span style="font-size: 11px; font-weight: 600;">Export</span>
+                                <span style="font-size: 9px; opacity: 0.65;">PNG / SVG</span>
+                            </span>
+                        </button>
+
                         <!-- Row 2, spans 3 cols each -->
                         <div style="grid-column: span 3; position: relative; display: flex;">
                             <button id="share-button" class="panel-btn" style="width: 100%;" title="Share options" aria-haspopup="menu" aria-expanded="false">
@@ -1996,6 +2193,106 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+
+    <!-- Export overlay modal -->
+    <div id="export-overlay" class="export-overlay">
+        <div class="export-content">
+            <h2>Export</h2>
+            <div class="export-options">
+
+                <div class="export-group">
+                    <div class="export-label">Format</div>
+                    <div class="export-radio-row">
+                        <label><input type="radio" name="export-format" value="png"> PNG</label>
+                        <label><input type="radio" name="export-format" value="svg" checked> SVG</label>
+                    </div>
+                </div>
+
+                <div class="export-group">
+                    <label class="export-label" for="export-frame-shape">Export frame</label>
+                    <select id="export-frame-shape" class="export-select">
+                        <option value="original" selected>Original (current viewport)</option>
+                        <option value="4:3">4:3</option>
+                        <option value="16:9">16:9</option>
+                        <option value="1:1">Square (1:1)</option>
+                    </select>
+                </div>
+
+                <div class="export-group">
+                    <div class="export-label">Crop preview</div>
+                    <div class="export-preview-wrap">
+                        <div id="export-preview-stage" class="export-preview-stage">
+                            <canvas id="export-preview-canvas" class="export-preview-canvas"></canvas>
+                            <img id="export-preview-svg" class="export-preview-svg export-hidden" alt="">
+                            <div id="export-preview-frame" class="export-preview-frame"></div>
+                        </div>
+                        <div id="export-preview-caption" class="export-preview-caption">Current viewport</div>
+                    </div>
+                </div>
+
+                <div class="export-group export-svg-only">
+                    <div class="export-label">Colours</div>
+                    <div class="export-radio-row">
+                        <label><input type="radio" name="export-color-mode" value="keep" checked> Keep colours</label>
+                        <label><input type="radio" name="export-color-mode" value="black"> All black</label>
+                    </div>
+                </div>
+
+                <div class="export-group export-svg-only">
+                    <label class="export-label" for="export-grid-mode">Gridlines</label>
+                    <select id="export-grid-mode" class="export-select">
+                        <option value="both" selected>Major and minor</option>
+                        <option value="major">Major only</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
+
+                <div class="export-group export-svg-only">
+                    <label class="export-label" for="export-text-size">Text size</label>
+                    <select id="export-text-size" class="export-select">
+                        <option value="small">12</option>
+                        <option value="medium">16</option>
+                        <option value="large" selected>20 (default)</option>
+                        <option value="xl">24</option>
+                        <option value="xxl">28</option>
+                    </select>
+                </div>
+
+                <div class="export-group export-svg-only">
+                    <label class="export-label" for="export-line-width">Line and point size</label>
+                    <select id="export-line-width" class="export-select">
+                        <option value="small" selected>Thin (default)</option>
+                        <option value="medium">Regular</option>
+                        <option value="large">Bold</option>
+                        <option value="xl">Heavy</option>
+                    </select>
+                </div>
+
+                <div class="export-group export-checkbox-row export-svg-only">
+                    <label><input id="export-include-axes" type="checkbox" checked> Include axes</label>
+                </div>
+
+                <div id="export-axis-labels-group" class="export-group export-checkbox-row export-svg-only export-sub-option">
+                    <label><input id="export-include-axis-labels" type="checkbox" checked> Include axis numbers and labels</label>
+                </div>
+
+                <div class="export-group export-checkbox-row export-svg-only">
+                    <label><input id="export-include-extrema" type="checkbox" checked> Include extrema markers</label>
+                </div>
+
+                <div class="export-group export-checkbox-row export-svg-only">
+                    <label><input id="export-include-intersections" type="checkbox" checked> Include intersection markers</label>
+                </div>
+
+            </div>
+
+            <div class="export-actions">
+                <button id="export-cancel-button" class="export-btn" type="button">Cancel</button>
+                <button id="export-generate-button" class="export-btn primary" type="button">Download SVG</button>
+            </div>
+        </div>
+    </div>
+
     <script src="./main.js"></script>
 </body>
 </html>
