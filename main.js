@@ -6639,7 +6639,7 @@ class Komplexiti {
         const dotOutline     = 'rgba(255,255,255,0.9)';
 
         const fontSizeMap    = { small: 12, medium: 16, large: 20, xl: 24, xxl: 28 };
-        const strokeWidthMap = { small: 2.5, medium: 3.5, large: 4.5, xl: 5.5 };
+        const strokeWidthMap = { small: 2.5, medium: 3.5, large: 4.5, xl: 5.5, xxl: 6.5 };
         const fSize      = fontSizeMap[options.textSize]    || 20;
         const baseStroke = strokeWidthMap[options.strokeWidth] || 2.5;
         const prevScale  = (Number.isFinite(options.previewStrokeScale) && options.previewStrokeScale > 0)
@@ -7035,6 +7035,30 @@ class Komplexiti {
                 const sp = this.worldToScreen(p.re, p.im);
                 lines.push(`<circle cx="${sn(sp.x)}" cy="${sn(sp.y)}" r="${sn(iDotR + iEdge)}" fill="${outer}"/>`);
                 lines.push(`<circle cx="${sn(sp.x)}" cy="${sn(sp.y)}" r="${sn(iDotR)}" fill="${inner}"/>`);
+            }
+        }
+
+        // Intersection badges (shown when user has tapped an intersection point)
+        if (this._intersectionBadges?.length) {
+            const badgeColor   = '#D63384';
+            const badgeOutline = '#852052';
+            const badgeTextClr = this.getContrastingTextColor(badgeColor);
+            const padding      = 6;
+            const fontWeight   = 'bold';
+            // Use a temp canvas to measure text width at the export font size
+            const measurer = document.createElement('canvas').getContext('2d');
+            measurer.font  = `${fontWeight} ${fSize}px Arial, sans-serif`;
+            for (const badge of this._intersectionBadges) {
+                const sp        = this.worldToScreen(badge.re, badge.im);
+                const labelText = `z = ${this.formatComplexPlain(badge.re, badge.im, 'cartesian')}`;
+                const tw        = measurer.measureText(labelText).width;
+                const boxH      = fSize + 2 * padding;
+                const labelX    = sp.x + 15;
+                const labelY    = sp.y - 10;
+                const boxY      = labelY - fSize - padding;
+                const totalW    = tw + 2 * padding;
+                lines.push(`<rect x="${sn(labelX - padding)}" y="${sn(boxY)}" width="${sn(totalW)}" height="${sn(boxH)}" rx="3" fill="${badgeColor}" stroke="${badgeOutline}" stroke-width="1.4" vector-effect="non-scaling-stroke"/>`);
+                lines.push(`<text x="${sn(labelX)}" y="${sn(boxY + boxH * 0.7)}" fill="${badgeTextClr}" font-family="Arial, sans-serif" font-size="${fSize}px" font-weight="${fontWeight}" dominant-baseline="alphabetic">${labelText}</text>`);
             }
         }
 

@@ -1822,8 +1822,8 @@
         .export-preview-caption {
             margin-top: 8px;
             text-align: center;
-            color: #888;
-            font-size: 12px;
+            color: #aaa;
+            font-size: 13px;
         }
 
         .export-hidden {
@@ -2044,21 +2044,20 @@
                             </svg>
                         </button>
 
-                        <!-- Export button - full width row -->
-                        <button id="export-image-btn" class="panel-btn" style="grid-column: span 6; justify-content: center; gap: 8px;" title="Export as PNG or SVG" aria-label="Export diagram">
+                        <!-- Row 2: export / share / help, spans 2 cols each -->
+                        <button id="export-image-btn" class="panel-btn" style="grid-column: span 2; justify-content: space-between; padding: 6px 10px;" title="Export as PNG or SVG" aria-label="Export diagram">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
                                 <polyline points="8 11 12 15 16 11"></polyline>
                                 <line x1="12" y1="2" x2="12" y2="15"></line>
                             </svg>
-                            <span style="display: flex; flex-direction: column; align-items: flex-start; line-height: 1.25;">
-                                <span style="font-size: 11px; font-weight: 600;">Export</span>
-                                <span style="font-size: 9px; opacity: 0.65;">PNG / SVG</span>
+                            <span style="display: flex; flex-direction: column; align-items: flex-end; justify-content: center; font-size: 10px; line-height: 1.15; letter-spacing: 0.2px; transform: translateY(1px);">
+                                <span>SVG</span>
+                                <span>PNG</span>
                             </span>
                         </button>
 
-                        <!-- Row 2, spans 3 cols each -->
-                        <div style="grid-column: span 3; position: relative; display: flex;">
+                        <div style="grid-column: span 2; position: relative; display: flex;">
                             <button id="share-button" class="panel-btn" style="width: 100%;" title="Share options" aria-haspopup="menu" aria-expanded="false">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
@@ -2072,7 +2071,7 @@
                             </div>
                         </div>
 
-                        <button id="help-button" class="panel-btn" style="grid-column: span 3;" title="How to Use" aria-label="How to Use">
+                        <button id="help-button" class="panel-btn" style="grid-column: span 2;" title="How to Use" aria-label="How to Use">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <circle cx="12" cy="12" r="10"></circle>
                                 <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
@@ -2259,12 +2258,13 @@
                 </div>
 
                 <div class="export-group export-svg-only">
-                    <label class="export-label" for="export-line-width">Line and point size</label>
+                    <label class="export-label" for="export-line-width">Curve stroke width</label>
                     <select id="export-line-width" class="export-select">
                         <option value="small" selected>Thin (default)</option>
                         <option value="medium">Regular</option>
                         <option value="large">Bold</option>
                         <option value="xl">Heavy</option>
+                        <option value="xxl">Extra Heavy</option>
                     </select>
                 </div>
 
