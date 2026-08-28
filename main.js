@@ -4439,6 +4439,48 @@ class Komplexiti {
         return zs;
     }
 
+    // Substitute u = sqrt(varName), varName = u*u to clear a sqrt(varName) term and solve as a polynomial.
+    _trySqrtSubstitution(lhs, rhs, varName, scope) {
+        const sqrtVar = `sqrt(${varName})`;
+        if (!lhs.includes(sqrtVar) && !rhs.includes(sqrtVar)) return null;
+        // Use a letter-starting name not already in scope (math.derivative requires valid JS-style identifiers)
+        let u = 'sqrtSub';
+        if (scope.hasOwnProperty(u)) u = 'sqrtSubVar';
+        if (scope.hasOwnProperty(u)) return null;
+        const sqrtRe = new RegExp(`sqrt\\(${varName}\\)`, 'g');
+        const varRe  = new RegExp(`\\b${varName}\\b`, 'g');
+        const sub    = (e) => e.replace(sqrtRe, u).replace(varRe, `(${u}*${u})`);
+        const hSub   = `(${sub(lhs)}) - (${sub(rhs)})`;
+        // Rationalize first (pure algebra, no derivative) to get a clean polynomial form
+        let coeffs = null;
+        try {
+            const rat = math.rationalize(hSub, {}, true);
+            if (rat?.numerator) coeffs = this._extractPolynomialCoeffs(rat.numerator.toString(), u, scope);
+        } catch {}
+        if (!coeffs || coeffs.length < 2)
+            coeffs = this._extractPolynomialCoeffs(hSub, u, scope);
+        if (!coeffs || coeffs.length < 2) return null;
+        const deg = coeffs.length - 1;
+        let uRoots;
+        if      (deg === 1) uRoots = this._solveLinear(coeffs);
+        else if (deg === 2) uRoots = this._solveQuadratic(coeffs);
+        else                uRoots = this._solveDurandKerner(coeffs);
+        if (!uRoots?.length) return null;
+        let lhsNode, rhsNode;
+        try { lhsNode = math.parse(lhs); rhsNode = math.parse(rhs); } catch { return null; }
+        const valid = [];
+        for (const uVal of uRoots) {
+            if (!isFinite(uVal.re) || !isFinite(uVal.im)) continue;
+            const z = this._cMul(uVal, uVal);
+            try {
+                const ev   = { ...scope, [varName]: math.complex(z.re, z.im) };
+                const diff = this._equationDifferenceMagnitude(lhsNode.evaluate(ev), rhsNode.evaluate(ev));
+                if (diff < 0.01 && valid.every(r => Math.hypot(r.re - z.re, r.im - z.im) > 1e-4)) valid.push(z);
+            } catch { /* skip */ }
+        }
+        return valid.length > 0 ? valid : null;
+    }
+
     // Main equation parser. Returns either finite roots or a drawable complex locus.
     parseEquation(rawLatex, ownId) {
         if (typeof math === 'undefined') return null;
@@ -4555,6 +4597,10 @@ class Komplexiti {
             }
 
             if (!coeffs || coeffs.length < 2) {
+                if (/\bsqrt\(/.test(hExpr)) {
+                    const sqrtRoots = this._trySqrtSubstitution(lhs, rhs, varName, scope);
+                    if (sqrtRoots?.length) return { type: 'equation', variable: varName, roots: sqrtRoots };
+                }
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
                 return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
             }
