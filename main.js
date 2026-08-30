@@ -3283,8 +3283,8 @@ class Komplexiti {
         };
         const mag = v => v ? Math.hypot(v.re, v.im) : Infinity;
 
-        // Coarse grid: 21x21 points over [-5,5]^2; step=0.5 ensures y=0 and x=0,1 are exact rows/columns
-        const R = 5, step = 0.5, N = Math.ceil(2 * R / step);
+        // Coarse grid over [-10,10]^2; step=0.5 keeps integer coordinates on exact grid points
+        const R = 10, step = 0.5, N = Math.ceil(2 * R / step);
         const grid = [];
         for (let iy = 0; iy <= N; iy++) {
             grid.push([]);
