@@ -4571,6 +4571,15 @@ class Komplexiti {
                 // generically 0-dimensional (isolated points).  Try to find them directly
                 // before falling back to the contour tracer.
                 if (!locus.scalar) {
+                    // conj(z) = f(z) → multiply both sides by z: |z|² = z·f(z), which is often real-valued
+                    const conjPat = new RegExp(`^conj\\(${varName}\\)$`);
+                    if (conjPat.test(lhs) && !/(?<![a-zA-Z])conj\(/.test(rhs)) {
+                        const rew = this._buildLocus(`abs(${varName})^2`, `(${varName}) * (${rhs})`, varName, scope);
+                        if (rew?.scalar) return { type: 'locus', variable: varName, roots: null, locus: rew };
+                    } else if (conjPat.test(rhs) && !/(?<![a-zA-Z])conj\(/.test(lhs)) {
+                        const rew = this._buildLocus(`abs(${varName})^2`, `(${varName}) * (${lhs})`, varName, scope);
+                        if (rew?.scalar) return { type: 'locus', variable: varName, roots: null, locus: rew };
+                    }
                     const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
                     if (roots) return { type: 'equation', variable: varName, roots };
                 }
