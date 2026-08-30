@@ -4563,7 +4563,8 @@ class Komplexiti {
             const hExpr  = `(${lhs}) - (${rhs})`;
 
             // abs/arg/conj expressions are never polynomials; skip symbolic differentiation to avoid hangs
-            if (/\babs\(|\barg\(|\bconj\(/.test(hExpr)) {
+            // Use (?<![a-zA-Z]) rather than \b so that e.g. 2conj( is also matched (digits precede no \b).
+            if (/(?<![a-zA-Z])(?:abs|arg|conj)\(/.test(hExpr)) {
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
                 if (!locus) return null;
                 // A non-scalar locus has a complex-valued LHS-RHS, so its zero set is
@@ -4627,6 +4628,10 @@ class Komplexiti {
             }
 
             const locus = this._buildLocus(lhs, rhs, varName, scope);
+            if (locus && !locus.scalar) {
+                const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
+                if (roots) return { type: 'equation', variable: varName, roots };
+            }
             return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
         } catch { return null; }
     }
