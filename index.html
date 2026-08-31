@@ -1427,6 +1427,11 @@
             }
         }
 
+        /* Modal is always dark, so force white glyph regardless of theme */
+        #shortcuts-close-btn {
+            color: #fff !important;
+        }
+
         /* Help / Shortcuts modal overlay */
         .shortcuts-overlay {
             position: fixed;
@@ -2089,7 +2094,9 @@
                 <div class="shortcuts-content">
                     <div class="shortcuts-header">
                         <h2>How to use Komplexiti</h2>
-                        <button id="shortcuts-close-btn" class="info-panel-close-btn" title="Close" aria-label="Close help">&times;</button>
+                        <button id="shortcuts-close-btn" class="expr-remove-btn" title="Close" aria-label="Close help">
+                            <svg viewBox="0 0 16 16"><path d="M4 4L12 12M12 4L4 12"/></svg>
+                        </button>
                     </div>
 
                     <!-- Complex Numbers & Values -->
