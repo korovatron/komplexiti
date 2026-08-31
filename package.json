@@ -1,0 +1,25 @@
+{
+  "name": "komplexiti",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/korovatron/komplexiti.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/korovatron/komplexiti/issues"
+  },
+  "homepage": "https://github.com/korovatron/komplexiti#readme",
+  "description": "",
+  "devDependencies": {
+    "mathjs": "^11.11.0",
+    "vitest": "^4.1.11"
+  }
+}
