@@ -2390,6 +2390,9 @@ class Komplexiti {
         // Negative lookbehind prevents matching a letter that is itself part of a LaTeX command (e.g. 'e' in \le\arctan).
         e = e.replace(/(?<![a-zA-Z])([a-zA-Z0-9])\\(sqrt|sin|cos|tan|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan|arcsinh|arccosh|arctanh)\b/g, '$1*\\$2');
         for (let p = 0; p < 4; p++) {
+            // Flatten exponent braces first so a braced exponent inside a \frac argument
+            // (e.g. \frac{1}{z^{-2}}) doesn't defeat the [^{}]* nested-brace-free match below.
+            e = e.replace(/\^\s*\{([^{}]+)\}/g, '^($1)');
             e = e.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '(($1)/($2))');
             // also handle \frac12 style (no braces, single-char args)
             e = e.replace(/\\frac\s*([^\s\\{])([^\s\\{])/g, '(($1)/($2))');
@@ -5201,7 +5204,8 @@ class Komplexiti {
             rootsEl.innerHTML      = '';
             const fp = c.locus.fastPath;
             const lineLabel = fp?.kind === 'line' ? (fp.perpBisector ? 'perpendicular bisector' : 'line') : null;
-            const kinds = { circle: 'circle', line: lineLabel, ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: 'Joukowski', 'inscribed-arc': 'inscribed arc' };
+            const joukowskiLabel = fp?.kind === 'joukowski' ? `Joukowski (n=${fp.n}, ${fp.cosSign === -1 ? '\u2212' : '+'})` : null;
+            const kinds = { circle: 'circle', line: lineLabel, ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: joukowskiLabel, 'inscribed-arc': 'inscribed arc' };
             valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
             const hasFoci = fp?.kind === 'circle' || !!(fp?.focusA && fp?.focusB && (fp?.perpBisector || fp?.kind === 'apollonius'));
             if (hasFoci) {
