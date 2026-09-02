@@ -5819,6 +5819,40 @@ class Komplexiti {
                     }
                 }
 
+                // Dotted line between the foci with a right-angle marker where it crosses the perpendicular bisector
+                if (c.showFoci !== false && fp?.perpBisector && fp?.focusA && fp?.focusB) {
+                    const aPt = this.worldToScreen(fp.focusA.re, fp.focusA.im);
+                    const bPt = this.worldToScreen(fp.focusB.re, fp.focusB.im);
+                    ctx.save();
+                    ctx.strokeStyle = c.color;
+                    ctx.lineWidth   = 1;
+                    ctx.globalAlpha = 0.6;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(aPt.x, aPt.y);
+                    ctx.lineTo(bPt.x, bPt.y);
+                    ctx.stroke();
+                    ctx.restore();
+
+                    // Right-angle marker at the midpoint, the point where the segment crosses the locus
+                    const midX  = (fp.focusA.re + fp.focusB.re) / 2, midY = (fp.focusA.im + fp.focusB.im) / 2;
+                    const midPt = this.worldToScreen(midX, midY);
+                    const ulen  = Math.hypot(bPt.x - aPt.x, bPt.y - aPt.y) || 1;
+                    const ux    = (bPt.x - aPt.x) / ulen, uy = (bPt.y - aPt.y) / ulen;
+                    const px    = -uy, py = ux;
+                    const s     = Math.max(12, dotR + 3);
+                    ctx.save();
+                    ctx.strokeStyle = c.color;
+                    ctx.lineWidth   = 2.5;
+                    ctx.globalAlpha = 0.9;
+                    ctx.beginPath();
+                    ctx.moveTo(midPt.x + ux * s, midPt.y + uy * s);
+                    ctx.lineTo(midPt.x + ux * s + px * s, midPt.y + uy * s + py * s);
+                    ctx.lineTo(midPt.x + px * s, midPt.y + py * s);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
                 // Draw centre C for circle and Apollonius
                 if (c.showFoci !== false && fp?.center && (fp.kind === 'circle' || fp.kind === 'apollonius')) {
                     const cPt   = this.worldToScreen(fp.center.re, fp.center.im);
@@ -7010,6 +7044,24 @@ class Komplexiti {
                         lines.push(`<circle cx="${sn(fs.x)}" cy="${sn(fs.y)}" r="${sn(fDotR)}" fill="${color}" opacity="0.75" stroke="${dotOutline}" stroke-width="1.5"/>`);
                         lines.push(`<text x="${sn(fs.x + fDotR + 3)}" y="${sn(fs.y - fDotR - 2)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize}px" font-style="italic" opacity="0.9" dominant-baseline="auto">F${sub}</text>`);
                     }
+                }
+
+                // Dotted line between the foci with a right-angle marker where it crosses the perpendicular bisector
+                if (c.showFoci !== false && fp2?.perpBisector && fp2?.focusA && fp2?.focusB) {
+                    const aPt = this.worldToScreen(fp2.focusA.re, fp2.focusA.im);
+                    const bPt = this.worldToScreen(fp2.focusB.re, fp2.focusB.im);
+                    lines.push(`<line x1="${sn(aPt.x)}" y1="${sn(aPt.y)}" x2="${sn(bPt.x)}" y2="${sn(bPt.y)}" stroke="${color}" stroke-width="${sw(1)}" vector-effect="non-scaling-stroke" opacity="0.6" stroke-dasharray="${sw(4)} ${sw(4)}"/>`);
+
+                    const midX  = (fp2.focusA.re + fp2.focusB.re) / 2, midY = (fp2.focusA.im + fp2.focusB.im) / 2;
+                    const midPt = this.worldToScreen(midX, midY);
+                    const ulen  = Math.hypot(bPt.x - aPt.x, bPt.y - aPt.y) || 1;
+                    const ux    = (bPt.x - aPt.x) / ulen, uy = (bPt.y - aPt.y) / ulen;
+                    const px    = -uy, py = ux;
+                    const s     = Math.max(12, dotR + 3);
+                    const p1x = midPt.x + ux * s, p1y = midPt.y + uy * s;
+                    const p2x = p1x + px * s, p2y = p1y + py * s;
+                    const p3x = midPt.x + px * s, p3y = midPt.y + py * s;
+                    lines.push(`<polyline points="${sn(p1x)},${sn(p1y)} ${sn(p2x)},${sn(p2y)} ${sn(p3x)},${sn(p3y)}" fill="none" stroke="${color}" stroke-width="${sw(2.5)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
                 }
 
                 // Centre marker
