@@ -2001,6 +2001,13 @@ class Komplexiti {
                 </div>
                 <div class="foci-equation-list"></div>
             </div>
+            <div class="centre-info-container">
+                <div class="metadata-title-row">
+                    <button class="metadata-visibility-toggle centre-visibility-toggle" aria-label="Toggle centre" title="Toggle centre" tabindex="-1"></button>
+                    <div class="centre-info-title">Centre</div>
+                </div>
+                <div class="centre-equation-list"></div>
+            </div>
             <div class="extrema-info-container">
                 <div class="metadata-title-row">
                     <button class="metadata-visibility-toggle extrema-visibility-toggle" aria-label="Toggle extrema" title="Toggle extrema on diagram" tabindex="-1"></button>
@@ -2098,6 +2105,13 @@ class Komplexiti {
         const fociToggleBtn = card.querySelector('.foci-visibility-toggle');
         fociToggleBtn.addEventListener('click', () => {
             c.showFoci = (c.showFoci !== false) ? false : true;
+            this.updateCardMetadata(c);
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        });
+
+        const centreToggleBtn = card.querySelector('.centre-visibility-toggle');
+        centreToggleBtn.addEventListener('click', () => {
+            c.showCentre = (c.showCentre !== false) ? false : true;
             this.updateCardMetadata(c);
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -5108,14 +5122,17 @@ class Komplexiti {
         const fociContainer = card.querySelector('.foci-info-container');
         const fociList      = card.querySelector('.foci-equation-list');
         const fociToggle    = card.querySelector('.foci-visibility-toggle');
-        const fociTitle     = card.querySelector('.foci-info-title');
         const hideFoci = () => { if (fociContainer) fociContainer.classList.remove('visible'); if (fociList) fociList.innerHTML = ''; };
+        const centreContainer = card.querySelector('.centre-info-container');
+        const centreList      = card.querySelector('.centre-equation-list');
+        const centreToggle    = card.querySelector('.centre-visibility-toggle');
+        const hideCentre = () => { if (centreContainer) centreContainer.classList.remove('visible'); if (centreList) centreList.innerHTML = ''; };
         const extremaContainer = card.querySelector('.extrema-info-container');
         const extremaList      = card.querySelector('.extrema-info-list');
         const extremaToggle    = card.querySelector('.extrema-visibility-toggle');
         const hideExtrema = () => { if (extremaContainer) extremaContainer.classList.remove('visible'); if (extremaList) extremaList.innerHTML = ''; };
 
-        const hide = () => { container.classList.remove('visible'); hideFoci(); hideExtrema(); };
+        const hide = () => { container.classList.remove('visible'); hideFoci(); hideCentre(); hideExtrema(); };
 
         if (!c.latex || !c.latex.trim()) { hide(); return; }
         if (!c.enabled) { hide(); return; }
@@ -5144,7 +5161,7 @@ class Komplexiti {
         };
 
         if (c.type === 'equation' && c.roots?.length) {
-            hideFoci(); hideExtrema();
+            hideFoci(); hideCentre(); hideExtrema();
             container.classList.add('is-equation');
             const fmt = c.cardRootFmt || 'cartesian';
             const fmtNames  = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
@@ -5193,7 +5210,7 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             valueEl.textContent    = 'region';
-            hideFoci(); hideExtrema();
+            hideFoci(); hideCentre(); hideExtrema();
             container.classList.add('visible');
 
         } else if (c.type === 'locus' && c.locus) {
@@ -5207,23 +5224,21 @@ class Komplexiti {
             const joukowskiLabel = fp?.kind === 'joukowski' ? `Joukowski (n=${fp.n}, ${fp.cosSign === -1 ? '\u2212' : '+'})` : null;
             const kinds = { circle: 'circle', line: lineLabel, ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: joukowskiLabel, 'inscribed-arc': 'inscribed arc' };
             valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
-            const hasFoci = fp?.kind === 'circle' || !!(fp?.focusA && fp?.focusB && (fp?.perpBisector || fp?.kind === 'apollonius'));
+            const fmtCoord = ({ re, im }) => {
+                const a = this.niceRealLatex(re)  ?? this.formatNumberShort(re);
+                const b = this.niceRealLatex(im)  ?? this.formatNumberShort(im);
+                return `\\left(${a},\\,${b}\\right)`;
+            };
+            const hasFoci = fp?.kind !== 'circle' && !!(fp?.focusA && fp?.focusB && (fp?.perpBisector || fp?.kind === 'apollonius'));
+            const hasCentre = !!(fp?.center && (fp.kind === 'circle' || fp.kind === 'apollonius'));
             if (hasFoci) {
                 fociContainer.classList.add('visible');
                 if (fociToggle) fociToggle.classList.toggle('is-hidden', c.showFoci === false);
-                if (fociTitle) fociTitle.textContent = fp.kind === 'circle' ? 'Centre' : 'Foci';
                 fociList.innerHTML = '';
-                const fmtCoord = ({ re, im }) => {
-                    const a = this.niceRealLatex(re)  ?? this.formatNumberShort(re);
-                    const b = this.niceRealLatex(im)  ?? this.formatNumberShort(im);
-                    return `\\left(${a},\\,${b}\\right)`;
-                };
-                if (fp.focusA && fp.focusB) {
-                    for (const focus of [fp.focusA, fp.focusB]) {
-                        const wrapper = document.createElement('div');
-                        wrapper.appendChild(makeMF(fmtCoord(focus), 17));
-                        fociList.appendChild(wrapper);
-                    }
+                for (const focus of [fp.focusA, fp.focusB]) {
+                    const wrapper = document.createElement('div');
+                    wrapper.appendChild(makeMF(fmtCoord(focus), 17));
+                    fociList.appendChild(wrapper);
                 }
                 if (fp.kind === 'apollonius' && fp.ratio != null) {
                     const kStr = this.niceRealLatex(fp.ratio) ?? this.formatNumberShort(fp.ratio);
@@ -5231,17 +5246,22 @@ class Komplexiti {
                     wrapper.appendChild(makeMF(`k=${kStr}`, 17));
                     fociList.appendChild(wrapper);
                 }
-                if (fp.center && (fp.kind === 'circle' || fp.kind === 'apollonius')) {
-                    const cWrapper = document.createElement('div');
-                    cWrapper.appendChild(makeMF(`C=${fmtCoord(fp.center)}`, 17));
-                    fociList.appendChild(cWrapper);
-                    const rStr = this.niceRealLatex(fp.radius) ?? this.formatNumberShort(fp.radius);
-                    const rWrapper = document.createElement('div');
-                    rWrapper.appendChild(makeMF(`r=${rStr}`, 17));
-                    fociList.appendChild(rWrapper);
-                }
             } else {
                 hideFoci();
+            }
+            if (hasCentre) {
+                centreContainer.classList.add('visible');
+                if (centreToggle) centreToggle.classList.toggle('is-hidden', c.showCentre === false);
+                centreList.innerHTML = '';
+                const cWrapper = document.createElement('div');
+                cWrapper.appendChild(makeMF(`C=${fmtCoord(fp.center)}`, 17));
+                centreList.appendChild(cWrapper);
+                const rStr = this.niceRealLatex(fp.radius) ?? this.formatNumberShort(fp.radius);
+                const rWrapper = document.createElement('div');
+                rWrapper.appendChild(makeMF(`r=${rStr}`, 17));
+                centreList.appendChild(rWrapper);
+            } else {
+                hideCentre();
             }
             const extrema = this._computeLocusExtrema(c);
             if (extrema) {
@@ -5268,7 +5288,7 @@ class Komplexiti {
             container.classList.add('visible');
 
         } else if (c.type === 'value' && c.re !== null && c.im !== null) {
-            hideFoci(); hideExtrema(); hideExtrema();
+            hideFoci(); hideCentre(); hideExtrema();
             container.classList.remove('is-equation');
             badge.textContent      = 'Constant';
             valueEl.style.display  = '';
@@ -5858,7 +5878,7 @@ class Komplexiti {
                 }
 
                 // Draw centre C for circle and Apollonius
-                if (c.showFoci !== false && fp?.center && (fp.kind === 'circle' || fp.kind === 'apollonius')) {
+                if (c.showCentre !== false && fp?.center && (fp.kind === 'circle' || fp.kind === 'apollonius')) {
                     const cPt   = this.worldToScreen(fp.center.re, fp.center.im);
                     const cDotR = Math.max(3, dotR - 1.5);
                     ctx.save();
@@ -7069,7 +7089,7 @@ class Komplexiti {
                 }
 
                 // Centre marker
-                if (c.showFoci !== false && fp2?.center && (fp2.kind === 'circle' || fp2.kind === 'apollonius')) {
+                if (c.showCentre !== false && fp2?.center && (fp2.kind === 'circle' || fp2.kind === 'apollonius')) {
                     const cPt   = this.worldToScreen(fp2.center.re, fp2.center.im);
                     const cDotR = Math.max(3, dotR - 1.5);
                     lines.push(`<circle cx="${sn(cPt.x)}" cy="${sn(cPt.y)}" r="${sn(cDotR)}" fill="${color}" opacity="0.75" stroke="${dotOutline}" stroke-width="1.5"/>`);
