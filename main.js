@@ -2196,7 +2196,10 @@ class Komplexiti {
                 ...mathField.inlineShortcuts,
                 abs:  { mode: 'math', value: '\\left|#?\\right|' },
                 mod:  { mode: 'math', value: '\\left|#?\\right|' },
-                conj: { mode: 'math', value: '\\overline{#?}' }
+                conj: { mode: 'math', value: '\\overline{#?}' },
+                // Override MathLive's default "log" shortcut (which inserts a base subscript
+                // placeholder) so typed "log" matches the virtual keyboard button: base-10, no base.
+                log:  { mode: 'math', value: '\\log(#?)' }
             };
             if (!c.enabled) mathField.style.opacity = '0.4';
             if (c.latex) {
