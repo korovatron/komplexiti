@@ -4629,6 +4629,11 @@ class Komplexiti {
                     if (sqrtRoots?.length) return { type: 'equation', variable: varName, roots: sqrtRoots };
                 }
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
+                if (locus && !locus.scalar) {
+                    // Non-scalar difference (e.g. a^z = c) is generically isolated points, not a curve
+                    const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
+                    if (roots) return { type: 'equation', variable: varName, roots };
+                }
                 return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
             }
 
