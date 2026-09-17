@@ -3311,7 +3311,10 @@ class Komplexiti {
             }
         }
 
-        // Collect strict local minima (smaller than all 8 neighbours)
+        // Collect strict local minima (smaller than all 8 neighbours). Boundary rows/columns are
+        // excluded deliberately: functions that only approach a value asymptotically as z -> infinity
+        // (e.g. tan(z)=i) get arbitrarily close to zero right at the edge of the search box, which
+        // would otherwise be misreported as an exact root.
         const candidates = [];
         for (let iy = 1; iy < N; iy++) {
             for (let ix = 1; ix < N; ix++) {
@@ -5432,6 +5435,21 @@ class Komplexiti {
                 }
             }
         }
+        // Rational multiple of e
+        {
+            const ratio = abs / Math.E;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    const neg = sign < 0 ? '-' : '';
+                    if (sn === 1 && sd === 1) return `${neg}e`;
+                    if (sd === 1)             return `${neg}${sn}e`;
+                    if (sn === 1)             return `${neg}\\frac{e}{${sd}}`;
+                    return `${neg}\\frac{${sn}e}{${sd}}`;
+                }
+            }
+        }
         // Try integer + rational*√k forms: e.g. √2-1, 1+√2, 3+2√3
         for (const k of [2, 3, 5, 6, 7, 10, 11, 13, 14, 15]) {
             const sqK = Math.sqrt(k);
@@ -5505,6 +5523,22 @@ class Komplexiti {
                     else if (sd === 1)              part = `${sn}${rad}`;
                     else if (sn === 1)              part = `${rad}/${sd}`;
                     else                           part = `${sn}${rad}/${sd}`;
+                    return (sign < 0 ? '-' : '') + part;
+                }
+            }
+        }
+        // Rational multiple of e
+        {
+            const ratio = abs / Math.E;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    let part;
+                    if      (sn === 1 && sd === 1) part = 'e';
+                    else if (sd === 1)              part = `${sn}e`;
+                    else if (sn === 1)              part = `e/${sd}`;
+                    else                           part = `${sn}e/${sd}`;
                     return (sign < 0 ? '-' : '') + part;
                 }
             }
