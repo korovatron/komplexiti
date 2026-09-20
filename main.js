@@ -2061,6 +2061,8 @@ class Komplexiti {
             c.type = 'value';
             c.roots = null;
             c.equationVar = null;
+            c.equationLhs = null;
+            c.equationRhs = null;
             c.locus = null;
             c.compoundParts = null;
 
@@ -2090,6 +2092,8 @@ class Komplexiti {
                     c.type = eq.type;
                     c.roots = eq.roots ?? null;
                     c.equationVar = eq.variable;
+                    c.equationLhs = eq.lhs ?? null;
+                    c.equationRhs = eq.rhs ?? null;
                     c.locus = eq.locus ?? null;
                     c._locusCache = null;
                     c.errorMessage = '';
@@ -2410,6 +2414,8 @@ class Komplexiti {
                         c.type = eq.type;
                         c.roots = eq.roots ?? null;
                         c.equationVar = eq.variable;
+                        c.equationLhs = eq.lhs ?? null;
+                        c.equationRhs = eq.rhs ?? null;
                         if (c.locus !== eq.locus) c._locusCache = null;
                         c.locus = eq.locus ?? null;
                         c.hasParseError = false;
@@ -4625,7 +4631,7 @@ class Komplexiti {
                 if (n >= 1 && n <= 16) {
                     const cVal = math.evaluate(rhs, scope);
                     const roots = this._solveNthRootsOfC(n, cVal);
-                    if (roots) return { type: 'equation', variable: varName, roots };
+                    if (roots) return { type: 'equation', variable: varName, roots, lhs, rhs };
                 }
             }
 
@@ -4651,7 +4657,7 @@ class Komplexiti {
                         if (rew?.scalar) return { type: 'locus', variable: varName, roots: null, locus: rew };
                     }
                     const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
-                    if (roots) return { type: 'equation', variable: varName, roots };
+                    if (roots) return { type: 'equation', variable: varName, roots, lhs, rhs };
                 }
                 return { type: 'locus', variable: varName, roots: null, locus };
             }
@@ -4679,13 +4685,13 @@ class Komplexiti {
             if (!coeffs || coeffs.length < 2) {
                 if (/\bsqrt\(/.test(hExpr)) {
                     const sqrtRoots = this._trySqrtSubstitution(lhs, rhs, varName, scope);
-                    if (sqrtRoots?.length) return { type: 'equation', variable: varName, roots: sqrtRoots };
+                    if (sqrtRoots?.length) return { type: 'equation', variable: varName, roots: sqrtRoots, lhs, rhs };
                 }
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
                 if (locus && !locus.scalar) {
                     // Non-scalar difference (e.g. a^z = c) is generically isolated points, not a curve
                     const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
-                    if (roots) return { type: 'equation', variable: varName, roots };
+                    if (roots) return { type: 'equation', variable: varName, roots, lhs, rhs };
                 }
                 return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
             }
@@ -4708,13 +4714,13 @@ class Komplexiti {
                         } catch { return false; }
                     });
                 }
-                if (valid.length) return { type: 'equation', variable: varName, roots: valid };
+                if (valid.length) return { type: 'equation', variable: varName, roots: valid, lhs, rhs };
             }
 
             const locus = this._buildLocus(lhs, rhs, varName, scope);
             if (locus && !locus.scalar) {
                 const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
-                if (roots) return { type: 'equation', variable: varName, roots };
+                if (roots) return { type: 'equation', variable: varName, roots, lhs, rhs };
             }
             return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
         } catch { return null; }
@@ -5201,6 +5207,20 @@ class Komplexiti {
         return this._hslToRgb(hue, 1, light);
     }
 
+    // Whether c can be phase/modulus-coloured, and the lhs/rhs to build the colouring from:
+    // either a plain equality locus (curve) or a root-finding equation (isolated zeros) -
+    // never an inequality/compound-locus (region shading), where a colour wash would clash.
+    _colorableLhsRhs(c) {
+        if (!c.equationVar) return null;
+        if (c.type === 'locus' && c.locus && !c.locus.inequality) {
+            return { lhs: c.locus.lhs, rhs: c.locus.rhs };
+        }
+        if (c.type === 'equation' && c.equationLhs != null && c.equationRhs != null) {
+            return { lhs: c.equationLhs, rhs: c.equationRhs };
+        }
+        return null;
+    }
+
     // Rasterises the phase/modulus colouring for expression c into a small offscreen canvas,
     // to be scaled up by the caller. This is only rebuilt once per toggle/pan/zoom (never per
     // animation frame like the shading grids), so it can afford a much finer resolution than
@@ -5208,12 +5228,12 @@ class Komplexiti {
     // Returns null if the expression can't be coloured.
     _buildColorLayerCanvas(c) {
         if (typeof math === 'undefined') return null;
-        const locus = c.locus;
-        if (!locus || locus.inequality || !c.equationVar) return null;
+        const target = this._colorableLhsRhs(c);
+        if (!target) return null;
 
         let compiled;
         try {
-            compiled = this._extractColorTargetNode(locus.lhs, locus.rhs).compile();
+            compiled = this._extractColorTargetNode(target.lhs, target.rhs).compile();
         } catch { return null; }
 
         const varName = c.equationVar;
@@ -5285,7 +5305,7 @@ class Komplexiti {
     _drawColorLayer(ctx) {
         if (this.colorModeExpressionId === null) return;
         const c = this.expressions.find(e => e.id === this.colorModeExpressionId);
-        if (!c || c.type !== 'locus' || !c.locus || c.locus.inequality) {
+        if (!c || !this._colorableLhsRhs(c)) {
             this.colorModeExpressionId = null;
             this._colorLayerCache = null;
             return;
@@ -5345,7 +5365,7 @@ class Komplexiti {
 
         const colorToggleBtn = card.querySelector('.expr-color-toggle-btn');
         if (colorToggleBtn) {
-            const eligible = !!(c.enabled && c.type === 'locus' && c.locus && !c.locus.inequality);
+            const eligible = !!(c.enabled && this._colorableLhsRhs(c));
             colorToggleBtn.style.display = eligible ? '' : 'none';
             colorToggleBtn.classList.toggle('is-active', this.colorModeExpressionId === c.id);
         }
