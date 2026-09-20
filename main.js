@@ -1964,7 +1964,7 @@ class Komplexiti {
             const prevIdx   = this.expressionColors.indexOf(prevColor);
             color = this.expressionColors[(prevIdx + 1) % this.expressionColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, equationVar: null, locus: null, hasParseError: false };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, equationVar: null, locus: null, hasParseError: false };
         this.expressions.push(c);
         this.createExpressionUI(c, { skipFocus });
         this.saveExpressions();
@@ -2009,10 +2009,17 @@ class Komplexiti {
             </div>
             <div class="poles-info-container">
                 <div class="metadata-title-row">
-                    <span class="metadata-visibility-placeholder" aria-hidden="true"></span>
+                    <button class="metadata-visibility-toggle poles-visibility-toggle" aria-label="Toggle poles on diagram" title="Toggle poles on diagram" tabindex="-1"></button>
                     <div class="poles-info-title">Poles (undefined at)</div>
                 </div>
                 <div class="poles-equation-list"></div>
+            </div>
+            <div class="holes-info-container">
+                <div class="metadata-title-row">
+                    <button class="metadata-visibility-toggle holes-visibility-toggle" aria-label="Toggle holes on diagram" title="Toggle holes on diagram" tabindex="-1"></button>
+                    <div class="holes-info-title">Holes (removable)</div>
+                </div>
+                <div class="holes-equation-list"></div>
             </div>
             <div class="centre-info-container">
                 <div class="metadata-title-row">
@@ -2057,6 +2064,7 @@ class Komplexiti {
             c.type = 'value';
             c.roots = null;
             c.poles = null;
+            c.holes = null;
             c.equationVar = null;
             c.equationLhs = null;
             c.equationRhs = null;
@@ -2089,6 +2097,7 @@ class Komplexiti {
                     c.type = eq.type;
                     c.roots = eq.roots ?? null;
                     c.poles = eq.poles ?? null;
+                    c.holes = eq.holes ?? null;
                     c.equationVar = eq.variable;
                     c.equationLhs = eq.lhs ?? null;
                     c.equationRhs = eq.rhs ?? null;
@@ -2143,6 +2152,21 @@ class Komplexiti {
         const extremaToggleBtn = card.querySelector('.extrema-visibility-toggle');
         extremaToggleBtn.addEventListener('click', () => {
             c.showExtrema = (c.showExtrema !== false) ? false : true;
+            this.updateCardMetadata(c);
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        });
+
+        // Poles/holes markers are off by default to keep the diagram clean; opt in via the toggle.
+        const polesToggleBtn = card.querySelector('.poles-visibility-toggle');
+        polesToggleBtn.addEventListener('click', () => {
+            c.showPoles = (c.showPoles === true) ? false : true;
+            this.updateCardMetadata(c);
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        });
+
+        const holesToggleBtn = card.querySelector('.holes-visibility-toggle');
+        holesToggleBtn.addEventListener('click', () => {
+            c.showHoles = (c.showHoles === true) ? false : true;
             this.updateCardMetadata(c);
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -2415,6 +2439,7 @@ class Komplexiti {
                         c.type = eq.type;
                         c.roots = eq.roots ?? null;
                         c.poles = eq.poles ?? null;
+                        c.holes = eq.holes ?? null;
                         c.equationVar = eq.variable;
                         c.equationLhs = eq.lhs ?? null;
                         c.equationRhs = eq.rhs ?? null;
@@ -2433,6 +2458,7 @@ class Komplexiti {
                         c.type = 'value';
                         c.roots = null;
                         c.poles = null;
+                        c.holes = null;
                         c.equationVar = null;
                         c.locus = null;
                         c.compoundParts = null;
@@ -4718,7 +4744,8 @@ class Komplexiti {
             const hasDivision = /\//.test(hExpr);
             let coeffs = hasDivision ? null : this._extractPolynomialCoeffs(hExpr, varName, scope);
             let fromRationalize = false;
-            let poles = null; // points where the original (undivided) expression is undefined
+            let poles = null; // denominator roots where the expression genuinely blows up
+            let holes = null; // denominator roots that are also numerator roots - removable, finite limit
 
             // Discard Taylor series before trying rationalization: a degree-6 series for 1/(z+1)
             // looks non-null but fails the approximation check, blocking the rational path.
@@ -4735,7 +4762,16 @@ class Komplexiti {
                         fromRationalize = coeffs != null;
                         if (fromRationalize && rat.denominator) {
                             const denCoeffs = this._extractPolynomialCoeffs(rat.denominator.toString(), varName, scope);
-                            if (denCoeffs && denCoeffs.length >= 2) poles = this._solvePolynomial(denCoeffs);
+                            if (denCoeffs && denCoeffs.length >= 2) {
+                                const denRoots = this._solvePolynomial(denCoeffs).filter(p => isFinite(p.re) && isFinite(p.im));
+                                // math.rationalize does not cancel common factors, so a denominator root
+                                // that's also a numerator root is a hole (removable), not a true pole.
+                                holes = denRoots.filter(p => {
+                                    const v = this._cPolyEval(coeffs, p);
+                                    return Math.hypot(v.re, v.im) < 1e-6;
+                                });
+                                poles = denRoots.filter(p => !holes.some(h => Math.hypot(h.re - p.re, h.im - p.im) < 1e-9));
+                            }
                         }
                     }
                 } catch { /* not rationalizable */ }
@@ -4771,7 +4807,12 @@ class Komplexiti {
                 }
                 if (valid.length) {
                     const validPoles = poles?.filter(p => isFinite(p.re) && isFinite(p.im)) ?? null;
-                    return { type: 'equation', variable: varName, roots: valid, lhs, rhs, poles: validPoles?.length ? validPoles : null };
+                    const validHoles = holes?.filter(p => isFinite(p.re) && isFinite(p.im)) ?? null;
+                    return {
+                        type: 'equation', variable: varName, roots: valid, lhs, rhs,
+                        poles: validPoles?.length ? validPoles : null,
+                        holes: validHoles?.length ? validHoles : null,
+                    };
                 }
             }
 
@@ -5455,7 +5496,12 @@ class Komplexiti {
         const hideFoci = () => { if (fociContainer) fociContainer.classList.remove('visible'); if (fociList) fociList.innerHTML = ''; };
         const polesContainer = card.querySelector('.poles-info-container');
         const polesList      = card.querySelector('.poles-equation-list');
+        const polesToggle    = card.querySelector('.poles-visibility-toggle');
         const hidePoles = () => { if (polesContainer) polesContainer.classList.remove('visible'); if (polesList) polesList.innerHTML = ''; };
+        const holesContainer = card.querySelector('.holes-info-container');
+        const holesList      = card.querySelector('.holes-equation-list');
+        const holesToggle    = card.querySelector('.holes-visibility-toggle');
+        const hideHoles = () => { if (holesContainer) holesContainer.classList.remove('visible'); if (holesList) holesList.innerHTML = ''; };
         const centreContainer = card.querySelector('.centre-info-container');
         const centreList      = card.querySelector('.centre-equation-list');
         const centreToggle    = card.querySelector('.centre-visibility-toggle');
@@ -5465,7 +5511,7 @@ class Komplexiti {
         const extremaToggle    = card.querySelector('.extrema-visibility-toggle');
         const hideExtrema = () => { if (extremaContainer) extremaContainer.classList.remove('visible'); if (extremaList) extremaList.innerHTML = ''; };
 
-        const hide = () => { container.classList.remove('visible'); hideFoci(); hideCentre(); hideExtrema(); hidePoles(); };
+        const hide = () => { container.classList.remove('visible'); hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); };
 
         const colorToggleBtn = card.querySelector('.expr-color-toggle-btn');
         if (colorToggleBtn) {
@@ -5506,6 +5552,7 @@ class Komplexiti {
             const varName4Poles = c.equationVar || 'z';
             if (c.poles?.length) {
                 polesContainer.classList.add('visible');
+                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
                 polesList.innerHTML = '';
                 for (const pole of c.poles) {
                     if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
@@ -5516,6 +5563,20 @@ class Komplexiti {
                 }
             } else {
                 hidePoles();
+            }
+            if (c.holes?.length) {
+                holesContainer.classList.add('visible');
+                if (holesToggle) holesToggle.classList.toggle('is-hidden', c.showHoles !== true);
+                holesList.innerHTML = '';
+                for (const hole of c.holes) {
+                    if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
+                    const wrapper = document.createElement('div');
+                    wrapper.title = `${varName4Poles} = ${this.formatComplexPlain(hole.re, hole.im, 'cartesian')} is a removable discontinuity (the limit exists, but the expression is undefined there)`;
+                    wrapper.appendChild(makeMF(`${varName4Poles}=${this.formatComplexLatex(hole.re, hole.im, 'cartesian')}`, 17));
+                    holesList.appendChild(wrapper);
+                }
+            } else {
+                hideHoles();
             }
             const fmt = c.cardRootFmt || 'cartesian';
             const fmtNames  = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
@@ -5564,7 +5625,7 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             valueEl.textContent    = 'region';
-            hideFoci(); hideCentre(); hideExtrema(); hidePoles();
+            hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles();
             container.classList.add('visible');
 
         } else if (c.type === 'locus' && c.locus) {
@@ -5640,10 +5701,11 @@ class Komplexiti {
                 hideExtrema();
             }
             hidePoles();
+            hideHoles();
             container.classList.add('visible');
 
         } else if (c.type === 'value' && c.re !== null && c.im !== null) {
-            hideFoci(); hideCentre(); hideExtrema(); hidePoles();
+            hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles();
             container.classList.remove('is-equation');
             badge.textContent      = 'Constant';
             valueEl.style.display  = '';
@@ -6117,6 +6179,55 @@ class Komplexiti {
                         const ly = pt.y - dotR - 2;
                         ctx.fillStyle = c.color;
                         ctx.fillText(label, lx, ly);
+                        ctx.restore();
+                    }
+                }
+
+                // Poles (×, standard pole-zero-plot notation) and holes (open circle, matching
+                // Graphiti's convention for removable discontinuities) - hidden until opted in via toggle.
+                if (c.showPoles === true && c.poles?.length) {
+                    for (let k = 0; k < c.poles.length; k++) {
+                        const pole = c.poles[k];
+                        if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
+                        const pt = this.worldToScreen(pole.re, pole.im);
+                        const s  = dotR * 0.8;
+                        ctx.save();
+                        ctx.strokeStyle = c.color;
+                        ctx.lineWidth   = strokeWidth * 0.7;
+                        ctx.globalAlpha = 0.9;
+                        ctx.beginPath();
+                        ctx.moveTo(pt.x - s, pt.y - s);
+                        ctx.lineTo(pt.x + s, pt.y + s);
+                        ctx.moveTo(pt.x + s, pt.y - s);
+                        ctx.lineTo(pt.x - s, pt.y + s);
+                        ctx.stroke();
+                        if (c.equationVar) {
+                            ctx.font = `italic ${fSize - 4}px Arial`;
+                            ctx.fillStyle = c.color;
+                            ctx.fillText(`P${toSub(k + 1)}`, pt.x + s + 3, pt.y - s - 1);
+                        }
+                        ctx.restore();
+                    }
+                }
+                if (c.showHoles === true && c.holes?.length) {
+                    for (let k = 0; k < c.holes.length; k++) {
+                        const hole = c.holes[k];
+                        if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
+                        const pt = this.worldToScreen(hole.re, hole.im);
+                        ctx.save();
+                        ctx.strokeStyle = c.color;
+                        ctx.lineWidth   = strokeWidth * 0.7;
+                        ctx.globalAlpha = 0.9;
+                        ctx.fillStyle   = isLight ? '#fff' : '#1a1a1a';
+                        ctx.beginPath();
+                        ctx.arc(pt.x, pt.y, dotR * 0.75, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                        if (c.equationVar) {
+                            ctx.font = `italic ${fSize - 4}px Arial`;
+                            ctx.fillStyle = c.color;
+                            ctx.fillText(`H${toSub(k + 1)}`, pt.x + dotR + 3, pt.y - dotR - 1);
+                        }
                         ctx.restore();
                     }
                 }
@@ -7427,6 +7538,33 @@ class Komplexiti {
                     lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(dotR)}" fill="${color}" stroke="${dotOutline}" stroke-width="1.5"/>`);
                     if (c.equationVar) {
                         lines.push(`<text x="${sn(pt.x + dotR + 4)}" y="${sn(pt.y - dotR - 2)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize}px" font-style="italic" dominant-baseline="auto">${c.equationVar}${toSub(k + 1)}</text>`);
+                    }
+                }
+
+                // Poles (×) and holes (open circle) - only drawn if the user opted in via the card toggle.
+                if (c.showPoles === true && c.poles?.length) {
+                    for (let k = 0; k < c.poles.length; k++) {
+                        const pole = c.poles[k];
+                        if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
+                        const pt = this.worldToScreen(pole.re, pole.im);
+                        const s  = dotR * 0.8;
+                        lines.push(`<line x1="${sn(pt.x - s)}" y1="${sn(pt.y - s)}" x2="${sn(pt.x + s)}" y2="${sn(pt.y + s)}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
+                        lines.push(`<line x1="${sn(pt.x + s)}" y1="${sn(pt.y - s)}" x2="${sn(pt.x - s)}" y2="${sn(pt.y + s)}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
+                        if (c.equationVar) {
+                            lines.push(`<text x="${sn(pt.x + s + 3)}" y="${sn(pt.y - s - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize - 4}px" font-style="italic" dominant-baseline="auto">P${toSub(k + 1)}</text>`);
+                        }
+                    }
+                }
+                if (c.showHoles === true && c.holes?.length) {
+                    for (let k = 0; k < c.holes.length; k++) {
+                        const hole = c.holes[k];
+                        if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
+                        const pt = this.worldToScreen(hole.re, hole.im);
+                        const r  = dotR * 0.75;
+                        lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(r)}" fill="${bgColor}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}"/>`);
+                        if (c.equationVar) {
+                            lines.push(`<text x="${sn(pt.x + dotR + 3)}" y="${sn(pt.y - dotR - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize - 4}px" font-style="italic" dominant-baseline="auto">H${toSub(k + 1)}</text>`);
+                        }
                     }
                 }
                 continue;
