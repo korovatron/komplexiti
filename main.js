@@ -45,6 +45,11 @@ class Komplexiti {
         this.activeInfoExpressionId = null;
         this.infoFormat = 'cartesian';
 
+        // ---- Phase/modulus colour layer (only one expression at a time) ----
+        this.colorModeExpressionId = null;
+        this._colorLayerViewportSnapshot = null;
+        this._colorLayerCache = null;
+
         // ---- Input state ----
         this.input = {
             mouse: { down: false, x: 0, y: 0, velocityX: 0, velocityY: 0, lastMoveTime: 0 },
@@ -901,11 +906,22 @@ class Komplexiti {
 
     drawCanvas() {
         if (!this.viewport.width || !this.viewport.height) return;
+        // Any pan/zoom invalidates the colour layer (v1: static snapshot only).
+        if (this.colorModeExpressionId !== null) {
+            const snap = this._colorLayerViewportSnapshot;
+            const vp   = this.viewport;
+            if (!snap || snap.minX !== vp.minX || snap.maxX !== vp.maxX || snap.minY !== vp.minY || snap.maxY !== vp.maxY) {
+                this.colorModeExpressionId = null;
+                this._colorLayerCache = null;
+                this.updateAllCardMetadata();
+            }
+        }
         const ctx = this.ctx;
         const canvasBg = getComputedStyle(document.documentElement)
             .getPropertyValue('--canvas-bg').trim() || '#000000';
         ctx.fillStyle = canvasBg;
         ctx.fillRect(0, 0, this.viewport.width, this.viewport.height);
+        this._drawColorLayer(ctx);
         this.drawGrid();
         this.drawAxes();
         this.drawAxisLabels();
@@ -1983,6 +1999,7 @@ class Komplexiti {
                         <svg viewBox="0 0 16 16"><path d="M4 4L12 12M12 4L4 12"/></svg>
                     </button>
                     <div class="expr-color-dot" style="background:${c.color};opacity:${c.enabled ? 1 : 0.3}" title="Toggle visibility"></div>
+                    <button class="expr-color-toggle-btn" style="display:none" title="Colour plane by phase &amp; modulus" aria-label="Toggle phase/modulus colouring"></button>
                 </div>
             </div>
             <div class="expr-name-error"></div>
@@ -2031,6 +2048,11 @@ class Komplexiti {
 
         mathField.addEventListener('input', () => {
             c.latex = mathField.value;
+            // Editing the expression invalidates any active colour layer built from it.
+            if (this.colorModeExpressionId === c.id) {
+                this.colorModeExpressionId = null;
+                this._colorLayerCache = null;
+            }
             const raw = c.latex.trim();
             const assignment = raw ? this.parseAssignment(raw) : null;
             let hasError = false;
@@ -2125,11 +2147,32 @@ class Komplexiti {
 
         dot.addEventListener('click', () => {
             c.enabled = !c.enabled;
+            if (!c.enabled && this.colorModeExpressionId === c.id) {
+                this.colorModeExpressionId = null;
+                this._colorLayerCache = null;
+            }
             dot.style.opacity      = c.enabled ? '1' : '0.3';
             mathField.style.opacity = c.enabled ? '1' : '0.4';
             this.updateCardMetadata(c);
             this.saveExpressions();
             this._intersectionBadges = (this._intersectionBadges || []).filter(b => !b.exprIds?.includes(c.id));
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        });
+
+        const colorToggleBtn = card.querySelector('.expr-color-toggle-btn');
+        colorToggleBtn.addEventListener('click', () => {
+            if (this.colorModeExpressionId === c.id) {
+                this.colorModeExpressionId = null;
+                this._colorLayerCache = null;
+            } else {
+                this.colorModeExpressionId = c.id;
+                this._colorLayerCache = null;
+                this._colorLayerViewportSnapshot = {
+                    minX: this.viewport.minX, maxX: this.viewport.maxX,
+                    minY: this.viewport.minY, maxY: this.viewport.maxY
+                };
+            }
+            this.updateAllCardMetadata();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
@@ -2213,6 +2256,10 @@ class Komplexiti {
     }
 
     removeExpression(id) {
+        if (this.colorModeExpressionId === id) {
+            this.colorModeExpressionId = null;
+            this._colorLayerCache = null;
+        }
         const idx = this.expressions.findIndex(c => c.id === id);
         if (idx !== -1) this.expressions.splice(idx, 1);
         const card = document.querySelector(`.expr-card[data-const-id="${id}"]`);
@@ -5104,6 +5151,157 @@ class Komplexiti {
         return { modMin, modMax, modMinPt, modMaxPt, argMin: isFinite(argMin) ? argMin : null, argMax: isFinite(argMax) ? argMax : null, argMinPt, argMaxPt, fullArgRange: false, approximate: true };
     }
 
+    // The complex function to colour is always the signed difference lhs-rhs, whose zero-set is
+    // exactly the plotted locus curve. This must not special-case the equation's surface form
+    // (e.g. unwrapping a bare arg(...)/abs(...) side) - lhs-rhs is invariant under moving terms
+    // across the "=", so algebraically identical equations (e.g. "arg(f)=t" vs "arg(f)-t=0")
+    // always produce the same colouring, which a heuristic based on syntactic shape would not.
+    _extractColorTargetNode(lhs, rhs) {
+        return math.parse(`(${lhs}) - (${rhs})`);
+    }
+
+    // HSL (h,s,l each in [0,1]) -> [r,g,b] each in [0,255].
+    _hslToRgb(h, s, l) {
+        if (s === 0) { const v = Math.round(l * 255); return [v, v, v]; }
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        const hue2rgb = (t) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1 / 6) return p + (q - p) * 6 * t;
+            if (t < 1 / 2) return q;
+            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+            return p;
+        };
+        return [
+            Math.round(hue2rgb(h + 1 / 3) * 255),
+            Math.round(hue2rgb(h) * 255),
+            Math.round(hue2rgb(h - 1 / 3) * 255)
+        ];
+    }
+
+    // Domain-colouring map: hue = arg(w), lightness a smooth monotonic (non-periodic) function
+    // of |w| - dark near a zero, brighter further away, asymptoting towards white. Deliberately
+    // NOT banded/periodic (e.g. via log(|w|) mod 1): near a zero |w| shrinks continuously to 0,
+    // so periodic bands get infinitely thin and alias no matter how fine the sampling grid is.
+    // Lightness is mapped in log space (log1p(|w|)) rather than linear |w|: a function whose
+    // modulus grows quickly in the far field (e.g. quadratically) would otherwise force a huge
+    // linear scale that crushes a much smaller-magnitude region (e.g. inside a bounded curve)
+    // down to near-black. `scale` sets the log1p(|w|) at which lightness reaches 50% - callers
+    // should derive it from the actual range of |w| in view (see _buildColorLayerCanvas).
+    // Returns null at non-finite w (singularities), which the caller renders as transparent.
+    _complexToRGB(re, im, scale = 1) {
+        const m = Math.hypot(re, im);
+        if (!isFinite(m)) return null;
+        let hue = Math.atan2(im, re);
+        if (hue < 0) hue += 2 * Math.PI;
+        hue /= 2 * Math.PI;
+        const lm = Math.log1p(m);
+        const light = lm / (lm + scale);
+        return this._hslToRgb(hue, 1, light);
+    }
+
+    // Rasterises the phase/modulus colouring for expression c into a small offscreen canvas,
+    // to be scaled up by the caller. This is only rebuilt once per toggle/pan/zoom (never per
+    // animation frame like the shading grids), so it can afford a much finer resolution than
+    // those to avoid visible blockiness, especially near zeros/poles where colour changes fast.
+    // Returns null if the expression can't be coloured.
+    _buildColorLayerCanvas(c) {
+        if (typeof math === 'undefined') return null;
+        const locus = c.locus;
+        if (!locus || locus.inequality || !c.equationVar) return null;
+
+        let compiled;
+        try {
+            compiled = this._extractColorTargetNode(locus.lhs, locus.rhs).compile();
+        } catch { return null; }
+
+        const varName = c.equationVar;
+        const scope   = this.buildExpressionScope(c.id);
+        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
+        const spanX = maxX - minX, spanY = maxY - minY;
+        if (!(spanX > 0) || !(spanY > 0)) return null;
+
+        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width / 6)));
+        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6)));
+
+        const off = document.createElement('canvas');
+        off.width  = cols;
+        off.height = rows;
+        const offCtx = off.getContext('2d');
+        const imgData = offCtx.createImageData(cols, rows);
+        const data = imgData.data;
+
+        // Pass 1: evaluate every cell, recording log1p(|w|) (not raw |w|) so the lightness
+        // mapping below can adapt to this function's actual dynamic range in view without a
+        // fast-growing far field (e.g. quadratic) dominating the scale (see _complexToRGB).
+        const cellCount = cols * rows;
+        const reArr  = new Float64Array(cellCount);
+        const imArr  = new Float64Array(cellCount);
+        const lmArr  = new Float64Array(cellCount);
+        const valid  = new Uint8Array(cellCount);
+        for (let iy = 0; iy < rows; iy++) {
+            const y = maxY - (iy + 0.5) / rows * spanY;
+            for (let ix = 0; ix < cols; ix++) {
+                const x = minX + (ix + 0.5) / cols * spanX;
+                const cell = iy * cols + ix;
+                try {
+                    const val = this._mathValueToComplex(compiled.evaluate({ ...scope, [varName]: math.complex(x, y) }));
+                    const m = val ? Math.hypot(val.re, val.im) : NaN;
+                    if (val && isFinite(m)) {
+                        reArr[cell] = val.re;
+                        imArr[cell] = val.im;
+                        lmArr[cell] = Math.log1p(m);
+                        valid[cell] = 1;
+                    }
+                } catch { /* singularity at this sample - leave invalid/transparent */ }
+            }
+        }
+
+        // Pass 2: convert to colour. Use the 90th percentile of log1p(|w|) (not the raw max or
+        // even the raw 90th percentile) as the lightness reference scale - this stays robust
+        // both to a single near-pole outlier and to a far field that grows quickly with |z|.
+        const sortedLm = [];
+        for (let cell = 0; cell < cellCount; cell++) if (valid[cell]) sortedLm.push(lmArr[cell]);
+        sortedLm.sort((a, b) => a - b);
+        const p90 = sortedLm.length ? sortedLm[Math.floor(0.9 * (sortedLm.length - 1))] : 0;
+        const lightScale = p90 > 0 ? p90 / 3 : 1;
+        for (let cell = 0; cell < cellCount; cell++) {
+            const idx = cell * 4;
+            const rgb = valid[cell] ? this._complexToRGB(reArr[cell], imArr[cell], lightScale) : null;
+            if (rgb) {
+                data[idx] = rgb[0]; data[idx + 1] = rgb[1]; data[idx + 2] = rgb[2]; data[idx + 3] = 255;
+            } else {
+                data[idx + 3] = 0;
+            }
+        }
+        offCtx.putImageData(imgData, 0, 0);
+        return off;
+    }
+
+    // Draws the active phase/modulus colour layer (if any) beneath the grid/axes/expressions.
+    // v1 is a static snapshot: drawCanvas() clears colorModeExpressionId on any viewport change,
+    // so by the time this runs the cached canvas (if present) is always still valid.
+    _drawColorLayer(ctx) {
+        if (this.colorModeExpressionId === null) return;
+        const c = this.expressions.find(e => e.id === this.colorModeExpressionId);
+        if (!c || c.type !== 'locus' || !c.locus || c.locus.inequality) {
+            this.colorModeExpressionId = null;
+            this._colorLayerCache = null;
+            return;
+        }
+        if (!this._colorLayerCache || this._colorLayerCache.exprId !== c.id) {
+            this._colorLayerCache = { exprId: c.id, canvas: this._buildColorLayerCanvas(c) };
+        }
+        const layer = this._colorLayerCache.canvas;
+        if (!layer) return;
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(layer, 0, 0, layer.width, layer.height, 0, 0, this.viewport.width, this.viewport.height);
+        ctx.restore();
+    }
+
     getContrastingTextColor(hex) {
         if (!hex || typeof hex !== 'string') return '#fff';
         const h = hex.replace('#', '');
@@ -5144,6 +5342,13 @@ class Komplexiti {
         const hideExtrema = () => { if (extremaContainer) extremaContainer.classList.remove('visible'); if (extremaList) extremaList.innerHTML = ''; };
 
         const hide = () => { container.classList.remove('visible'); hideFoci(); hideCentre(); hideExtrema(); };
+
+        const colorToggleBtn = card.querySelector('.expr-color-toggle-btn');
+        if (colorToggleBtn) {
+            const eligible = !!(c.enabled && c.type === 'locus' && c.locus && !c.locus.inequality);
+            colorToggleBtn.style.display = eligible ? '' : 'none';
+            colorToggleBtn.classList.toggle('is-active', this.colorModeExpressionId === c.id);
+        }
 
         if (!c.latex || !c.latex.trim()) { hide(); return; }
         if (!c.enabled) { hide(); return; }

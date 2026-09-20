@@ -1185,6 +1185,35 @@
             transform: scale(1.1);
         }
 
+        .expr-color-toggle-btn {
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            border-radius: 5px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            flex-shrink: 0;
+            background: conic-gradient(from 0deg, #ff3b30, #ffcc00, #34c759, #00c7be, #007aff, #af52de, #ff3b30);
+            transition: all 0.2s ease;
+        }
+
+        .expr-color-toggle-btn.is-active {
+            border-color: #fff;
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+        }
+
+        @media (hover: hover) {
+            .expr-color-toggle-btn:hover {
+                border-color: rgba(255, 255, 255, 0.5);
+                transform: scale(1.1);
+            }
+        }
+
+        .expr-color-toggle-btn:active {
+            border-color: rgba(255, 255, 255, 0.5);
+            transform: scale(1.1);
+        }
+
         /* ------------------------------------------------------------------ */
         /* Card metadata (exact Graphiti styles)                                */
         /* ------------------------------------------------------------------ */
