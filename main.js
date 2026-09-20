@@ -2160,6 +2160,9 @@ class Komplexiti {
                 this.colorModeExpressionId = c.id;
             }
             this._colorLayerCache = null;
+            if (window.goatcounter?.count) {
+                window.goatcounter.count({ path: 'Komplexiti - Domain Colouring toggled', event: true });
+            }
             this.updateAllCardMetadata();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
