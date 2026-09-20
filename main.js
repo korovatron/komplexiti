@@ -3420,6 +3420,40 @@ class Komplexiti {
         return roots.length > 0 ? roots : null;
     }
 
+    // _tryBuildFastLocus matches fastPath shapes (circle, perpendicular bisector, etc.) by
+    // requiring a whole side of the equation to literally be a bare wrapper call, e.g.
+    // "abs(...)". Rearranging "|z-a|=|z-b|" to "|z-a|-|z-b|=0" defeats that match even though
+    // it's the same equation. If the constant side evaluates to 0, split the other side back
+    // into its two additive terms and retry - this recovers fastPath detection (and its
+    // foci/centre/extrema metadata) after this specific, common kind of rearrangement.
+    _tryFastLocusAfterDerearranging(lhs, rhs, varName, scope) {
+        const rhsZero = this._evaluateRealExpr(rhs, scope);
+        if (rhsZero !== null && Math.abs(rhsZero) < 1e-9) {
+            const split = this._splitAdditiveEquationSide(lhs);
+            if (split) {
+                const fastPath = this._tryBuildFastLocus(split.lhs, split.rhs, varName, scope);
+                if (fastPath) return fastPath;
+            }
+        }
+        const lhsZero = this._evaluateRealExpr(lhs, scope);
+        if (lhsZero !== null && Math.abs(lhsZero) < 1e-9) {
+            const split = this._splitAdditiveEquationSide(rhs);
+            if (split) return this._tryBuildFastLocus(split.lhs, split.rhs, varName, scope);
+        }
+        return null;
+    }
+
+    // If expr is exactly "A - B" or "A + B" at the top level, returns the two operands as the
+    // {lhs, rhs} pair of the two-sided equation it came from (A=B, or A=-B for a "+").
+    _splitAdditiveEquationSide(expr) {
+        let node;
+        try { node = math.parse(expr); } catch { return null; }
+        if (node.type !== 'OperatorNode' || !node.args || node.args.length !== 2) return null;
+        if (node.fn === 'subtract') return { lhs: node.args[0].toString(), rhs: node.args[1].toString() };
+        if (node.fn === 'add') return { lhs: node.args[0].toString(), rhs: `-(${node.args[1].toString()})` };
+        return null;
+    }
+
     _buildLocus(lhs, rhs, varName, scope) {
         const canonical = this._canonicaliseAffineArgEquation(lhs, rhs, varName, scope);
         if (canonical?.absInfo) {
@@ -3464,7 +3498,8 @@ class Komplexiti {
             lhs = canonical.lhs;
             rhs = canonical.rhs;
         }
-        const fastPath = this._tryBuildFastLocus(lhs, rhs, varName, scope);
+        const fastPath = this._tryBuildFastLocus(lhs, rhs, varName, scope) ??
+            this._tryFastLocusAfterDerearranging(lhs, rhs, varName, scope);
         if (fastPath) return fastPath;
 
         const lhsNode = math.parse(lhs);
