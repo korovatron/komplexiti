@@ -1297,7 +1297,7 @@ class Komplexiti {
 
         if (this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
             const y = crisp(this.worldToScreen(0, 0).y);
-            this.ctx.strokeStyle = colorModeActive ? (this._axisAverageColorAt(true, y) ?? themeAxisColor) : themeAxisColor;
+            this.ctx.strokeStyle = colorModeActive ? (this._axisRowAverageColor() ?? themeAxisColor) : themeAxisColor;
             this.ctx.beginPath();
             this.ctx.moveTo(0, y);
             this.ctx.lineTo(this.viewport.width, y);
@@ -1305,7 +1305,7 @@ class Komplexiti {
         }
         if (this.viewport.minX <= 0 && this.viewport.maxX >= 0) {
             const x = crisp(this.worldToScreen(0, 0).x);
-            this.ctx.strokeStyle = colorModeActive ? (this._axisAverageColorAt(false, x) ?? themeAxisColor) : themeAxisColor;
+            this.ctx.strokeStyle = colorModeActive ? (this._axisColAverageColor() ?? themeAxisColor) : themeAxisColor;
             this.ctx.beginPath();
             this.ctx.moveTo(x, 0);
             this.ctx.lineTo(x, this.viewport.height);
@@ -1330,7 +1330,6 @@ class Komplexiti {
                    : this.sizeMode === 'large'  ? 'bold 20px Arial'
                    : 'bold 16px Arial';
         this.ctx.font = font;
-        const halfFont = this.sizeMode === 'xlarge' ? 12 : this.sizeMode === 'large' ? 10 : 8;
 
         const labelSpacing = this.getLabelSpacing();
 
@@ -1348,7 +1347,7 @@ class Komplexiti {
                 const ly = axisY + 5;
                 if (ly < this.viewport.height - 15) {
                     if (colorModeActive) {
-                        curLabelColor = this._axisTextColorWithHysteresis(sp.x, ly + halfFont, curLabelColor) ?? labelColor;
+                        curLabelColor = this._axisTextColorWithHysteresis(this._axisRowLuminanceAtWorldX(x), curLabelColor) ?? labelColor;
                         this.ctx.fillStyle = curLabelColor;
                     }
                     this.ctx.fillText(this.formatNumber(x), sp.x, ly);
@@ -1370,7 +1369,7 @@ class Komplexiti {
                 const lx = axisX - 5;
                 if (lx > 15) {
                     if (colorModeActive) {
-                        curLabelColor = this._axisTextColorWithHysteresis(lx - halfFont, sp.y, curLabelColor) ?? labelColor;
+                        curLabelColor = this._axisTextColorWithHysteresis(this._axisColLuminanceAtWorldY(y), curLabelColor) ?? labelColor;
                         this.ctx.fillStyle = curLabelColor;
                     }
                     this.ctx.fillText(this.formatNumber(y), lx, sp.y);
@@ -1384,7 +1383,7 @@ class Komplexiti {
             const o = this.worldToScreen(0, 0);
             this.ctx.textAlign    = 'right';
             this.ctx.textBaseline = 'top';
-            if (colorModeActive) this.ctx.fillStyle = this._axisTextColorWithHysteresis(o.x - 5 - halfFont, o.y + 5 + halfFont, null) ?? labelColor;
+            if (colorModeActive) this.ctx.fillStyle = this._axisTextColorWithHysteresis(this._axisRowLuminanceAtWorldX(0), null) ?? labelColor;
             this.ctx.fillText('0', o.x - 5, o.y + 5);
         }
 
@@ -5815,7 +5814,10 @@ class Komplexiti {
         if (!this._colorLayerCache || this._colorLayerCache.exprId !== c.id) {
             const canvasLayer = this._buildColorLayerCanvas(c);
             this._colorLayerCache = canvasLayer
-                ? { exprId: c.id, canvas: canvasLayer, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY }
+                ? {
+                    exprId: c.id, canvas: canvasLayer, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY,
+                    axisSamples: this._buildAxisColorSamples(canvasLayer, vp.minX, vp.maxX, vp.minY, vp.maxY)
+                }
                 : null;
         } else {
             const cc = this._colorLayerCache;
@@ -5857,49 +5859,80 @@ class Komplexiti {
                 cc.minY === vp.minY && cc.maxY === vp.maxY) return; // already fresh
             const canvasLayer = this._buildColorLayerCanvas(c);
             this._colorLayerCache = canvasLayer
-                ? { exprId: c.id, canvas: canvasLayer, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY }
+                ? {
+                    exprId: c.id, canvas: canvasLayer, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY,
+                    axisSamples: this._buildAxisColorSamples(canvasLayer, vp.minX, vp.maxX, vp.minY, vp.maxY)
+                }
                 : null;
             if (this.currentState === this.states.APP) this.drawCanvas();
         }, 200);
     }
 
-    // Samples the average luminance along a full horizontal/vertical strip of the already-drawn
-    // canvas (colour layer + grid, drawn before axes in drawCanvas) and returns black or white -
-    // used so each axis stays legible as a whole against domain colouring, which can vary in hue
-    // along its length (unlike a single label, an axis line can't recolour partway along itself).
-    _axisAverageColorAt(isHorizontal, coord) {
+    // Precomputes cheap-to-query background samples for the axis lines/labels from the small
+    // offscreen colour-layer bitmap (not the full-resolution on-screen canvas) - called once
+    // whenever that bitmap is (re)built, so per-frame axis/label colouring during pan never needs
+    // an expensive getImageData readback of the live canvas (which was causing choppy panning).
+    _buildAxisColorSamples(canvasLayer, minX, maxX, minY, maxY) {
+        const cols = canvasLayer.width, rows = canvasLayer.height;
+        const offCtx = canvasLayer.getContext('2d');
+        const samples = { cols, rows, minX, maxX, minY, maxY, rowData: null, colData: null };
         try {
-            const data = isHorizontal
-                ? this.ctx.getImageData(0, Math.round(coord), this.viewport.width, 1).data
-                : this.ctx.getImageData(Math.round(coord), 0, 1, this.viewport.height).data;
-            let total = 0, count = 0;
-            for (let i = 0; i < data.length; i += 4) {
-                total += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
-                count++;
+            if (minY <= 0 && maxY >= 0) {
+                const iy = Math.min(rows - 1, Math.max(0, Math.round((maxY - 0) / (maxY - minY) * rows)));
+                samples.rowData = offCtx.getImageData(0, iy, cols, 1).data;
             }
-            if (!count) return null;
-            return (total / count / 255) > 0.5 ? '#000000' : '#ffffff';
-        } catch {
-            return null;
-        }
+            if (minX <= 0 && maxX >= 0) {
+                const ix = Math.min(cols - 1, Math.max(0, Math.round((0 - minX) / (maxX - minX) * cols)));
+                samples.colData = offCtx.getImageData(ix, 0, 1, rows).data;
+            }
+        } catch { /* leave null - callers fall back to theme colour */ }
+        return samples;
     }
 
-    // Samples the already-drawn canvas (colour layer + grid + axes, drawn before labels in
-    // drawCanvas) at a screen point and returns black or white for legible text there - used so
-    // axis numbers stay readable against domain colouring, where theme-based colour can vanish.
+    _luminance(data, i) {
+        return (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
+    }
+
+    // Average luminance across a cached sample strip, as black/white - used for whole axis lines
+    // (unlike a single label, an axis line can't recolour partway along its own length).
+    _axisRowAverageColor() {
+        const d = this._colorLayerCache?.axisSamples?.rowData;
+        if (!d) return null;
+        let total = 0, count = 0;
+        for (let i = 0; i < d.length; i += 4) { total += this._luminance(d, i); count++; }
+        return count ? (total / count > 0.5 ? '#000000' : '#ffffff') : null;
+    }
+    _axisColAverageColor() {
+        const d = this._colorLayerCache?.axisSamples?.colData;
+        if (!d) return null;
+        let total = 0, count = 0;
+        for (let i = 0; i < d.length; i += 4) { total += this._luminance(d, i); count++; }
+        return count ? (total / count > 0.5 ? '#000000' : '#ffffff') : null;
+    }
+
+    // Luminance at a given world position, looked up from the cached sample strip - null if the
+    // colour layer hasn't been built there yet (e.g. a newly-panned-into area before settling).
+    _axisRowLuminanceAtWorldX(x) {
+        const s = this._colorLayerCache?.axisSamples;
+        if (!s?.rowData || x < s.minX || x > s.maxX || s.maxX === s.minX) return null;
+        const ix = Math.min(s.cols - 1, Math.max(0, Math.round((x - s.minX) / (s.maxX - s.minX) * (s.cols - 1))));
+        return this._luminance(s.rowData, ix * 4);
+    }
+    _axisColLuminanceAtWorldY(y) {
+        const s = this._colorLayerCache?.axisSamples;
+        if (!s?.colData || y < s.minY || y > s.maxY || s.maxY === s.minY) return null;
+        const iy = Math.min(s.rows - 1, Math.max(0, Math.round((s.maxY - y) / (s.maxY - s.minY) * (s.rows - 1))));
+        return this._luminance(s.colData, iy * 4);
+    }
+
+    // Picks black/white for legible axis-number text from a precomputed luminance value.
     // `prevColor` (the previous label's colour along the same axis, or null for the first one)
     // adds hysteresis: only flips once luminance is clearly past the midpoint (not just over/under
     // 0.5), otherwise a background that lightens gradually along an axis (e.g. |gamma(z)| growing)
     // would flip adjacent labels between black/white right at the crossing point, which looks like
     // a sudden, unexplained jump even though the underlying colour barely changed there.
-    _axisTextColorWithHysteresis(px, py, prevColor) {
-        let data;
-        try {
-            data = this.ctx.getImageData(Math.round(px), Math.round(py), 1, 1).data;
-        } catch {
-            return null;
-        }
-        const luminance = (0.2126 * data[0] + 0.7152 * data[1] + 0.0722 * data[2]) / 255;
+    _axisTextColorWithHysteresis(luminance, prevColor) {
+        if (luminance === null) return null;
         if (prevColor === '#000000') return luminance < 0.42 ? '#ffffff' : '#000000';
         if (prevColor === '#ffffff') return luminance > 0.58 ? '#000000' : '#ffffff';
         return luminance > 0.5 ? '#000000' : '#ffffff';
