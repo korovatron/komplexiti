@@ -4722,10 +4722,43 @@ class Komplexiti {
         return valid.length > 0 ? valid : null;
     }
 
-    // Attaches numerically-found poles (approximate) to an equation result when the expression
-    // contains a division - used by fallback paths that can't go through math.rationalize.
+    // Scans the expression tree for division nodes whose denominator is a plain polynomial in
+    // varName (no nested division/abs/arg/conj, so it can't blow up under differentiation) and
+    // solves that denominator exactly. Catches poles like z=i in |z^2+conj(z)|/(z-i)=1, which the
+    // generic numeric grid search in _findPolesNumerically can miss when the non-holomorphic
+    // numerator (abs/conj) makes the |1/h| landscape around the pole asymmetric.
+    _findPolesFromDenominators(hExpr, varName, scope) {
+        let root;
+        try { root = math.parse(hExpr); } catch { return null; }
+        const denomStrings = new Set();
+        root.traverse(node => {
+            if (node.type !== 'OperatorNode' || node.op !== '/' || node.args?.length !== 2) return;
+            const denomStr = node.args[1].toString();
+            if (denomStr.includes(varName) && !/\//.test(denomStr) && !/(?<![a-zA-Z])(?:abs|arg|conj)\(/.test(denomStr)) {
+                denomStrings.add(denomStr);
+            }
+        });
+        if (!denomStrings.size) return null;
+
+        const poles = [];
+        for (const denomStr of denomStrings) {
+            const coeffs = this._extractPolynomialCoeffs(denomStr, varName, scope);
+            if (!coeffs || coeffs.length < 2) continue;
+            for (const r of this._solvePolynomial(coeffs)) {
+                if (!isFinite(r.re) || !isFinite(r.im)) continue;
+                if (!poles.some(p => Math.hypot(p.re - r.re, p.im - r.im) < 1e-6)) poles.push(r);
+            }
+        }
+        return poles.length ? poles : null;
+    }
+
+    // Attaches poles to an equation result when the expression contains a division - used by
+    // fallback paths that can't go through math.rationalize. Prefers exact denominator roots;
+    // falls back to the approximate numeric grid search only if that finds nothing.
     _withNumericPoles(result, lhs, rhs, varName, scope, hExpr) {
         if (!/\//.test(hExpr)) return result;
+        const exactPoles = this._findPolesFromDenominators(hExpr, varName, scope);
+        if (exactPoles) return { ...result, poles: exactPoles };
         const poles = this._findPolesNumerically(lhs, rhs, varName, scope);
         return poles ? { ...result, poles, polesApproximate: true } : result;
     }
