@@ -2310,7 +2310,12 @@ class Komplexiti {
     parseAssignment(latex) {
         const m = latex.match(/^([a-zA-Z][0-9]*)=(.+)$/);
         if (!m) return null;
-        return { name: m[1], valueLaTeX: m[2] };
+        const [, name, valueLaTeX] = m;
+        // If the "value" side references the name being defined, this isn't an assignment at
+        // all - it's an equation to solve for that name (e.g. "z=1/z" means z^2=1, not a
+        // circular definition). Let the equation-solving path handle it instead.
+        if (new RegExp(`\\b${name}\\b`).test(valueLaTeX)) return null;
+        return { name, valueLaTeX };
     }
 
     // Returns an error string if the name is invalid, or null if it is acceptable.
