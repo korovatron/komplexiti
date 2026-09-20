@@ -3389,8 +3389,11 @@ class Komplexiti {
         };
         const mag = v => v ? Math.hypot(v.re, v.im) : Infinity;
 
-        // Coarse grid over [-10,10]^2; step=0.5 keeps integer coordinates on exact grid points
-        const R = 10, step = 0.5, N = Math.ceil(2 * R / step);
+        // Grid over [-10,10]^2. step=0.2 (rather than a coarser value) matters: two roots
+        // closer together than the step can share a single coarse cell and only one gets
+        // found - verified via testing |z^2+conj(z)|/(z-i)=1, which has roots at z=0.424+i
+        // and z=0.826+i (spacing ~0.4) that a step=0.5 grid silently merges into one.
+        const R = 10, step = 0.2, N = Math.ceil(2 * R / step);
         const grid = [];
         for (let iy = 0; iy <= N; iy++) {
             grid.push([]);
@@ -3480,7 +3483,9 @@ class Komplexiti {
         };
         const mag = v => v ? Math.hypot(v.re, v.im) : Infinity;
 
-        const R = 10, step = 0.5, N = Math.ceil(2 * R / step);
+        // Matches the step used in _findComplexEquationRootsNumerically - see that comment
+        // for why a finer step matters (closely-spaced singularities can otherwise be merged).
+        const R = 10, step = 0.2, N = Math.ceil(2 * R / step);
         const grid = [];
         for (let iy = 0; iy <= N; iy++) {
             grid.push([]);
