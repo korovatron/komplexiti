@@ -63,7 +63,7 @@
                 "@type": "ItemPage",
                 "@id": "https://www.korovatron.co.uk/komplexiti/guide.html#webpage",
                 "name": "Komplexiti Guide | Complex Numbers &amp; Argand Diagram Tool for A Level Further Maths",
-                "description": "Comprehensive guide to Komplexiti, including the Argand diagram, complex number forms, polynomial root solving, loci including circles, perpendicular bisectors, half-lines and spirals, and phase/modulus colouring.",
+                "description": "Comprehensive guide to Komplexiti, including the Argand diagram, complex number forms, polynomial root solving, poles and holes in rational equations, loci including circles, perpendicular bisectors, half-lines and spirals, and phase/modulus colouring.",
                 "url": "https://www.korovatron.co.uk/komplexiti/guide.html",
                 "inLanguage": "en-GB",
                 "mainEntity": {
@@ -456,6 +456,16 @@
                         <p>Finding the nth roots of a complex number produces a set of equally spaced points around a circle centred at the origin. Komplexiti plots all these roots simultaneously so students can see the regular polygon pattern that emerges, connecting the algebra to the geometry.</p>
                     </div>
                 </details>
+                <details>
+                    <summary>Poles and holes in rational equations</summary>
+                    <div class="answer">
+                        <p>When an equation contains a fraction, such as (z − 1)(z + 2) / ((z − 1)(z + 3)) = 0, Komplexiti also detects any values of z where the denominator vanishes. These are marked separately on the Argand diagram: a pole (a genuine blow-up, where the expression is undefined and unbounded nearby) is shown as a cross, and a hole (a removable discontinuity, where the same factor also cancels in the numerator) is shown as an open circle.</p>
+                        <p>Poles and holes are listed on the expression's card alongside its roots, and each has its own toggle to show or hide its markers on the diagram, keeping the display uncluttered when they are not needed.</p>
+                    </div>
+                </details>
+                <figure class="screenshot-figure">
+                    <img src="images/screenshots/polesHoles.png" alt="Komplexiti showing poles marked with crosses and a hole marked with an open circle for a rational equation">
+                </figure>
             </section>
 
             <section class="content-section" id="loci">
