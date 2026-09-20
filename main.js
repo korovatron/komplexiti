@@ -1964,7 +1964,7 @@ class Komplexiti {
             const prevIdx   = this.expressionColors.indexOf(prevColor);
             color = this.expressionColors[(prevIdx + 1) % this.expressionColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, equationVar: null, locus: null, hasParseError: false };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, polesApproximate: false, equationVar: null, locus: null, hasParseError: false };
         this.expressions.push(c);
         this.createExpressionUI(c, { skipFocus });
         this.saveExpressions();
@@ -2065,6 +2065,7 @@ class Komplexiti {
             c.roots = null;
             c.poles = null;
             c.holes = null;
+            c.polesApproximate = false;
             c.equationVar = null;
             c.equationLhs = null;
             c.equationRhs = null;
@@ -2098,6 +2099,7 @@ class Komplexiti {
                     c.roots = eq.roots ?? null;
                     c.poles = eq.poles ?? null;
                     c.holes = eq.holes ?? null;
+                    c.polesApproximate = eq.polesApproximate ?? false;
                     c.equationVar = eq.variable;
                     c.equationLhs = eq.lhs ?? null;
                     c.equationRhs = eq.rhs ?? null;
@@ -2440,6 +2442,7 @@ class Komplexiti {
                         c.roots = eq.roots ?? null;
                         c.poles = eq.poles ?? null;
                         c.holes = eq.holes ?? null;
+                        c.polesApproximate = eq.polesApproximate ?? false;
                         c.equationVar = eq.variable;
                         c.equationLhs = eq.lhs ?? null;
                         c.equationRhs = eq.rhs ?? null;
@@ -2459,6 +2462,7 @@ class Komplexiti {
                         c.roots = null;
                         c.poles = null;
                         c.holes = null;
+                        c.polesApproximate = false;
                         c.equationVar = null;
                         c.locus = null;
                         c.compoundParts = null;
@@ -3447,6 +3451,92 @@ class Komplexiti {
             if (!isDup) roots.push({ re: x, im: y });
         }
         return roots.length > 0 ? roots : null;
+    }
+
+    // Numerically locates poles (points where lhs-rhs blows up to infinity) for equations that
+    // can't go through the symbolic rationalize path (e.g. abs/arg/conj expressions). A pole of
+    // h(z) = lhs-rhs is a zero of g(z) = 1/h(z), so this reuses the same grid + Newton approach
+    // as _findComplexEquationRootsNumerically but searches for zeros of the reciprocal.
+    // NOTE: this cannot detect holes - a removable singularity looks perfectly smooth to a
+    // numeric probe everywhere except at the single undefined point, which a grid scan won't land on.
+    _findPolesNumerically(lhs, rhs, varName, scope) {
+        const hExpr = `(${lhs}) - (${rhs})`;
+        let hNode;
+        try { hNode = math.parse(hExpr); } catch { return null; }
+
+        const evalH = (x, y) => {
+            try {
+                const v = hNode.evaluate({ ...scope, [varName]: math.complex(x, y) });
+                const h = typeof v === 'number' ? { re: v, im: 0 } : { re: v.re ?? 0, im: v.im ?? 0 };
+                return (isFinite(h.re) && isFinite(h.im)) ? h : null;
+            } catch { return null; }
+        };
+        const evalG = (x, y) => {
+            const h = evalH(x, y);
+            if (!h) return null;
+            const m2 = h.re * h.re + h.im * h.im;
+            if (m2 < 1e-12) return null; // h itself ~0 here - that's a root, not a pole
+            return { re: h.re / m2, im: -h.im / m2 };
+        };
+        const mag = v => v ? Math.hypot(v.re, v.im) : Infinity;
+
+        const R = 10, step = 0.5, N = Math.ceil(2 * R / step);
+        const grid = [];
+        for (let iy = 0; iy <= N; iy++) {
+            grid.push([]);
+            for (let ix = 0; ix <= N; ix++) {
+                const x = -R + ix * step, y = -R + iy * step;
+                grid[iy].push({ x, y, m: mag(evalG(x, y)) });
+            }
+        }
+
+        const candidates = [];
+        for (let iy = 1; iy < N; iy++) {
+            for (let ix = 1; ix < N; ix++) {
+                const m = grid[iy][ix].m;
+                if (!isFinite(m)) continue;
+                let isMin = true;
+                outer: for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        if ((grid[iy + dy]?.[ix + dx]?.m ?? Infinity) <= m) { isMin = false; break outer; }
+                    }
+                }
+                if (isMin) candidates.push(grid[iy][ix]);
+            }
+        }
+        if (candidates.length > 25) return null;
+
+        const poles = [];
+        for (const cand of candidates) {
+            let { x, y } = cand;
+            for (let iter = 0; iter < 50; iter++) {
+                const g = evalG(x, y);
+                if (!g || !isFinite(g.re) || !isFinite(g.im)) break;
+                if (Math.hypot(g.re, g.im) < 1e-10) break;
+                const d = 1e-6;
+                const gxp = evalG(x + d, y), gxm = evalG(x - d, y);
+                const gyp = evalG(x, y + d), gym = evalG(x, y - d);
+                if (!gxp || !gxm || !gyp || !gym) break;
+                const dRe_dx = (gxp.re - gxm.re) / (2 * d);
+                const dRe_dy = (gyp.re - gym.re) / (2 * d);
+                const dIm_dx = (gxp.im - gxm.im) / (2 * d);
+                const dIm_dy = (gyp.im - gym.im) / (2 * d);
+                const det = dRe_dx * dIm_dy - dRe_dy * dIm_dx;
+                if (Math.abs(det) < 1e-12) break;
+                const stepX = (g.re * dIm_dy - g.im * dRe_dy) / det;
+                const stepY = (g.im * dRe_dx - g.re * dIm_dx) / det;
+                x -= stepX; y -= stepY;
+                if (Math.hypot(stepX, stepY) < 1e-10) break;
+            }
+            // The pole itself is often numerically undefined (NaN/Infinity), so confirm the
+            // blow-up by probing a tiny distance away instead of evaluating exactly at (x, y).
+            const probe = evalH(x + 1e-6, y) ?? evalH(x, y + 1e-6);
+            if (!probe || Math.hypot(probe.re, probe.im) < 1e4) continue;
+            const isDup = poles.some(p => Math.hypot(p.re - x, p.im - y) < 1e-4);
+            if (!isDup) poles.push({ re: x, im: y });
+        }
+        return poles.length > 0 ? poles : null;
     }
 
     // _tryBuildFastLocus matches fastPath shapes (circle, perpendicular bisector, etc.) by
@@ -4632,6 +4722,14 @@ class Komplexiti {
         return valid.length > 0 ? valid : null;
     }
 
+    // Attaches numerically-found poles (approximate) to an equation result when the expression
+    // contains a division - used by fallback paths that can't go through math.rationalize.
+    _withNumericPoles(result, lhs, rhs, varName, scope, hExpr) {
+        if (!/\//.test(hExpr)) return result;
+        const poles = this._findPolesNumerically(lhs, rhs, varName, scope);
+        return poles ? { ...result, poles, polesApproximate: true } : result;
+    }
+
     // Main equation parser. Returns either finite roots or a drawable complex locus.
     parseEquation(rawLatex, ownId) {
         if (typeof math === 'undefined') return null;
@@ -4732,9 +4830,9 @@ class Komplexiti {
                         if (rew?.scalar) return { type: 'locus', variable: varName, roots: null, locus: rew };
                     }
                     const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
-                    if (roots) return { type: 'equation', variable: varName, roots, lhs, rhs };
+                    if (roots) return this._withNumericPoles({ type: 'equation', variable: varName, roots, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
                 }
-                return { type: 'locus', variable: varName, roots: null, locus };
+                return this._withNumericPoles({ type: 'locus', variable: varName, roots: null, locus }, lhs, rhs, varName, scope, hExpr);
             }
 
             // Skip direct differentiation for expressions containing a division: repeated
@@ -4786,9 +4884,9 @@ class Komplexiti {
                 if (locus && !locus.scalar) {
                     // Non-scalar difference (e.g. a^z = c) is generically isolated points, not a curve
                     const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
-                    if (roots) return { type: 'equation', variable: varName, roots, lhs, rhs };
+                    if (roots) return this._withNumericPoles({ type: 'equation', variable: varName, roots, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
                 }
-                return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
+                return locus ? this._withNumericPoles({ type: 'locus', variable: varName, roots: null, locus }, lhs, rhs, varName, scope, hExpr) : null;
             }
 
             let roots = this._solvePolynomial(coeffs);
@@ -4819,9 +4917,9 @@ class Komplexiti {
             const locus = this._buildLocus(lhs, rhs, varName, scope);
             if (locus && !locus.scalar) {
                 const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
-                if (roots) return { type: 'equation', variable: varName, roots, lhs, rhs };
+                if (roots) return this._withNumericPoles({ type: 'equation', variable: varName, roots, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
             }
-            return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
+            return locus ? this._withNumericPoles({ type: 'locus', variable: varName, roots: null, locus }, lhs, rhs, varName, scope, hExpr) : null;
         } catch { return null; }
     }
 
@@ -5546,10 +5644,11 @@ class Komplexiti {
             return mf;
         };
 
-        if (c.type === 'equation' && c.roots?.length) {
-            hideFoci(); hideCentre(); hideExtrema();
-            container.classList.add('is-equation');
-            const varName4Poles = c.equationVar || 'z';
+        // Populates the Poles/Holes card sections; shared by the equation and locus branches
+        // since both can carry poles/holes (e.g. arg((z-1)/(z+1))=pi/4 is a locus with a pole at z=-1).
+        const renderPolesHoles = () => {
+            const varName = c.equationVar || 'z';
+            const poleRel = c.polesApproximate ? '\\approx ' : '=';
             if (c.poles?.length) {
                 polesContainer.classList.add('visible');
                 if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
@@ -5557,8 +5656,9 @@ class Komplexiti {
                 for (const pole of c.poles) {
                     if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
                     const wrapper = document.createElement('div');
-                    wrapper.title = `${varName4Poles} = ${this.formatComplexPlain(pole.re, pole.im, 'cartesian')} makes the expression undefined (division by zero)`;
-                    wrapper.appendChild(makeMF(`${varName4Poles}=${this.formatComplexLatex(pole.re, pole.im, 'cartesian')}`, 17));
+                    const approxNote = c.polesApproximate ? ' (approximate)' : '';
+                    wrapper.title = `${varName} ${c.polesApproximate ? '\u2248' : '='} ${this.formatComplexPlain(pole.re, pole.im, 'cartesian')} makes the expression undefined (division by zero)${approxNote}`;
+                    wrapper.appendChild(makeMF(`${varName}${poleRel}${this.formatComplexLatex(pole.re, pole.im, 'cartesian')}`, 17));
                     polesList.appendChild(wrapper);
                 }
             } else {
@@ -5571,13 +5671,19 @@ class Komplexiti {
                 for (const hole of c.holes) {
                     if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
                     const wrapper = document.createElement('div');
-                    wrapper.title = `${varName4Poles} = ${this.formatComplexPlain(hole.re, hole.im, 'cartesian')} is a removable discontinuity (the limit exists, but the expression is undefined there)`;
-                    wrapper.appendChild(makeMF(`${varName4Poles}=${this.formatComplexLatex(hole.re, hole.im, 'cartesian')}`, 17));
+                    wrapper.title = `${varName} = ${this.formatComplexPlain(hole.re, hole.im, 'cartesian')} is a removable discontinuity (the limit exists, but the expression is undefined there)`;
+                    wrapper.appendChild(makeMF(`${varName}=${this.formatComplexLatex(hole.re, hole.im, 'cartesian')}`, 17));
                     holesList.appendChild(wrapper);
                 }
             } else {
                 hideHoles();
             }
+        };
+
+        if (c.type === 'equation' && c.roots?.length) {
+            hideFoci(); hideCentre(); hideExtrema();
+            container.classList.add('is-equation');
+            renderPolesHoles();
             const fmt = c.cardRootFmt || 'cartesian';
             const fmtNames  = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
             badge.textContent     = 'Root format (click to change)';
@@ -5634,6 +5740,7 @@ class Komplexiti {
             valueEl.style.display  = '';
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
+            renderPolesHoles();
             const fp = c.locus.fastPath;
             const lineLabel = fp?.kind === 'line' ? (fp.perpBisector ? 'perpendicular bisector' : 'line') : null;
             const joukowskiLabel = fp?.kind === 'joukowski' ? `Joukowski (n=${fp.n}, ${fp.cosSign === -1 ? '\u2212' : '+'})` : null;
@@ -5700,8 +5807,6 @@ class Komplexiti {
             } else {
                 hideExtrema();
             }
-            hidePoles();
-            hideHoles();
             container.classList.add('visible');
 
         } else if (c.type === 'value' && c.re !== null && c.im !== null) {
@@ -6122,10 +6227,61 @@ class Komplexiti {
 
         for (const c of this.expressions) {
             if (!c.enabled) continue;
+            const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
+
+            // Poles (×, standard pole-zero-plot notation) and holes (open circle, matching
+            // Graphiti's convention for removable discontinuities) - hidden until opted in via
+            // toggle. Applies to both 'equation' and 'locus' results (e.g. arg((z-1)/(z+1))=pi/4
+            // is a locus with a pole at z=-1), so this runs before the per-type branches below.
+            if (c.showPoles === true && c.poles?.length) {
+                for (let k = 0; k < c.poles.length; k++) {
+                    const pole = c.poles[k];
+                    if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
+                    const pt = this.worldToScreen(pole.re, pole.im);
+                    const s  = dotR * 0.8;
+                    ctx.save();
+                    ctx.strokeStyle = c.color;
+                    ctx.lineWidth   = strokeWidth * 0.7;
+                    ctx.globalAlpha = 0.9;
+                    ctx.beginPath();
+                    ctx.moveTo(pt.x - s, pt.y - s);
+                    ctx.lineTo(pt.x + s, pt.y + s);
+                    ctx.moveTo(pt.x + s, pt.y - s);
+                    ctx.lineTo(pt.x - s, pt.y + s);
+                    ctx.stroke();
+                    if (c.equationVar) {
+                        ctx.font = `italic ${fSize - 4}px Arial`;
+                        ctx.fillStyle = c.color;
+                        ctx.fillText(`P${toSub(k + 1)}`, pt.x + s + 3, pt.y - s - 1);
+                    }
+                    ctx.restore();
+                }
+            }
+            if (c.showHoles === true && c.holes?.length) {
+                for (let k = 0; k < c.holes.length; k++) {
+                    const hole = c.holes[k];
+                    if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
+                    const pt = this.worldToScreen(hole.re, hole.im);
+                    ctx.save();
+                    ctx.strokeStyle = c.color;
+                    ctx.lineWidth   = strokeWidth * 0.7;
+                    ctx.globalAlpha = 0.9;
+                    ctx.fillStyle   = isLight ? '#fff' : '#1a1a1a';
+                    ctx.beginPath();
+                    ctx.arc(pt.x, pt.y, dotR * 0.75, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                    if (c.equationVar) {
+                        ctx.font = `italic ${fSize - 4}px Arial`;
+                        ctx.fillStyle = c.color;
+                        ctx.fillText(`H${toSub(k + 1)}`, pt.x + dotR + 3, pt.y - dotR - 1);
+                    }
+                    ctx.restore();
+                }
+            }
 
             // --- Equation: draw each root using the global display mode ---
             if (c.type === 'equation' && c.roots?.length) {
-                const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
                 const org   = this.worldToScreen(0, 0);
                 for (let k = 0; k < c.roots.length; k++) {
                     const root = c.roots[k];
@@ -6179,55 +6335,6 @@ class Komplexiti {
                         const ly = pt.y - dotR - 2;
                         ctx.fillStyle = c.color;
                         ctx.fillText(label, lx, ly);
-                        ctx.restore();
-                    }
-                }
-
-                // Poles (×, standard pole-zero-plot notation) and holes (open circle, matching
-                // Graphiti's convention for removable discontinuities) - hidden until opted in via toggle.
-                if (c.showPoles === true && c.poles?.length) {
-                    for (let k = 0; k < c.poles.length; k++) {
-                        const pole = c.poles[k];
-                        if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
-                        const pt = this.worldToScreen(pole.re, pole.im);
-                        const s  = dotR * 0.8;
-                        ctx.save();
-                        ctx.strokeStyle = c.color;
-                        ctx.lineWidth   = strokeWidth * 0.7;
-                        ctx.globalAlpha = 0.9;
-                        ctx.beginPath();
-                        ctx.moveTo(pt.x - s, pt.y - s);
-                        ctx.lineTo(pt.x + s, pt.y + s);
-                        ctx.moveTo(pt.x + s, pt.y - s);
-                        ctx.lineTo(pt.x - s, pt.y + s);
-                        ctx.stroke();
-                        if (c.equationVar) {
-                            ctx.font = `italic ${fSize - 4}px Arial`;
-                            ctx.fillStyle = c.color;
-                            ctx.fillText(`P${toSub(k + 1)}`, pt.x + s + 3, pt.y - s - 1);
-                        }
-                        ctx.restore();
-                    }
-                }
-                if (c.showHoles === true && c.holes?.length) {
-                    for (let k = 0; k < c.holes.length; k++) {
-                        const hole = c.holes[k];
-                        if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
-                        const pt = this.worldToScreen(hole.re, hole.im);
-                        ctx.save();
-                        ctx.strokeStyle = c.color;
-                        ctx.lineWidth   = strokeWidth * 0.7;
-                        ctx.globalAlpha = 0.9;
-                        ctx.fillStyle   = isLight ? '#fff' : '#1a1a1a';
-                        ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, dotR * 0.75, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.stroke();
-                        if (c.equationVar) {
-                            ctx.font = `italic ${fSize - 4}px Arial`;
-                            ctx.fillStyle = c.color;
-                            ctx.fillText(`H${toSub(k + 1)}`, pt.x + dotR + 3, pt.y - dotR - 1);
-                        }
                         ctx.restore();
                     }
                 }
@@ -7517,6 +7624,34 @@ class Komplexiti {
             if (!c.enabled) continue;
             const color = exprColor(c);
 
+            // Poles (×) and holes (open circle) - only drawn if opted in via the card toggle.
+            // Applies to both 'equation' and 'locus' results, so this runs before the per-type branches.
+            if (c.showPoles === true && c.poles?.length) {
+                for (let k = 0; k < c.poles.length; k++) {
+                    const pole = c.poles[k];
+                    if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
+                    const pt = this.worldToScreen(pole.re, pole.im);
+                    const s  = dotR * 0.8;
+                    lines.push(`<line x1="${sn(pt.x - s)}" y1="${sn(pt.y - s)}" x2="${sn(pt.x + s)}" y2="${sn(pt.y + s)}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
+                    lines.push(`<line x1="${sn(pt.x + s)}" y1="${sn(pt.y - s)}" x2="${sn(pt.x - s)}" y2="${sn(pt.y + s)}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
+                    if (c.equationVar) {
+                        lines.push(`<text x="${sn(pt.x + s + 3)}" y="${sn(pt.y - s - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize - 4}px" font-style="italic" dominant-baseline="auto">P${toSub(k + 1)}</text>`);
+                    }
+                }
+            }
+            if (c.showHoles === true && c.holes?.length) {
+                for (let k = 0; k < c.holes.length; k++) {
+                    const hole = c.holes[k];
+                    if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
+                    const pt = this.worldToScreen(hole.re, hole.im);
+                    const r  = dotR * 0.75;
+                    lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(r)}" fill="${bgColor}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}"/>`);
+                    if (c.equationVar) {
+                        lines.push(`<text x="${sn(pt.x + dotR + 3)}" y="${sn(pt.y - dotR - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize - 4}px" font-style="italic" dominant-baseline="auto">H${toSub(k + 1)}</text>`);
+                    }
+                }
+            }
+
             // Equation roots
             if (c.type === 'equation' && c.roots?.length) {
                 const org = this.worldToScreen(0, 0);
@@ -7538,33 +7673,6 @@ class Komplexiti {
                     lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(dotR)}" fill="${color}" stroke="${dotOutline}" stroke-width="1.5"/>`);
                     if (c.equationVar) {
                         lines.push(`<text x="${sn(pt.x + dotR + 4)}" y="${sn(pt.y - dotR - 2)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize}px" font-style="italic" dominant-baseline="auto">${c.equationVar}${toSub(k + 1)}</text>`);
-                    }
-                }
-
-                // Poles (×) and holes (open circle) - only drawn if the user opted in via the card toggle.
-                if (c.showPoles === true && c.poles?.length) {
-                    for (let k = 0; k < c.poles.length; k++) {
-                        const pole = c.poles[k];
-                        if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
-                        const pt = this.worldToScreen(pole.re, pole.im);
-                        const s  = dotR * 0.8;
-                        lines.push(`<line x1="${sn(pt.x - s)}" y1="${sn(pt.y - s)}" x2="${sn(pt.x + s)}" y2="${sn(pt.y + s)}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
-                        lines.push(`<line x1="${sn(pt.x + s)}" y1="${sn(pt.y - s)}" x2="${sn(pt.x - s)}" y2="${sn(pt.y + s)}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
-                        if (c.equationVar) {
-                            lines.push(`<text x="${sn(pt.x + s + 3)}" y="${sn(pt.y - s - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize - 4}px" font-style="italic" dominant-baseline="auto">P${toSub(k + 1)}</text>`);
-                        }
-                    }
-                }
-                if (c.showHoles === true && c.holes?.length) {
-                    for (let k = 0; k < c.holes.length; k++) {
-                        const hole = c.holes[k];
-                        if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
-                        const pt = this.worldToScreen(hole.re, hole.im);
-                        const r  = dotR * 0.75;
-                        lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(r)}" fill="${bgColor}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}"/>`);
-                        if (c.equationVar) {
-                            lines.push(`<text x="${sn(pt.x + dotR + 3)}" y="${sn(pt.y - dotR - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize - 4}px" font-style="italic" dominant-baseline="auto">H${toSub(k + 1)}</text>`);
-                        }
                     }
                 }
                 continue;
