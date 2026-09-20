@@ -2268,7 +2268,12 @@ class Komplexiti {
                 conj: { mode: 'math', value: '\\overline{#?}' },
                 // Override MathLive's default "log" shortcut (which inserts a base subscript
                 // placeholder) so typed "log" matches the virtual keyboard button: base-10, no base.
-                log:  { mode: 'math', value: '\\log(#?)' }
+                log:  { mode: 'math', value: '\\log(#?)' },
+                // MathLive's default "gamma" shortcut inserts the lower-case symbol \gamma, which
+                // users won't think to capitalise even though the Gamma function is conventionally
+                // upper-case - so typed "gamma" (either case) inserts \Gamma directly.
+                gamma: { mode: 'math', value: '\\Gamma(#?)' },
+                Gamma: { mode: 'math', value: '\\Gamma(#?)' }
             };
             if (!c.enabled) mathField.style.opacity = '0.4';
             if (c.latex) {
@@ -2491,7 +2496,7 @@ class Komplexiti {
         }
         // Insert * where a variable/digit directly precedes a \function command (e.g. w\sqrt → w*\sqrt)
         // Negative lookbehind prevents matching a letter that is itself part of a LaTeX command (e.g. 'e' in \le\arctan).
-        e = e.replace(/(?<![a-zA-Z])([a-zA-Z0-9])\\(sqrt|sin|cos|tan|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan|arcsinh|arccosh|arctanh)\b/g, '$1*\\$2');
+        e = e.replace(/(?<![a-zA-Z])([a-zA-Z0-9])\\(sqrt|sin|cos|tan|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan|arcsinh|arccosh|arctanh|Gamma|gamma)\b/g, '$1*\\$2');
         for (let p = 0; p < 4; p++) {
             // Flatten exponent braces first so a braced exponent inside a \frac argument
             // (e.g. \frac{1}{z^{-2}}) doesn't defeat the [^{}]* nested-brace-free match below.
@@ -2532,6 +2537,9 @@ class Komplexiti {
         e = e.replace(/\\cos/g, 'cos').replace(/\\sin/g, 'sin').replace(/\\tan/g, 'tan');
         e = e.replace(/\\arg\b/g, 'arg');
         e = e.replace(/\\Re\b/g, 're').replace(/\\Im\b/g, 'im');
+        // Both \Gamma (capital) and \gamma (lowercase) map to the Gamma function - MathLive's
+        // symbol autocomplete renders lowercase \gamma by default when a user types "gamma".
+        e = e.replace(/\\(?:Gamma|gamma)\b/g, 'gamma');
         e = e.replace(/\\arcsin\b/g, 'asin').replace(/\\arccos\b/g, 'acos').replace(/\\arctan\b/g, 'atan');
         e = e.replace(/\\sinh\b/g, 'sinh').replace(/\\cosh\b/g, 'cosh').replace(/\\tanh\b/g, 'tanh');
         e = e.replace(/\\ln\b/g, 'log').replace(/\\log\b/g, 'log10');
@@ -2544,9 +2552,13 @@ class Komplexiti {
         if (!e) return '';
         // Split consecutive letters that aren't a known name into implicit products (user vars are single-letter only)
         // Also handles variable immediately followed by function name, e.g. zconj → z*conj
-        const knownFnNames = ['log10', 'sqrt', 'conj', 'arg', 'abs', 'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh', 'sinh', 'cosh', 'tanh', 'sin', 'cos', 'tan', 'exp', 'log', 're', 'im', 'pi', 'Infinity', 'NaN'];
+        const knownFnNames = ['log10', 'sqrt', 'conj', 'arg', 'abs', 'gamma', 'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh', 'sinh', 'cosh', 'tanh', 'sin', 'cos', 'tan', 'exp', 'log', 're', 'im', 'pi', 'Infinity', 'NaN'];
         e = e.replace(/[a-zA-Z]{2,}/g, m => {
-            if (/^(sqrt|log10|log|exp|abs|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|sinh|cosh|tanh|re|im|pi|Infinity|NaN)$/.test(m)) return m;
+            if (/^(sqrt|log10|log|exp|abs|gamma|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|sinh|cosh|tanh|re|im|pi|Infinity|NaN)$/.test(m)) return m;
+            // gamma is the only name users might plausibly capitalise (mathematical convention is
+            // Γ, upper-case) without realising the parser only recognises lower-case - accept either.
+            if (m === 'Gamma') return 'gamma';
+            if (m.length > 5 && m.endsWith('Gamma')) return m.slice(0, m.length - 5).split('').join('*') + '*gamma';
             for (const fn of knownFnNames) {
                 if (m.length > fn.length && m.endsWith(fn)) {
                     return m.slice(0, m.length - fn.length).split('').join('*') + '*' + fn;
@@ -2554,14 +2566,14 @@ class Komplexiti {
             }
             return m.split('').join('*');
         });
-        e = e.replace(/\bi\s*(sqrt|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|asinh|acosh|atanh|log|log10|exp|conj)\s*\(/g, 'i*$1(');
+        e = e.replace(/\bi\s*(sqrt|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|asinh|acosh|atanh|log|log10|exp|conj|gamma)\s*\(/g, 'i*$1(');
         e = e.replace(/\)\s*i\b/g, ')*i');
         // Insert * before a trailing imaginary i that directly follows a letter or digit (e.g. wi → w*i)
         e = e.replace(/([a-zA-Z0-9])i(?=[^a-zA-Z0-9]|$)/g, (match, prefix) => prefix === 'p' ? match : `${prefix}*i`);
         // Insert * where a letter directly precedes ( but is not the end of a known function name (e.g. z\left(...) → z*(...))
         e = e.replace(/([a-zA-Z])\(/g, (_, ch, offset, str) => {
             const tail = str.slice(Math.max(0, offset - 9), offset + 1);
-            return /(sqrt|log10|log|exp|abs|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|sinh|cosh|tanh|re|im)$/.test(tail)
+            return /(sqrt|log10|log|exp|abs|conj|arg|gamma|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|sinh|cosh|tanh|re|im)$/.test(tail)
                 ? `${ch}(` : `${ch}*(`;
         });
         return e;
@@ -2585,7 +2597,7 @@ class Komplexiti {
 
     // Returns the single free variable name in expr, or null if there are 0 or >1.
     _findEquationVariable(expr, scope) {
-        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'Infinity', 'NaN']);
+        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'gamma', 'Infinity', 'NaN']);
         const known    = new Set(Object.keys(scope));
         const free     = new Set();
         for (const [, id] of expr.matchAll(/(?<![a-zA-Z_])([a-zA-Z][a-zA-Z0-9]*)/g)) {
@@ -3373,8 +3385,13 @@ class Komplexiti {
 
     // For equations whose LHS-RHS is complex-valued (scalar=false), the zero set is
     // generically a finite set of isolated points, not a curve.  Sample a coarse grid,
-    // find local minima of |h|, and refine each via 2-D Newton.  Returns the roots, or
-    // null if there are too many candidates (suggesting a 1-D solution curve instead).
+    // find local minima of |h|, and refine each via 2-D Newton.  Returns an array of roots
+    // (empty if the search is confident none exist - e.g. gamma(z)=0, which has no zeros
+    // anywhere), or null if there are too many candidates (suggesting a 1-D solution curve
+    // instead). Callers must NOT treat an empty array the same as null: only null should fall
+    // back to the approximate contour tracer, otherwise a confidently-empty result still ends
+    // up drawing a spurious "locus" through points where |h| merely dips small without ever
+    // truly reaching zero.
     _findComplexEquationRootsNumerically(lhs, rhs, varName, scope) {
         const hExpr = `(${lhs}) - (${rhs})`;
         let hNode;
@@ -3453,7 +3470,7 @@ class Komplexiti {
             const isDup = roots.some(r => Math.hypot(r.re - x, r.im - y) < 1e-4);
             if (!isDup) roots.push({ re: x, im: y });
         }
-        return roots.length > 0 ? roots : null;
+        return roots;
     }
 
     // Numerically locates poles (points where lhs-rhs blows up to infinity) for equations that
@@ -3930,6 +3947,10 @@ class Komplexiti {
 
     _traceLocusSegments(locus, varName, ownId) {
         if (!locus || typeof math === 'undefined') return [];
+        // A non-scalar equation confirmed to have no roots has no curve either (see
+        // _resolveNonScalarEquation) - tracing it anyway would draw a spurious contour through
+        // points where |h| merely dips small without ever truly reaching zero.
+        if (locus.confirmedEmpty) return [];
         const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
         const spanX = maxX - minX;
         const spanY = maxY - minY;
@@ -4757,15 +4778,32 @@ class Komplexiti {
         return poles.length ? poles : null;
     }
 
-    // Attaches poles to an equation result when the expression contains a division - used by
-    // fallback paths that can't go through math.rationalize. Prefers exact denominator roots;
-    // falls back to the approximate numeric grid search only if that finds nothing.
+    // Attaches poles to an equation result when the expression contains a division, or gamma()
+    // (whose poles at 0, -1, -2, ... aren't a division at all) - used by fallback paths that
+    // can't go through math.rationalize. Prefers exact denominator roots; falls back to the
+    // approximate numeric grid search only if that finds nothing.
     _withNumericPoles(result, lhs, rhs, varName, scope, hExpr) {
-        if (!/\//.test(hExpr)) return result;
+        if (!/\//.test(hExpr) && !/(?<![a-zA-Z])gamma\(/.test(hExpr)) return result;
         const exactPoles = this._findPolesFromDenominators(hExpr, varName, scope);
         if (exactPoles) return { ...result, poles: exactPoles };
         const poles = this._findPolesNumerically(lhs, rhs, varName, scope);
         return poles ? { ...result, poles, polesApproximate: true } : result;
+    }
+
+    // Shared resolution for a non-scalar (complex-valued) equation once a candidate `locus` has
+    // already been built. Such equations generically have only isolated zeros (identity theorem),
+    // never a genuine curve, so a confidently-empty numeric search (an empty array, not null) must
+    // mark the locus as having no curve to trace, rather than letting the approximate contour
+    // tracer draw a spurious "locus" through points where |h| merely dips small without ever truly
+    // reaching zero (e.g. gamma(z)=0, which has no zeros anywhere but decays factorially between
+    // poles). The contour tracer is only still used when the search is genuinely ambiguous.
+    _resolveNonScalarEquation(lhs, rhs, varName, scope, hExpr, locus) {
+        const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
+        if (roots?.length) {
+            return this._withNumericPoles({ type: 'equation', variable: varName, roots, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+        }
+        if (roots) locus.confirmedEmpty = true;
+        return this._withNumericPoles({ type: 'locus', variable: varName, roots: null, locus }, lhs, rhs, varName, scope, hExpr);
     }
 
     // Main equation parser. Returns either finite roots or a drawable complex locus.
@@ -4849,9 +4887,9 @@ class Komplexiti {
             // General polynomial solver via symbolic differentiation
             const hExpr  = `(${lhs}) - (${rhs})`;
 
-            // abs/arg/conj expressions are never polynomials; skip symbolic differentiation to avoid hangs
+            // abs/arg/conj/gamma expressions are never polynomials; skip symbolic differentiation to avoid hangs
             // Use (?<![a-zA-Z]) rather than \b so that e.g. 2conj( is also matched (digits precede no \b).
-            if (/(?<![a-zA-Z])(?:abs|arg|conj)\(/.test(hExpr)) {
+            if (/(?<![a-zA-Z])(?:abs|arg|conj|gamma)\(/.test(hExpr)) {
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
                 if (!locus) return null;
                 // A non-scalar locus has a complex-valued LHS-RHS, so its zero set is
@@ -4867,8 +4905,7 @@ class Komplexiti {
                         const rew = this._buildLocus(`abs(${varName})^2`, `(${varName}) * (${lhs})`, varName, scope);
                         if (rew?.scalar) return { type: 'locus', variable: varName, roots: null, locus: rew };
                     }
-                    const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
-                    if (roots) return this._withNumericPoles({ type: 'equation', variable: varName, roots, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                    return this._resolveNonScalarEquation(lhs, rhs, varName, scope, hExpr, locus);
                 }
                 return this._withNumericPoles({ type: 'locus', variable: varName, roots: null, locus }, lhs, rhs, varName, scope, hExpr);
             }
@@ -4921,8 +4958,7 @@ class Komplexiti {
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
                 if (locus && !locus.scalar) {
                     // Non-scalar difference (e.g. a^z = c) is generically isolated points, not a curve
-                    const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
-                    if (roots) return this._withNumericPoles({ type: 'equation', variable: varName, roots, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                    return this._resolveNonScalarEquation(lhs, rhs, varName, scope, hExpr, locus);
                 }
                 return locus ? this._withNumericPoles({ type: 'locus', variable: varName, roots: null, locus }, lhs, rhs, varName, scope, hExpr) : null;
             }
@@ -4954,8 +4990,7 @@ class Komplexiti {
 
             const locus = this._buildLocus(lhs, rhs, varName, scope);
             if (locus && !locus.scalar) {
-                const roots = this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
-                if (roots) return this._withNumericPoles({ type: 'equation', variable: varName, roots, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                return this._resolveNonScalarEquation(lhs, rhs, varName, scope, hExpr, locus);
             }
             return locus ? this._withNumericPoles({ type: 'locus', variable: varName, roots: null, locus }, lhs, rhs, varName, scope, hExpr) : null;
         } catch { return null; }
