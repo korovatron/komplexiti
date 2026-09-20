@@ -1964,7 +1964,7 @@ class Komplexiti {
             const prevIdx   = this.expressionColors.indexOf(prevColor);
             color = this.expressionColors[(prevIdx + 1) % this.expressionColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, equationVar: null, locus: null, hasParseError: false };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, equationVar: null, locus: null, hasParseError: false };
         this.expressions.push(c);
         this.createExpressionUI(c, { skipFocus });
         this.saveExpressions();
@@ -2006,6 +2006,13 @@ class Komplexiti {
                     <div class="foci-info-title">Foci</div>
                 </div>
                 <div class="foci-equation-list"></div>
+            </div>
+            <div class="poles-info-container">
+                <div class="metadata-title-row">
+                    <span class="metadata-visibility-placeholder" aria-hidden="true"></span>
+                    <div class="poles-info-title">Poles (undefined at)</div>
+                </div>
+                <div class="poles-equation-list"></div>
             </div>
             <div class="centre-info-container">
                 <div class="metadata-title-row">
@@ -2049,6 +2056,7 @@ class Komplexiti {
             // Reset any previous equation state before re-evaluating
             c.type = 'value';
             c.roots = null;
+            c.poles = null;
             c.equationVar = null;
             c.equationLhs = null;
             c.equationRhs = null;
@@ -2080,6 +2088,7 @@ class Komplexiti {
                 if (eq) {
                     c.type = eq.type;
                     c.roots = eq.roots ?? null;
+                    c.poles = eq.poles ?? null;
                     c.equationVar = eq.variable;
                     c.equationLhs = eq.lhs ?? null;
                     c.equationRhs = eq.rhs ?? null;
@@ -2405,6 +2414,7 @@ class Komplexiti {
                     if (eq) {
                         c.type = eq.type;
                         c.roots = eq.roots ?? null;
+                        c.poles = eq.poles ?? null;
                         c.equationVar = eq.variable;
                         c.equationLhs = eq.lhs ?? null;
                         c.equationRhs = eq.rhs ?? null;
@@ -2422,6 +2432,7 @@ class Komplexiti {
                     } else {
                         c.type = 'value';
                         c.roots = null;
+                        c.poles = null;
                         c.equationVar = null;
                         c.locus = null;
                         c.compoundParts = null;
@@ -4498,6 +4509,14 @@ class Komplexiti {
         return [ this._cDiv({ re: -coeffs[0].re, im: -coeffs[0].im }, coeffs[1]) ];
     }
 
+    // Dispatches to the appropriate solver by degree; used for both equation roots and poles.
+    _solvePolynomial(coeffs) {
+        const deg = coeffs.length - 1;
+        if      (deg === 1) return this._solveLinear(coeffs);
+        else if (deg === 2) return this._solveQuadratic(coeffs);
+        else                return this._solveDurandKerner(coeffs);
+    }
+
     _solveQuadratic(coeffs) {
         const [a0, a1, a2] = coeffs;
         const disc  = this._cSub(this._cMul(a1, a1), this._cMul({ re: 4, im: 0 }, this._cMul(a0, a2)));
@@ -4699,6 +4718,7 @@ class Komplexiti {
             const hasDivision = /\//.test(hExpr);
             let coeffs = hasDivision ? null : this._extractPolynomialCoeffs(hExpr, varName, scope);
             let fromRationalize = false;
+            let poles = null; // points where the original (undivided) expression is undefined
 
             // Discard Taylor series before trying rationalization: a degree-6 series for 1/(z+1)
             // looks non-null but fails the approximation check, blocking the rational path.
@@ -4713,6 +4733,10 @@ class Komplexiti {
                     if (rat?.numerator) {
                         coeffs = this._extractPolynomialCoeffs(rat.numerator.toString(), varName, scope);
                         fromRationalize = coeffs != null;
+                        if (fromRationalize && rat.denominator) {
+                            const denCoeffs = this._extractPolynomialCoeffs(rat.denominator.toString(), varName, scope);
+                            if (denCoeffs && denCoeffs.length >= 2) poles = this._solvePolynomial(denCoeffs);
+                        }
                     }
                 } catch { /* not rationalizable */ }
             }
@@ -4731,11 +4755,7 @@ class Komplexiti {
                 return locus ? { type: 'locus', variable: varName, roots: null, locus } : null;
             }
 
-            const deg = coeffs.length - 1;
-            let roots;
-            if      (deg === 1) roots = this._solveLinear(coeffs);
-            else if (deg === 2) roots = this._solveQuadratic(coeffs);
-            else                roots = this._solveDurandKerner(coeffs);
+            let roots = this._solvePolynomial(coeffs);
 
             if (roots?.length) {
                 let valid = roots.filter(r => isFinite(r.re) && isFinite(r.im));
@@ -4749,7 +4769,10 @@ class Komplexiti {
                         } catch { return false; }
                     });
                 }
-                if (valid.length) return { type: 'equation', variable: varName, roots: valid, lhs, rhs };
+                if (valid.length) {
+                    const validPoles = poles?.filter(p => isFinite(p.re) && isFinite(p.im)) ?? null;
+                    return { type: 'equation', variable: varName, roots: valid, lhs, rhs, poles: validPoles?.length ? validPoles : null };
+                }
             }
 
             const locus = this._buildLocus(lhs, rhs, varName, scope);
@@ -5430,6 +5453,9 @@ class Komplexiti {
         const fociList      = card.querySelector('.foci-equation-list');
         const fociToggle    = card.querySelector('.foci-visibility-toggle');
         const hideFoci = () => { if (fociContainer) fociContainer.classList.remove('visible'); if (fociList) fociList.innerHTML = ''; };
+        const polesContainer = card.querySelector('.poles-info-container');
+        const polesList      = card.querySelector('.poles-equation-list');
+        const hidePoles = () => { if (polesContainer) polesContainer.classList.remove('visible'); if (polesList) polesList.innerHTML = ''; };
         const centreContainer = card.querySelector('.centre-info-container');
         const centreList      = card.querySelector('.centre-equation-list');
         const centreToggle    = card.querySelector('.centre-visibility-toggle');
@@ -5439,7 +5465,7 @@ class Komplexiti {
         const extremaToggle    = card.querySelector('.extrema-visibility-toggle');
         const hideExtrema = () => { if (extremaContainer) extremaContainer.classList.remove('visible'); if (extremaList) extremaList.innerHTML = ''; };
 
-        const hide = () => { container.classList.remove('visible'); hideFoci(); hideCentre(); hideExtrema(); };
+        const hide = () => { container.classList.remove('visible'); hideFoci(); hideCentre(); hideExtrema(); hidePoles(); };
 
         const colorToggleBtn = card.querySelector('.expr-color-toggle-btn');
         if (colorToggleBtn) {
@@ -5477,6 +5503,20 @@ class Komplexiti {
         if (c.type === 'equation' && c.roots?.length) {
             hideFoci(); hideCentre(); hideExtrema();
             container.classList.add('is-equation');
+            const varName4Poles = c.equationVar || 'z';
+            if (c.poles?.length) {
+                polesContainer.classList.add('visible');
+                polesList.innerHTML = '';
+                for (const pole of c.poles) {
+                    if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
+                    const wrapper = document.createElement('div');
+                    wrapper.title = `${varName4Poles} = ${this.formatComplexPlain(pole.re, pole.im, 'cartesian')} makes the expression undefined (division by zero)`;
+                    wrapper.appendChild(makeMF(`${varName4Poles}=${this.formatComplexLatex(pole.re, pole.im, 'cartesian')}`, 17));
+                    polesList.appendChild(wrapper);
+                }
+            } else {
+                hidePoles();
+            }
             const fmt = c.cardRootFmt || 'cartesian';
             const fmtNames  = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
             badge.textContent     = 'Root format (click to change)';
@@ -5524,7 +5564,7 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             valueEl.textContent    = 'region';
-            hideFoci(); hideCentre(); hideExtrema();
+            hideFoci(); hideCentre(); hideExtrema(); hidePoles();
             container.classList.add('visible');
 
         } else if (c.type === 'locus' && c.locus) {
@@ -5599,10 +5639,11 @@ class Komplexiti {
             } else {
                 hideExtrema();
             }
+            hidePoles();
             container.classList.add('visible');
 
         } else if (c.type === 'value' && c.re !== null && c.im !== null) {
-            hideFoci(); hideCentre(); hideExtrema();
+            hideFoci(); hideCentre(); hideExtrema(); hidePoles();
             container.classList.remove('is-equation');
             badge.textContent      = 'Constant';
             valueEl.style.display  = '';

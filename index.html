@@ -1347,6 +1347,35 @@
         }
         .extrema-visibility-toggle { border-color: #fff; }
 
+        .poles-info-container {
+            display: none;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 8px;
+            padding-top: 8px;
+        }
+        .poles-info-container.visible { display: flex; }
+        .poles-info-title {
+            display: inline-flex;
+            align-self: flex-start;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: 0.02em;
+            color: var(--function-badge-fg, #000);
+            background: var(--function-badge-bg, #4A90E2);
+            border-radius: 999px;
+            padding: 3px 8px;
+        }
+        .poles-equation-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            padding-left: 10px;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
         .shape-info-title {
             display: inline-flex;
             align-self: flex-start;
