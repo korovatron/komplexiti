@@ -47,7 +47,6 @@ class Komplexiti {
 
         // ---- Phase/modulus colour layer (only one expression at a time) ----
         this.colorModeExpressionId = null;
-        this._colorLayerViewportSnapshot = null;
         this._colorLayerCache = null;
 
         // ---- Input state ----
@@ -906,16 +905,6 @@ class Komplexiti {
 
     drawCanvas() {
         if (!this.viewport.width || !this.viewport.height) return;
-        // Any pan/zoom invalidates the colour layer (v1: static snapshot only).
-        if (this.colorModeExpressionId !== null) {
-            const snap = this._colorLayerViewportSnapshot;
-            const vp   = this.viewport;
-            if (!snap || snap.minX !== vp.minX || snap.maxX !== vp.maxX || snap.minY !== vp.minY || snap.maxY !== vp.maxY) {
-                this.colorModeExpressionId = null;
-                this._colorLayerCache = null;
-                this.updateAllCardMetadata();
-            }
-        }
         const ctx = this.ctx;
         const canvasBg = getComputedStyle(document.documentElement)
             .getPropertyValue('--canvas-bg').trim() || '#000000';
@@ -2167,15 +2156,10 @@ class Komplexiti {
         colorToggleBtn.addEventListener('click', () => {
             if (this.colorModeExpressionId === c.id) {
                 this.colorModeExpressionId = null;
-                this._colorLayerCache = null;
             } else {
                 this.colorModeExpressionId = c.id;
-                this._colorLayerCache = null;
-                this._colorLayerViewportSnapshot = {
-                    minX: this.viewport.minX, maxX: this.viewport.maxX,
-                    minY: this.viewport.minY, maxY: this.viewport.maxY
-                };
             }
+            this._colorLayerCache = null;
             this.updateAllCardMetadata();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -5335,8 +5319,11 @@ class Komplexiti {
     }
 
     // Draws the active phase/modulus colour layer (if any) beneath the grid/axes/expressions.
-    // v1 is a static snapshot: drawCanvas() clears colorModeExpressionId on any viewport change,
-    // so by the time this runs the cached canvas (if present) is always still valid.
+    // Like the locus shading grids, this is a world-space raster: while pan/zoom is in
+    // progress the cached bitmap (built for the *previous* viewport) is re-projected onto the
+    // current viewport via worldToScreen, so it pans/scales along with everything else rather
+    // than disappearing - newly-revealed areas are simply left blank until a fresh build lands.
+    // A debounced rebuild (_scheduleColorLayerRetrace) fires once pan/zoom settles.
     _drawColorLayer(ctx) {
         if (this.colorModeExpressionId === null) return;
         const c = this.expressions.find(e => e.id === this.colorModeExpressionId);
@@ -5345,16 +5332,56 @@ class Komplexiti {
             this._colorLayerCache = null;
             return;
         }
+        const vp = this.viewport;
         if (!this._colorLayerCache || this._colorLayerCache.exprId !== c.id) {
-            this._colorLayerCache = { exprId: c.id, canvas: this._buildColorLayerCanvas(c) };
+            const canvasLayer = this._buildColorLayerCanvas(c);
+            this._colorLayerCache = canvasLayer
+                ? { exprId: c.id, canvas: canvasLayer, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY }
+                : null;
+        } else {
+            const cc = this._colorLayerCache;
+            const fresh = cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY;
+            if (!fresh) this._scheduleColorLayerRetrace();
         }
-        const layer = this._colorLayerCache.canvas;
-        if (!layer) return;
+        const cache = this._colorLayerCache;
+        if (!cache?.canvas) return;
+
+        // Map the world rectangle the bitmap was built for onto the *current* viewport.
+        const topLeft     = this.worldToScreen(cache.minX, cache.maxY);
+        const bottomRight  = this.worldToScreen(cache.maxX, cache.minY);
+        const destW = bottomRight.x - topLeft.x;
+        const destH = bottomRight.y - topLeft.y;
+        if (!(destW > 0) || !(destH > 0)) return;
+
         ctx.save();
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(layer, 0, 0, layer.width, layer.height, 0, 0, this.viewport.width, this.viewport.height);
+        ctx.drawImage(cache.canvas, 0, 0, cache.canvas.width, cache.canvas.height, topLeft.x, topLeft.y, destW, destH);
         ctx.restore();
+    }
+
+    // Debounced rebuild of the colour layer once pan/zoom settles, mirroring _scheduleLocusRetrace.
+    _scheduleColorLayerRetrace() {
+        if (this._colorLayerRetraceTimer) clearTimeout(this._colorLayerRetraceTimer);
+        this._colorLayerRetraceTimer = setTimeout(() => {
+            this._colorLayerRetraceTimer = null;
+            if (this.colorModeExpressionId === null) return;
+            const c = this.expressions.find(e => e.id === this.colorModeExpressionId);
+            if (!c || !this._colorableLhsRhs(c)) {
+                this.colorModeExpressionId = null;
+                this._colorLayerCache = null;
+                return;
+            }
+            const vp = this.viewport;
+            const cc = this._colorLayerCache;
+            if (cc && cc.exprId === c.id && cc.minX === vp.minX && cc.maxX === vp.maxX &&
+                cc.minY === vp.minY && cc.maxY === vp.maxY) return; // already fresh
+            const canvasLayer = this._buildColorLayerCanvas(c);
+            this._colorLayerCache = canvasLayer
+                ? { exprId: c.id, canvas: canvasLayer, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY }
+                : null;
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        }, 200);
     }
 
     getContrastingTextColor(hex) {
