@@ -7757,6 +7757,49 @@ class Komplexiti {
         lines.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${sn(exportFrame.width)}" height="${sn(exportFrame.height)}" viewBox="${sn(exportFrame.x)} ${sn(exportFrame.y)} ${sn(exportFrame.width)} ${sn(exportFrame.height)}">`);
         lines.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="${bgColor}"/>`);
 
+        // Domain colouring layer - drawn beneath grid/axes/expressions, matching drawCanvas's
+        // _drawColorLayer ordering. Skipped for black-and-white export since the layer is
+        // inherently a colour (phase/modulus) map.
+        // Restored after axis rendering below - axis colour picking reuses the live instance
+        // helpers (_axisRowAverageColor etc.), which read this._colorLayerCache.
+        const originalColorLayerCache = this._colorLayerCache;
+        let colorModeActiveForExport = false;
+        if (!allBlack && this.colorModeExpressionId !== null) {
+            const cExpr = this.expressions.find(e => e.id === this.colorModeExpressionId);
+            if (cExpr?.enabled) {
+                try {
+                    const cached = this._colorLayerCache?.exprId === cExpr.id ? this._colorLayerCache : null;
+                    const canvasLayer = cached?.canvas || this._buildColorLayerCanvas(cExpr);
+                    if (canvasLayer) {
+                        const vp = this.viewport;
+                        const minX = cached ? cached.minX : vp.minX, maxX = cached ? cached.maxX : vp.maxX;
+                        const minY = cached ? cached.minY : vp.minY, maxY = cached ? cached.maxY : vp.maxY;
+                        if (!cached) {
+                            this._colorLayerCache = {
+                                exprId: cExpr.id, canvas: canvasLayer, minX, maxX, minY, maxY,
+                                axisSamples: this._buildAxisColorSamples(canvasLayer, minX, maxX, minY, maxY)
+                            };
+                        }
+                        colorModeActiveForExport = true;
+                        const topLeft     = this.worldToScreen(minX, maxY);
+                        const bottomRight = this.worldToScreen(maxX, minY);
+                        const destW = bottomRight.x - topLeft.x;
+                        const destH = bottomRight.y - topLeft.y;
+                        if (destW > 0 && destH > 0) {
+                            const tmp = document.createElement('canvas');
+                            tmp.width  = W;
+                            tmp.height = H;
+                            const tctx = tmp.getContext('2d');
+                            tctx.imageSmoothingEnabled = true;
+                            tctx.imageSmoothingQuality  = 'high';
+                            tctx.drawImage(canvasLayer, 0, 0, canvasLayer.width, canvasLayer.height, topLeft.x, topLeft.y, destW, destH);
+                            lines.push(`<image x="0" y="0" width="${W}" height="${H}" href="${tmp.toDataURL('image/png')}" preserveAspectRatio="none"/>`);
+                        }
+                    }
+                } catch { /* cross-origin guard, mirrors inequality shading */ }
+            }
+        }
+
         // Grid
         if (options.gridMode !== 'none') {
             const labelSpacing = this.getLabelSpacing();
@@ -7795,15 +7838,18 @@ class Komplexiti {
             if (MLines.length) lines.push(MLines.join('\n'));
         }
 
-        // Axes
+        // Axes - like the canvas, pick black/white per axis from the colour layer once domain
+        // colouring is active (theme colour has no real meaning against an arbitrary hue map).
         if (options.includeAxes) {
             if (this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
                 const y = this.worldToScreen(0, 0).y;
-                lines.push(`<line x1="0" y1="${sn(y)}" x2="${W}" y2="${sn(y)}" stroke="${axisColor}" stroke-width="2.2" vector-effect="non-scaling-stroke"/>`);
+                const rowColor = colorModeActiveForExport ? (this._axisRowAverageColor() ?? axisColor) : axisColor;
+                lines.push(`<line x1="0" y1="${sn(y)}" x2="${W}" y2="${sn(y)}" stroke="${rowColor}" stroke-width="2.2" vector-effect="non-scaling-stroke"/>`);
             }
             if (this.viewport.minX <= 0 && this.viewport.maxX >= 0) {
                 const x = this.worldToScreen(0, 0).x;
-                lines.push(`<line x1="${sn(x)}" y1="0" x2="${sn(x)}" y2="${H}" stroke="${axisColor}" stroke-width="2.2" vector-effect="non-scaling-stroke"/>`);
+                const colColor = colorModeActiveForExport ? (this._axisColAverageColor() ?? axisColor) : axisColor;
+                lines.push(`<line x1="${sn(x)}" y1="0" x2="${sn(x)}" y2="${H}" stroke="${colColor}" stroke-width="2.2" vector-effect="non-scaling-stroke"/>`);
             }
         }
 
@@ -7828,36 +7874,46 @@ class Komplexiti {
 
             if (this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
                 const axisY = this.worldToScreen(0, 0).y;
+                const tickColor = colorModeActiveForExport ? (this._axisRowAverageColor() ?? axisColor) : axisColor;
                 const x0 = Math.floor(this.viewport.minX / labelSpacing) * labelSpacing;
+                let curLabelColor = null;
                 for (let x = x0; x <= this.viewport.maxX; x += labelSpacing) {
                     if (Math.abs(x) < 1e-9) continue;
                     if (!shouldRender(x, labelSpacing)) continue;
                     const sp = this.worldToScreen(x, 0);
                     if (sp.x < 20 || sp.x > W - 20) continue;
                     if (includeTicks) {
-                        tLines.push(`<line x1="${sn(sp.x)}" y1="${sn(axisY)}" x2="${sn(sp.x)}" y2="${sn(axisY + tickLen)}" stroke="${axisColor}" stroke-width="${tickSW}" vector-effect="non-scaling-stroke"/>`);
+                        tLines.push(`<line x1="${sn(sp.x)}" y1="${sn(axisY)}" x2="${sn(sp.x)}" y2="${sn(axisY + tickLen)}" stroke="${tickColor}" stroke-width="${tickSW}" vector-effect="non-scaling-stroke"/>`);
                     }
                     const ly = axisY + xLabelOffY;
                     if (ly < H - 6) {
-                        tLines.push(`<text x="${sn(sp.x)}" y="${sn(ly)}" fill="${labelColor}" ${fontAttr} text-anchor="middle" dominant-baseline="alphabetic">${this.formatNumber(x)}</text>`);
+                        const fillC = colorModeActiveForExport
+                            ? (curLabelColor = this._axisTextColorWithHysteresis(this._axisRowLuminanceAtWorldX(x), curLabelColor) ?? labelColor)
+                            : labelColor;
+                        tLines.push(`<text x="${sn(sp.x)}" y="${sn(ly)}" fill="${fillC}" ${fontAttr} text-anchor="middle" dominant-baseline="alphabetic">${this.formatNumber(x)}</text>`);
                     }
                 }
             }
 
             if (this.viewport.minX <= 0 && this.viewport.maxX >= 0) {
                 const axisX = this.worldToScreen(0, 0).x;
+                const tickColor = colorModeActiveForExport ? (this._axisColAverageColor() ?? axisColor) : axisColor;
                 const y0 = Math.floor(this.viewport.minY / labelSpacing) * labelSpacing;
+                let curLabelColor = null;
                 for (let y = y0; y <= this.viewport.maxY; y += labelSpacing) {
                     if (Math.abs(y) < 1e-9) continue;
                     if (!shouldRender(y, labelSpacing)) continue;
                     const sp = this.worldToScreen(0, y);
                     if (sp.y < 20 || sp.y > H - 20) continue;
                     if (includeTicks) {
-                        tLines.push(`<line x1="${sn(axisX)}" y1="${sn(sp.y)}" x2="${sn(axisX - tickLen)}" y2="${sn(sp.y)}" stroke="${axisColor}" stroke-width="${tickSW}" vector-effect="non-scaling-stroke"/>`);
+                        tLines.push(`<line x1="${sn(axisX)}" y1="${sn(sp.y)}" x2="${sn(axisX - tickLen)}" y2="${sn(sp.y)}" stroke="${tickColor}" stroke-width="${tickSW}" vector-effect="non-scaling-stroke"/>`);
                     }
                     const lx = axisX - yLabelOffX;
                     if (lx > 15) {
-                        tLines.push(`<text x="${sn(lx)}" y="${sn(sp.y)}" fill="${labelColor}" ${fontAttr} text-anchor="end" dominant-baseline="middle">${this.formatNumber(y)}</text>`);
+                        const fillC = colorModeActiveForExport
+                            ? (curLabelColor = this._axisTextColorWithHysteresis(this._axisColLuminanceAtWorldY(y), curLabelColor) ?? labelColor)
+                            : labelColor;
+                        tLines.push(`<text x="${sn(lx)}" y="${sn(sp.y)}" fill="${fillC}" ${fontAttr} text-anchor="end" dominant-baseline="middle">${this.formatNumber(y)}</text>`);
                     }
                 }
             }
@@ -7865,7 +7921,10 @@ class Komplexiti {
             if (this.viewport.minX <= 0 && this.viewport.maxX >= 0 &&
                 this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
                 const o = this.worldToScreen(0, 0);
-                tLines.push(`<text x="${sn(o.x - yLabelOffX)}" y="${sn(o.y + xLabelOffY)}" fill="${labelColor}" ${fontAttr} text-anchor="end" dominant-baseline="alphabetic">0</text>`);
+                const originFill = colorModeActiveForExport
+                    ? (this._axisTextColorWithHysteresis(this._axisRowLuminanceAtWorldX(0), null) ?? labelColor)
+                    : labelColor;
+                tLines.push(`<text x="${sn(o.x - yLabelOffX)}" y="${sn(o.y + xLabelOffY)}" fill="${originFill}" ${fontAttr} text-anchor="end" dominant-baseline="alphabetic">0</text>`);
             }
 
             const titleFontAttr = `font-family="Arial, sans-serif" font-size="${fSize - 2}px" font-weight="bold"`;
@@ -7880,6 +7939,10 @@ class Komplexiti {
 
             if (tLines.length) lines.push(tLines.join('\n'));
         }
+
+        // Restore the live colour-layer cache so this export-only lookup doesn't leak into
+        // subsequent on-screen redraws.
+        this._colorLayerCache = originalColorLayerCache;
 
         // Helper: convert chains of world-coord points to SVG path d attribute
         const chainsToDPath = (chains) => {
