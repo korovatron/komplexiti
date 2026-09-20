@@ -4560,8 +4560,11 @@ class Komplexiti {
             const rat = math.rationalize(hSub, {}, true);
             if (rat?.numerator) coeffs = this._extractPolynomialCoeffs(rat.numerator.toString(), u, scope);
         } catch {}
-        if (!coeffs || coeffs.length < 2)
-            coeffs = this._extractPolynomialCoeffs(hSub, u, scope);
+        if (!coeffs || coeffs.length < 2) {
+            // Skip if hSub still contains a division: repeated differentiation of a rational
+            // expression grows exponentially and can freeze the tab (see parseEquation).
+            if (!/\//.test(hSub)) coeffs = this._extractPolynomialCoeffs(hSub, u, scope);
+        }
         if (!coeffs || coeffs.length < 2) return null;
         const deg = coeffs.length - 1;
         let uRoots;
@@ -4689,7 +4692,12 @@ class Komplexiti {
                 return { type: 'locus', variable: varName, roots: null, locus };
             }
 
-            let coeffs = this._extractPolynomialCoeffs(hExpr, varName, scope);
+            // Skip direct differentiation for expressions containing a division: repeated
+            // quotient-rule differentiation causes the expression tree (and denominator power)
+            // to grow exponentially with each derivative, which can freeze the tab before the
+            // maxDeg loop even finishes. Rational expressions go straight to the rationalize path below.
+            const hasDivision = /\//.test(hExpr);
+            let coeffs = hasDivision ? null : this._extractPolynomialCoeffs(hExpr, varName, scope);
             let fromRationalize = false;
 
             // Discard Taylor series before trying rationalization: a degree-6 series for 1/(z+1)
