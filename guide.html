@@ -63,7 +63,7 @@
                 "@type": "ItemPage",
                 "@id": "https://www.korovatron.co.uk/komplexiti/guide.html#webpage",
                 "name": "Komplexiti Guide | Complex Numbers &amp; Argand Diagram Tool for A Level Further Maths",
-                "description": "Comprehensive guide to Komplexiti, including the Argand diagram, complex number forms, polynomial root solving, and loci including circles, perpendicular bisectors, half-lines and spirals.",
+                "description": "Comprehensive guide to Komplexiti, including the Argand diagram, complex number forms, polynomial root solving, loci including circles, perpendicular bisectors, half-lines and spirals, and phase/modulus colouring.",
                 "url": "https://www.korovatron.co.uk/komplexiti/guide.html",
                 "inLanguage": "en-GB",
                 "mainEntity": {
@@ -314,7 +314,7 @@
         }
 
         .screenshot-figure {
-            margin: 16px 0 0;
+            margin: 16px 0;
             border: 1px solid var(--border);
             border-radius: 8px;
             overflow: hidden;
@@ -488,6 +488,36 @@
                 </details>
                 <figure class="screenshot-figure">
                     <img src="images/screenshots/complexInequalities.png" alt="Komplexiti showing shaded regions defined by complex inequalities and loci">
+                </figure>
+            </section>
+
+            <section class="content-section" id="colouring">
+                <h2>Phase and modulus colouring</h2>
+                <details>
+                    <summary>What the colouring shows</summary>
+                    <div class="answer">
+                        <p>Any polynomial equation or non-inequality locus can be shaded with a colour toggle on its card. This paints the whole Argand diagram by evaluating the equation's difference (left-hand side minus right-hand side) at every point z, then colouring that value's argument as a hue and its modulus as a brightness. It is the classic "domain colouring" technique used to visualise complex functions, applied directly to whatever equation is already on the card.</p>
+                        <p>Only one expression can be coloured at a time, since two colourings would overlap and become unreadable. Colouring is only offered for equations and plain (non-inequality) loci — shaded inequality regions already use colour to show a boundary, so combining the two would be confusing rather than informative.</p>
+                    </div>
+                </details>
+                <details>
+                    <summary>Roots as zeros: rainbow spokes and winding number</summary>
+                    <div class="answer">
+                        <p>For a polynomial equation, the plotted roots are exactly the points where the coloured difference is zero. Near any simple root, the hue sweeps through the full colour wheel once as you go around it — a visible "rainbow spoke" pattern rather than an abstract coordinate. If a root were repeated, the hue would cycle round twice as fast, so the winding count is a direct visual check of a root's multiplicity.</p>
+                        <p>The example below, z³ = 8i, has three simple roots equally spaced around a circle. Each shows an identical rainbow pattern rotated by 120°, which is the equation's own rotational symmetry (multiplying a root by a cube root of unity gives another root) made visible.</p>
+                    </div>
+                </details>
+                <figure class="screenshot-figure">
+                    <img src="images/screenshots/colouring1.png" alt="Komplexiti showing phase colouring around the three roots of z cubed equals 8i, each root surrounded by a full rainbow of hues">
+                </figure>
+                <details>
+                    <summary>Loci as boundaries: where the colouring changes sign</summary>
+                    <div class="answer">
+                        <p>For a locus such as |z² + 1/z²| = 2, the plotted curve is precisely the boundary of the coloured field — the set of points where the difference between the two sides is zero. On one side of the curve the difference is positive, on the other it is negative, which shows up as two contrasting colours meeting exactly along the curve. This gives a direct visual reason why the equation defines that particular boundary, rather than a curve found by trial and error.</p>
+                    </div>
+                </details>
+                <figure class="screenshot-figure">
+                    <img src="images/screenshots/colouring2.png" alt="Komplexiti showing a Joukowski locus as the boundary between two colours, with the shape of the curve visible as the zero set of the coloured function">
                 </figure>
             </section>
 
