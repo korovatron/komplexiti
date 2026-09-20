@@ -1285,26 +1285,32 @@ class Komplexiti {
 
     drawAxes() {
         const isLight   = document.documentElement.getAttribute('data-theme') === 'light';
-        const axisColor = isLight ? '#000000' : 'rgba(255, 255, 255, 0.72)';
+        const themeAxisColor = isLight ? '#000000' : 'rgba(255, 255, 255, 0.72)';
+        // Light/dark theme has no real meaning once domain colouring is on - sample the average
+        // luminance along each axis's full length instead and pick black/white for that axis.
+        const colorModeActive = this.colorModeExpressionId !== null && !!this._colorLayerCache?.canvas;
         const crisp     = (v) => Math.round(v) + 0.5;
 
         this.ctx.save();
-        this.ctx.strokeStyle = axisColor;
         this.ctx.lineWidth   = 2.2;
         this.ctx.globalAlpha = 1;
-        this.ctx.beginPath();
 
         if (this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
             const y = crisp(this.worldToScreen(0, 0).y);
+            this.ctx.strokeStyle = colorModeActive ? (this._axisAverageColorAt(true, y) ?? themeAxisColor) : themeAxisColor;
+            this.ctx.beginPath();
             this.ctx.moveTo(0, y);
             this.ctx.lineTo(this.viewport.width, y);
+            this.ctx.stroke();
         }
         if (this.viewport.minX <= 0 && this.viewport.maxX >= 0) {
             const x = crisp(this.worldToScreen(0, 0).x);
+            this.ctx.strokeStyle = colorModeActive ? (this._axisAverageColorAt(false, x) ?? themeAxisColor) : themeAxisColor;
+            this.ctx.beginPath();
             this.ctx.moveTo(x, 0);
             this.ctx.lineTo(x, this.viewport.height);
+            this.ctx.stroke();
         }
-        this.ctx.stroke();
         this.ctx.restore();
     }
 
@@ -1313,6 +1319,9 @@ class Komplexiti {
         const labelColor = isLight
             ? '#000000'
             : getComputedStyle(document.documentElement).getPropertyValue('--label-color').trim();
+        // Light/dark theme has no real meaning once domain colouring is on (the background can
+        // be any hue) - sample the actual pixel under each number instead and pick black/white.
+        const colorModeActive = this.colorModeExpressionId !== null && !!this._colorLayerCache?.canvas;
 
         this.ctx.save();
         this.ctx.fillStyle = labelColor;
@@ -1321,10 +1330,12 @@ class Komplexiti {
                    : this.sizeMode === 'large'  ? 'bold 20px Arial'
                    : 'bold 16px Arial';
         this.ctx.font = font;
+        const halfFont = this.sizeMode === 'xlarge' ? 12 : this.sizeMode === 'large' ? 10 : 8;
 
         const labelSpacing = this.getLabelSpacing();
 
         // Real (x) axis numbers
+        let curLabelColor = null;
         if (this.viewport.minY <= 0 && this.viewport.maxY >= 0) {
             const axisY = this.worldToScreen(0, 0).y;
             this.ctx.textAlign    = 'center';
@@ -1336,12 +1347,17 @@ class Komplexiti {
                 if (sp.x < 20 || sp.x > this.viewport.width - 20) continue;
                 const ly = axisY + 5;
                 if (ly < this.viewport.height - 15) {
+                    if (colorModeActive) {
+                        curLabelColor = this._axisTextColorWithHysteresis(sp.x, ly + halfFont, curLabelColor) ?? labelColor;
+                        this.ctx.fillStyle = curLabelColor;
+                    }
                     this.ctx.fillText(this.formatNumber(x), sp.x, ly);
                 }
             }
         }
 
         // Imaginary (y) axis numbers
+        curLabelColor = null;
         if (this.viewport.minX <= 0 && this.viewport.maxX >= 0) {
             const axisX = this.worldToScreen(0, 0).x;
             this.ctx.textAlign    = 'right';
@@ -1353,6 +1369,10 @@ class Komplexiti {
                 if (sp.y < 20 || sp.y > this.viewport.height - 20) continue;
                 const lx = axisX - 5;
                 if (lx > 15) {
+                    if (colorModeActive) {
+                        curLabelColor = this._axisTextColorWithHysteresis(lx - halfFont, sp.y, curLabelColor) ?? labelColor;
+                        this.ctx.fillStyle = curLabelColor;
+                    }
                     this.ctx.fillText(this.formatNumber(y), lx, sp.y);
                 }
             }
@@ -1364,6 +1384,7 @@ class Komplexiti {
             const o = this.worldToScreen(0, 0);
             this.ctx.textAlign    = 'right';
             this.ctx.textBaseline = 'top';
+            if (colorModeActive) this.ctx.fillStyle = this._axisTextColorWithHysteresis(o.x - 5 - halfFont, o.y + 5 + halfFont, null) ?? labelColor;
             this.ctx.fillText('0', o.x - 5, o.y + 5);
         }
 
@@ -5840,6 +5861,48 @@ class Komplexiti {
                 : null;
             if (this.currentState === this.states.APP) this.drawCanvas();
         }, 200);
+    }
+
+    // Samples the average luminance along a full horizontal/vertical strip of the already-drawn
+    // canvas (colour layer + grid, drawn before axes in drawCanvas) and returns black or white -
+    // used so each axis stays legible as a whole against domain colouring, which can vary in hue
+    // along its length (unlike a single label, an axis line can't recolour partway along itself).
+    _axisAverageColorAt(isHorizontal, coord) {
+        try {
+            const data = isHorizontal
+                ? this.ctx.getImageData(0, Math.round(coord), this.viewport.width, 1).data
+                : this.ctx.getImageData(Math.round(coord), 0, 1, this.viewport.height).data;
+            let total = 0, count = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                total += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+                count++;
+            }
+            if (!count) return null;
+            return (total / count / 255) > 0.5 ? '#000000' : '#ffffff';
+        } catch {
+            return null;
+        }
+    }
+
+    // Samples the already-drawn canvas (colour layer + grid + axes, drawn before labels in
+    // drawCanvas) at a screen point and returns black or white for legible text there - used so
+    // axis numbers stay readable against domain colouring, where theme-based colour can vanish.
+    // `prevColor` (the previous label's colour along the same axis, or null for the first one)
+    // adds hysteresis: only flips once luminance is clearly past the midpoint (not just over/under
+    // 0.5), otherwise a background that lightens gradually along an axis (e.g. |gamma(z)| growing)
+    // would flip adjacent labels between black/white right at the crossing point, which looks like
+    // a sudden, unexplained jump even though the underlying colour barely changed there.
+    _axisTextColorWithHysteresis(px, py, prevColor) {
+        let data;
+        try {
+            data = this.ctx.getImageData(Math.round(px), Math.round(py), 1, 1).data;
+        } catch {
+            return null;
+        }
+        const luminance = (0.2126 * data[0] + 0.7152 * data[1] + 0.0722 * data[2]) / 255;
+        if (prevColor === '#000000') return luminance < 0.42 ? '#ffffff' : '#000000';
+        if (prevColor === '#ffffff') return luminance > 0.58 ? '#000000' : '#ffffff';
+        return luminance > 0.5 ? '#000000' : '#ffffff';
     }
 
     getContrastingTextColor(hex) {
