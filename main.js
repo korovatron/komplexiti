@@ -5821,7 +5821,11 @@ class Komplexiti {
     // to be scaled up by the caller. This is only rebuilt once per toggle/pan/zoom (never per
     // animation frame like the shading grids), so it can afford a much finer resolution than
     // those to avoid visible blockiness, especially near zeros/poles where colour changes fast.
-    // Returns null if the expression can't be coloured.
+    // Built for a world rectangle padded beyond the current viewport (see _COLOR_LAYER_PAD) so
+    // a moderate pan/zoom-out afterwards still lands inside the cached bitmap instead of
+    // exposing a blank strip - see _drawColorLayer for how that containment is used.
+    // Returns null if the expression can't be coloured, else { canvas, minX, maxX, minY, maxY }
+    // giving the actual (padded) world rectangle the canvas covers.
     _buildColorLayerCanvas(c) {
         if (typeof math === 'undefined') return null;
         const target = this._colorableLhsRhs(c);
@@ -5834,12 +5838,18 @@ class Komplexiti {
 
         const varName = c.equationVar;
         const scope   = this.buildExpressionScope(c.id);
-        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
-        const spanX = maxX - minX, spanY = maxY - minY;
-        if (!(spanX > 0) || !(spanY > 0)) return null;
+        const vb = this.getVisibleWorldBounds();
+        const vSpanX = vb.maxX - vb.minX, vSpanY = vb.maxY - vb.minY;
+        if (!(vSpanX > 0) || !(vSpanY > 0)) return null;
 
-        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width / 6)));
-        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6)));
+        const PAD = this._COLOR_LAYER_PAD;
+        const minX = vb.minX - vSpanX * PAD, maxX = vb.maxX + vSpanX * PAD;
+        const minY = vb.minY - vSpanY * PAD, maxY = vb.maxY + vSpanY * PAD;
+        const spanX = maxX - minX, spanY = maxY - minY;
+
+        const padScale = 1 + 2 * PAD;
+        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width  / 6 * padScale)));
+        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6 * padScale)));
 
         const off = document.createElement('canvas');
         off.width  = cols;
@@ -5892,15 +5902,17 @@ class Komplexiti {
             }
         }
         offCtx.putImageData(imgData, 0, 0);
-        return off;
+        return { canvas: off, minX, maxX, minY, maxY };
     }
 
     // Draws the active phase/modulus colour layer (if any) beneath the grid/axes/expressions.
     // Like the locus shading grids, this is a world-space raster: while pan/zoom is in
-    // progress the cached bitmap (built for the *previous* viewport) is re-projected onto the
-    // current viewport via worldToScreen, so it pans/scales along with everything else rather
-    // than disappearing - newly-revealed areas are simply left blank until a fresh build lands.
-    // A debounced rebuild (_scheduleColorLayerRetrace) fires once pan/zoom settles.
+    // progress the cached bitmap (built for a *padded* previous viewport, see
+    // _buildColorLayerCanvas) is re-projected onto the current viewport via worldToScreen, so it
+    // pans/scales along with everything else. As long as the current viewport still fits inside
+    // that padded rectangle (the common case for a moderate pan/zoom), the whole visible area
+    // stays coloured with no blank strip; only once the viewport spills outside it does a
+    // debounced rebuild (_scheduleColorLayerRetrace) fire, landing once pan/zoom settles.
     _drawColorLayer(ctx) {
         if (this.colorModeExpressionId === null) return;
         const c = this.expressions.find(e => e.id === this.colorModeExpressionId);
@@ -5911,16 +5923,16 @@ class Komplexiti {
         }
         const vp = this.viewport;
         if (!this._colorLayerCache || this._colorLayerCache.exprId !== c.id) {
-            const canvasLayer = this._buildColorLayerCanvas(c);
-            this._colorLayerCache = canvasLayer
+            const built = this._buildColorLayerCanvas(c);
+            this._colorLayerCache = built
                 ? {
-                    exprId: c.id, canvas: canvasLayer, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY,
-                    axisSamples: this._buildAxisColorSamples(canvasLayer, vp.minX, vp.maxX, vp.minY, vp.maxY)
+                    exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
+                    axisSamples: this._buildAxisColorSamples(built.canvas, built.minX, built.maxX, built.minY, built.maxY)
                 }
                 : null;
         } else {
             const cc = this._colorLayerCache;
-            const fresh = cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY;
+            const fresh = vp.minX >= cc.minX && vp.maxX <= cc.maxX && vp.minY >= cc.minY && vp.maxY <= cc.maxY;
             if (!fresh) this._scheduleColorLayerRetrace();
         }
         const cache = this._colorLayerCache;
@@ -5954,18 +5966,23 @@ class Komplexiti {
             }
             const vp = this.viewport;
             const cc = this._colorLayerCache;
-            if (cc && cc.exprId === c.id && cc.minX === vp.minX && cc.maxX === vp.maxX &&
-                cc.minY === vp.minY && cc.maxY === vp.maxY) return; // already fresh
-            const canvasLayer = this._buildColorLayerCanvas(c);
-            this._colorLayerCache = canvasLayer
+            if (cc && cc.exprId === c.id &&
+                vp.minX >= cc.minX && vp.maxX <= cc.maxX && vp.minY >= cc.minY && vp.maxY <= cc.maxY) return; // already fresh
+            const built = this._buildColorLayerCanvas(c);
+            this._colorLayerCache = built
                 ? {
-                    exprId: c.id, canvas: canvasLayer, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY,
-                    axisSamples: this._buildAxisColorSamples(canvasLayer, vp.minX, vp.maxX, vp.minY, vp.maxY)
+                    exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
+                    axisSamples: this._buildAxisColorSamples(built.canvas, built.minX, built.maxX, built.minY, built.maxY)
                 }
                 : null;
             if (this.currentState === this.states.APP) this.drawCanvas();
-        }, 200);
+        }, 120);
     }
+
+    // Fraction of extra world-space margin built into the colour layer beyond the visible
+    // viewport on each side (see _buildColorLayerCanvas) - the larger this is, the more a pan or
+    // zoom-out can move before exposing a blank edge, at the cost of a coarser/larger bitmap.
+    get _COLOR_LAYER_PAD() { return 0.3; }
 
     // Precomputes cheap-to-query background samples for the axis lines/labels from the small
     // offscreen colour-layer bitmap (not the full-resolution on-screen canvas) - called once
@@ -7991,11 +8008,11 @@ class Komplexiti {
             if (cExpr?.enabled) {
                 try {
                     const cached = this._colorLayerCache?.exprId === cExpr.id ? this._colorLayerCache : null;
-                    const canvasLayer = cached?.canvas || this._buildColorLayerCanvas(cExpr);
+                    const built = cached ? null : this._buildColorLayerCanvas(cExpr);
+                    const canvasLayer = cached ? cached.canvas : built?.canvas;
                     if (canvasLayer) {
-                        const vp = this.viewport;
-                        const minX = cached ? cached.minX : vp.minX, maxX = cached ? cached.maxX : vp.maxX;
-                        const minY = cached ? cached.minY : vp.minY, maxY = cached ? cached.maxY : vp.maxY;
+                        const minX = cached ? cached.minX : built.minX, maxX = cached ? cached.maxX : built.maxX;
+                        const minY = cached ? cached.minY : built.minY, maxY = cached ? cached.maxY : built.maxY;
                         if (!cached) {
                             this._colorLayerCache = {
                                 exprId: cExpr.id, canvas: canvasLayer, minX, maxX, minY, maxY,
