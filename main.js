@@ -4945,29 +4945,49 @@ class Komplexiti {
     // solves that denominator exactly. Catches poles like z=i in |z^2+conj(z)|/(z-i)=1, which the
     // generic numeric grid search in _findPolesNumerically can miss when the non-holomorphic
     // numerator (abs/conj) makes the |1/h| landscape around the pole asymmetric.
+    // Also cross-checks each denominator root against that same division's numerator (e.g.
+    // sin(z)/z): a root that also zeroes the numerator is a removable hole, not a genuine pole.
     _findPolesFromDenominators(hExpr, varName, scope) {
         let root;
         try { root = math.parse(hExpr); } catch { return null; }
-        const denomStrings = new Set();
+        const divisions = new Map(); // denomStr -> numerStr, first match wins for duplicate denominators
         root.traverse(node => {
             if (node.type !== 'OperatorNode' || node.op !== '/' || node.args?.length !== 2) return;
             const denomStr = node.args[1].toString();
             if (denomStr.includes(varName) && !/\//.test(denomStr) && !/(?<![a-zA-Z])(?:abs|arg|conj)\(/.test(denomStr)) {
-                denomStrings.add(denomStr);
+                if (!divisions.has(denomStr)) divisions.set(denomStr, node.args[0].toString());
             }
         });
-        if (!denomStrings.size) return null;
+        if (!divisions.size) return null;
 
         const poles = [];
-        for (const denomStr of denomStrings) {
+        const holes = [];
+        for (const [denomStr, numerStr] of divisions) {
             const coeffs = this._extractPolynomialCoeffs(denomStr, varName, scope);
             if (!coeffs || coeffs.length < 2) continue;
+            // A degree-6 Taylor truncation of a non-polynomial denominator (e.g. cos(z)) is only
+            // accurate near the expansion point - its "roots" away from there are numerical
+            // artefacts of the truncation, not genuine zeros of the denominator, so this must be
+            // verified the same way _extractPolynomialCoeffs's other callers do before trusting it.
+            if (!this._matchesPolynomialApproximation(denomStr, coeffs, varName, scope)) continue;
+            let numerNode;
+            try { numerNode = math.parse(numerStr); } catch { numerNode = null; }
             for (const r of this._solvePolynomial(coeffs)) {
                 if (!isFinite(r.re) || !isFinite(r.im)) continue;
-                if (!poles.some(p => Math.hypot(p.re - r.re, p.im - r.im) < 1e-6)) poles.push(r);
+                let isHole = false;
+                if (numerNode) {
+                    try {
+                        const v = numerNode.evaluate({ ...scope, [varName]: math.complex(r.re, r.im) });
+                        const nre = typeof v === 'number' ? v : (v?.re ?? 0);
+                        const nim = typeof v === 'number' ? 0 : (v?.im ?? 0);
+                        isHole = isFinite(nre) && isFinite(nim) && Math.hypot(nre, nim) < 1e-6;
+                    } catch { /* treat as pole */ }
+                }
+                const bucket = isHole ? holes : poles;
+                if (!bucket.some(p => Math.hypot(p.re - r.re, p.im - r.im) < 1e-6)) bucket.push(r);
             }
         }
-        return poles.length ? poles : null;
+        return (poles.length || holes.length) ? { poles: poles.length ? poles : null, holes: holes.length ? holes : null } : null;
     }
 
     // Attaches poles to an equation result when the expression contains a division, or gamma()/
@@ -4976,8 +4996,8 @@ class Komplexiti {
     // denominator roots; falls back to the approximate numeric grid search only if that finds nothing.
     _withNumericPoles(result, lhs, rhs, varName, scope, hExpr) {
         if (!/\//.test(hExpr) && !/(?<![a-zA-Z])(?:gamma|zeta)\(/.test(hExpr)) return result;
-        const exactPoles = this._findPolesFromDenominators(hExpr, varName, scope);
-        if (exactPoles) return { ...result, poles: exactPoles };
+        const exact = this._findPolesFromDenominators(hExpr, varName, scope);
+        if (exact) return { ...result, poles: exact.poles, holes: exact.holes ?? result.holes ?? null };
         const poles = this._findPolesNumerically(lhs, rhs, varName, scope);
         return poles ? { ...result, poles, polesApproximate: true } : result;
     }
@@ -5635,7 +5655,10 @@ class Komplexiti {
             return { modMin: Math.hypot(foot.re, foot.im), modMax: null, modMinPt: foot, modMaxPt: null, argMin: null, argMax: null, argMinPt: null, argMaxPt: null, fullArgRange: false, approximate: false };
         }
 
-        // General numeric locus: approximate extrema from cached segment endpoints
+        // General numeric locus: seed extrema from cached segment endpoints (only accurate to the
+        // marching-squares grid spacing used to trace them), then refine each candidate to near
+        // machine precision so an extremum that lands exactly on a nice value (e.g. |z|min=1) can
+        // actually be recognised as such instead of being stuck at the coarse sampling error.
         const segs = c._locusCache?.segments;
         if (!segs?.length) return null;
         let modMin = Infinity, modMax = -Infinity, argMin = Infinity, argMax = -Infinity;
@@ -5651,7 +5674,83 @@ class Komplexiti {
             }
         }
         if (!modMinPt) return null;
+
+        const scope   = this.buildExpressionScope(c.id);
+        const objMod  = (x, y) => x * x + y * y;
+        const objArg  = (x, y) => Math.atan2(y, x);
+        const refine  = (seed, objective, maximize) =>
+            this._refineLocusExtremum(c.locus, c.equationVar, scope, seed, objective, maximize);
+
+        modMinPt = refine(modMinPt, objMod, false); modMin = Math.hypot(modMinPt.re, modMinPt.im);
+        modMaxPt = refine(modMaxPt, objMod, true);  modMax = Math.hypot(modMaxPt.re, modMaxPt.im);
+        if (argMinPt) { argMinPt = refine(argMinPt, objArg, false); argMin = Math.atan2(argMinPt.im, argMinPt.re); }
+        if (argMaxPt) { argMaxPt = refine(argMaxPt, objArg, true);  argMax = Math.atan2(argMaxPt.im, argMaxPt.re); }
+
         return { modMin, modMax, modMinPt, modMaxPt, argMin: isFinite(argMin) ? argMin : null, argMax: isFinite(argMax) ? argMax : null, argMinPt, argMaxPt, fullArgRange: false, approximate: true };
+    }
+
+    // Refines a coarse marching-squares extremum candidate (of some scalar objective, e.g. |z|²
+    // or arg(z)) on a scalar locus to near machine precision. Works by hill-climbing along the
+    // curve's local tangent direction (perpendicular to ∇G) with a Newton correction back onto
+    // G=0 after every step, since the seed point is only accurate to the grid spacing used by
+    // _traceLocusSegments. Falls back to returning the seed unchanged if the locus isn't scalar
+    // (G undefined) or the walk can't get started.
+    _refineLocusExtremum(locus, varName, scope, seed, objective, maximize) {
+        let lhsNode, rhsNode;
+        try {
+            lhsNode = math.parse(locus.lhs);
+            rhsNode = math.parse(locus.rhs);
+        } catch { return seed; }
+        const G = (x, y) => {
+            try {
+                const evalScope = { ...scope, [varName]: math.complex(x, y) };
+                return this._equationSignedDifference(lhsNode.evaluate(evalScope), rhsNode.evaluate(evalScope), { angular: locus.angular });
+            } catch { return null; }
+        };
+        const grad = (x, y) => {
+            const h = 1e-6;
+            const gxp = G(x + h, y), gxm = G(x - h, y), gyp = G(x, y + h), gym = G(x, y - h);
+            if (gxp === null || gxm === null || gyp === null || gym === null) return null;
+            return { gx: (gxp - gxm) / (2 * h), gy: (gyp - gym) / (2 * h) };
+        };
+        const correct = (x, y) => {
+            for (let i = 0; i < 8; i++) {
+                const g = G(x, y);
+                if (g === null) return null;
+                if (Math.abs(g) < 1e-13) break;
+                const grd = grad(x, y);
+                if (!grd) return null;
+                const norm2 = grd.gx * grd.gx + grd.gy * grd.gy;
+                if (norm2 < 1e-20) break;
+                x -= g * grd.gx / norm2;
+                y -= g * grd.gy / norm2;
+            }
+            return { x, y };
+        };
+
+        let cur = correct(seed.re, seed.im);
+        if (!cur) return seed;
+        let curVal = objective(cur.x, cur.y);
+        let step = 0.02;
+        for (let outer = 0; outer < 80 && step > 1e-12; outer++) {
+            const grd = grad(cur.x, cur.y);
+            if (!grd) break;
+            const norm = Math.hypot(grd.gx, grd.gy);
+            if (norm < 1e-12) break;
+            const tx = -grd.gy / norm, ty = grd.gx / norm;
+            let improved = false;
+            for (const dir of [1, -1]) {
+                const cand = correct(cur.x + dir * step * tx, cur.y + dir * step * ty);
+                if (!cand) continue;
+                const val = objective(cand.x, cand.y);
+                if ((maximize && val > curVal) || (!maximize && val < curVal)) {
+                    cur = cand; curVal = val; improved = true;
+                    break;
+                }
+            }
+            if (!improved) step *= 0.5;
+        }
+        return { re: cur.x, im: cur.y };
     }
 
     // The complex function to colour is always the signed difference lhs-rhs, whose zero-set is
@@ -6024,7 +6123,6 @@ class Komplexiti {
         // since both can carry poles/holes (e.g. arg((z-1)/(z+1))=pi/4 is a locus with a pole at z=-1).
         const renderPolesHoles = () => {
             const varName = c.equationVar || 'z';
-            const poleRel = c.polesApproximate ? '\\approx ' : '=';
             if (c.poles?.length) {
                 polesContainer.classList.add('visible');
                 if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
@@ -6032,8 +6130,10 @@ class Komplexiti {
                 for (const pole of c.poles) {
                     if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
                     const wrapper = document.createElement('div');
-                    const approxNote = c.polesApproximate ? ' (approximate)' : '';
-                    wrapper.title = `${varName} ${c.polesApproximate ? '\u2248' : '='} ${this.formatComplexPlain(pole.re, pole.im, 'cartesian')} makes the expression undefined (division by zero)${approxNote}`;
+                    const isExact = this._isExactComplex(pole.re, pole.im, 'cartesian');
+                    const poleRel = isExact ? '=' : '\\approx ';
+                    const approxNote = isExact ? '' : ' (approximate)';
+                    wrapper.title = `${varName} ${isExact ? '=' : '\u2248'} ${this.formatComplexPlain(pole.re, pole.im, 'cartesian')} makes the expression undefined (division by zero)${approxNote}`;
                     wrapper.appendChild(makeMF(`${varName}${poleRel}${this.formatComplexLatex(pole.re, pole.im, 'cartesian')}`, 17));
                     polesList.appendChild(wrapper);
                 }
@@ -6047,8 +6147,10 @@ class Komplexiti {
                 for (const hole of c.holes) {
                     if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
                     const wrapper = document.createElement('div');
-                    wrapper.title = `${varName} = ${this.formatComplexPlain(hole.re, hole.im, 'cartesian')} is a removable discontinuity (the limit exists, but the expression is undefined there)`;
-                    wrapper.appendChild(makeMF(`${varName}=${this.formatComplexLatex(hole.re, hole.im, 'cartesian')}`, 17));
+                    const isExact = this._isExactComplex(hole.re, hole.im, 'cartesian');
+                    const holeRel = isExact ? '=' : '\\approx ';
+                    wrapper.title = `${varName} ${isExact ? '=' : '\u2248'} ${this.formatComplexPlain(hole.re, hole.im, 'cartesian')} is a removable discontinuity (the limit exists, but the expression is undefined there)`;
+                    wrapper.appendChild(makeMF(`${varName}${holeRel}${this.formatComplexLatex(hole.re, hole.im, 'cartesian')}`, 17));
                     holesList.appendChild(wrapper);
                 }
             } else {
@@ -6078,6 +6180,8 @@ class Komplexiti {
                 wrapper.title = tooltip;
 
                 const mfSize = fmt === 'exponential' ? 22 : 18;
+                const isExact = this._isExactComplex(root.re, root.im, fmt);
+                const rel = isExact ? '=' : '\\approx ';
 
                 if (fmt === 'trig') {
                     const r = Math.hypot(root.re, root.im);
@@ -6089,11 +6193,11 @@ class Komplexiti {
                         const thStr  = this.niceAngleLatex(theta) ?? this.formatNumberShort(theta);
                         const rPart  = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
                         const label  = `${varName}_{${k + 1}}`;
-                        wrapper.appendChild(makeMF(`${label}=${rPart}\\cos(${thStr})`, mfSize));
-                        wrapper.appendChild(makeMF(`\\phantom{${label}=}+${rPart}i\\sin(${thStr})`, mfSize));
+                        wrapper.appendChild(makeMF(`${label}${rel}${rPart}\\cos(${thStr})`, mfSize));
+                        wrapper.appendChild(makeMF(`\\phantom{${label}${rel}}+${rPart}i\\sin(${thStr})`, mfSize));
                     }
                 } else {
-                    wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=${this.formatComplexLatex(root.re, root.im, fmt)}`, mfSize));
+                    wrapper.appendChild(makeMF(`${varName}_{${k + 1}}${rel}${this.formatComplexLatex(root.re, root.im, fmt)}`, mfSize));
                 }
 
                 rootsEl.appendChild(wrapper);
@@ -6166,19 +6270,23 @@ class Komplexiti {
                 if (extremaContainer) extremaContainer.classList.add('visible');
                 if (extremaToggle) extremaToggle.classList.toggle('is-hidden', c.showExtrema === false);
                 if (extremaList) extremaList.innerHTML = '';
-                const ap  = extrema.approximate ? '\\approx ' : '';
-                const rel = extrema.approximate ? '\\approx ' : '=';
                 const fmtVal = v => this.niceRealLatex(v) ?? this.formatNumberShort(v);
-                if (extrema.modMin !== null && extremaList)
+                if (extrema.modMin !== null && extremaList) {
+                    const rel = this._isExactReal(extrema.modMin) ? '=' : '\\approx ';
                     extremaList.appendChild(makeMF(`|z|_{\\min}${rel}${fmtVal(extrema.modMin)}`, 15));
-                if (extrema.modMax !== null && extremaList)
+                }
+                if (extrema.modMax !== null && extremaList) {
+                    const rel = this._isExactReal(extrema.modMax) ? '=' : '\\approx ';
                     extremaList.appendChild(makeMF(`|z|_{\\max}${rel}${fmtVal(extrema.modMax)}`, 15));
+                }
                 if (extrema.fullArgRange && extremaList) {
                     extremaList.appendChild(makeMF('\\arg(z)\\in(-\\pi,\\,\\pi]', 15));
                 } else if (extrema.argMin !== null && extrema.argMax !== null && extremaList) {
                     const amin = this.niceAngleLatex(extrema.argMin) ?? this.formatNumberShort(extrema.argMin);
                     const amax = this.niceAngleLatex(extrema.argMax) ?? this.formatNumberShort(extrema.argMax);
-                    extremaList.appendChild(makeMF(`\\arg(z)\\in[${ap}${amin},\\,${ap}${amax}]`, 15));
+                    const apMin = this._isExactAngle(extrema.argMin) ? '' : '\\approx ';
+                    const apMax = this._isExactAngle(extrema.argMax) ? '' : '\\approx ';
+                    extremaList.appendChild(makeMF(`\\arg(z)\\in[${apMin}${amin},\\,${apMax}${amax}]`, 15));
                 }
             } else {
                 hideExtrema();
@@ -6340,6 +6448,21 @@ class Komplexiti {
                 }
             }
         }
+        // Rational multiple of π - catches numeric roots that land on kπ (e.g. sin(z)/z=0)
+        {
+            const ratio = abs / Math.PI;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    const neg = sign < 0 ? '-' : '';
+                    if (sn === 1 && sd === 1) return `${neg}\\pi`;
+                    if (sd === 1)             return `${neg}${sn}\\pi`;
+                    if (sn === 1)             return `${neg}\\frac{\\pi}{${sd}}`;
+                    return `${neg}\\frac{${sn}\\pi}{${sd}}`;
+                }
+            }
+        }
         // Try integer + rational*√k forms: e.g. √2-1, 1+√2, 3+2√3
         for (const k of [2, 3, 5, 6, 7, 10, 11, 13, 14, 15]) {
             const sqK = Math.sqrt(k);
@@ -6433,6 +6556,22 @@ class Komplexiti {
                 }
             }
         }
+        // Rational multiple of π - catches numeric roots that land on kπ (e.g. sin(z)/z=0)
+        {
+            const ratio = abs / Math.PI;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    let part;
+                    if      (sn === 1 && sd === 1) part = '&pi;';
+                    else if (sd === 1)              part = `${sn}&pi;`;
+                    else if (sn === 1)              part = `&pi;/${sd}`;
+                    else                           part = `${sn}&pi;/${sd}`;
+                    return (sign < 0 ? '-' : '') + part;
+                }
+            }
+        }
         return null;
     }
 
@@ -6454,6 +6593,20 @@ class Komplexiti {
             }
         }
         return null;
+    }
+
+    // Whether a value renders as an exact closed form (see niceRealLatex/niceAngleLatex) rather
+    // than falling back to a raw decimal - used to decide "=" vs "\approx" independent of how the
+    // value was computed, since a numeric search that lands on a recognisable value (e.g. 5π/2) is
+    // just as exact as a symbolic solve, while a symbolic solve that doesn't simplify nicely is
+    // still only shown as a rounded decimal.
+    _isExactReal(v) { return this.niceRealLatex(v) !== null; }
+    _isExactAngle(theta) { return this.niceAngleLatex(theta) !== null; }
+    _isExactComplex(re, im, fmt = 'cartesian') {
+        if (fmt === 'cartesian') return this._isExactReal(re) && this._isExactReal(im);
+        const r = Math.hypot(re, im);
+        if (r < 1e-10) return true;
+        return this._isExactReal(r) && this._isExactAngle(Math.atan2(im, re));
     }
 
     formatComplexLatex(re, im, fmt) {
