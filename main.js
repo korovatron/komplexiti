@@ -5129,13 +5129,110 @@ class Komplexiti {
 
         // Only expose the collapsed "n form" when the step is purely imaginary (i.e. C is real) -
         // a general complex step is mathematically just as periodic but not worth the LaTeX
-        // complexity of rendering a non-axis-aligned parametric line for a rarer case.
+        // complexity of rendering a non-axis-aligned parametric line for a rarer case. Stored as
+        // a single-family array so the card renderer can share code with sin/cos (two families).
         let periodic = null;
         if (zStep && Math.abs(zStep.re) < 1e-6 * Math.max(1, Math.abs(zStep.im))) {
             const base = roots.reduce((best, r) => Math.abs(r.im) < Math.abs(best.im) ? r : best, roots[0]);
-            periodic = { base, stepIm: zStep.im };
+            periodic = [{ base, step: { re: 0, im: zStep.im } }];
         }
         return { roots, periodic };
+    }
+
+    // Closed-form solver for sin/cos/tan(C*z+D) = K (single occurrence, affine argument) - unlike
+    // exp/pow, sin and cos each invert to TWO interleaved periodic families (e.g.
+    // sin(w)=k => w = 2m*pi + asin(k)  OR  w = 2m*pi + pi - asin(k)), while tan has just one
+    // (w = n*pi + atan(k)). Uses mathjs's complex-capable asin/acos/atan directly. Fixes the same
+    // box-truncation issue as _tryExpLogPowSubstitution (e.g. sin(x)=0 only showed roots within
+    // +-10 from the generic grid search before).
+    _tryTrigSubstitution(lhs, rhs, varName, scope) {
+        const hExpr = `(${lhs}) - (${rhs})`;
+        let root;
+        try { root = math.parse(hExpr); } catch { return null; }
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        const containsVar = node => varRe.test(node.toString());
+
+        const candidates = [];
+        root.traverse(node => {
+            if (node.type === 'FunctionNode' && node.args?.length === 1 &&
+                (node.fn?.name === 'sin' || node.fn?.name === 'cos' || node.fn?.name === 'tan')) {
+                if (containsVar(node.args[0])) candidates.push({ kind: node.fn.name, node, argNode: node.args[0] });
+            }
+        });
+        if (candidates.length !== 1) return null;
+        const { kind, node, argNode } = candidates[0];
+
+        const argStr = argNode.toString();
+        const argCoeffs = this._extractPolynomialCoeffs(argStr, varName, scope, 1);
+        if (!argCoeffs || argCoeffs.length !== 2 || !this._matchesPolynomialApproximation(argStr, argCoeffs, varName, scope)) return null;
+        const [D, C] = argCoeffs;
+        if (Math.hypot(C.re, C.im) < 1e-12) return null;
+
+        let u = 'trigSub';
+        if (scope.hasOwnProperty(u) || u === varName) u = 'trigSubVar';
+        if (scope.hasOwnProperty(u) || u === varName) return null;
+        let hSub;
+        try {
+            hSub = root.transform(n => (n === node ? new math.SymbolNode(u) : n)).toString();
+        } catch { return null; }
+        const outerCoeffs = this._extractPolynomialCoeffs(hSub, u, scope, 1);
+        if (!outerCoeffs || outerCoeffs.length !== 2 || !this._matchesPolynomialApproximation(hSub, outerCoeffs, u, scope)) return null;
+        const [A, B] = outerCoeffs;
+        if (Math.hypot(B.re, B.im) < 1e-12) return null;
+        const u0 = this._cDiv({ re: -A.re, im: -A.im }, B);
+
+        let inv; // the principal complex inverse value(s), before the +n*pi/2*pi periodicity
+        try {
+            const u0c = math.complex(u0.re, u0.im);
+            inv = kind === 'sin' ? math.asin(u0c) : kind === 'cos' ? math.acos(u0c) : math.atan(u0c);
+        } catch { return null; }
+        const invVal = { re: inv.re ?? inv, im: inv.im ?? 0 };
+
+        let lhsNode, rhsNode;
+        try { lhsNode = math.parse(lhs); rhsNode = math.parse(rhs); } catch { return null; }
+        const verify = z => {
+            if (!isFinite(z.re) || !isFinite(z.im)) return false;
+            try {
+                const ev = { ...scope, [varName]: math.complex(z.re, z.im) };
+                return this._equationDifferenceMagnitude(lhsNode.evaluate(ev), rhsNode.evaluate(ev)) < 1e-4;
+            } catch { return false; }
+        };
+        const toZ = w => this._cDiv(this._cSub(w, D), C);
+
+        const roots = [];
+        const families = []; // {base, step} descriptors, one per interleaved family found
+
+        const collectFamily = (wBase, wStep) => {
+            const famRoots = [];
+            for (let n = -5; n <= 5; n++) {
+                const w = this._cAdd(wBase, this._cMul(wStep, { re: n, im: 0 }));
+                const z = toZ(w);
+                if (verify(z) && famRoots.every(r => Math.hypot(r.re - z.re, r.im - z.im) > 1e-6)) famRoots.push(z);
+            }
+            if (!famRoots.length) return;
+            roots.push(...famRoots);
+            // z-space step = w-space step / C; only worth a compact "n form" if it's purely real
+            // or purely imaginary (an axis-aligned parametric line - see _renderPeriodicFamily).
+            const zStep = this._cDiv(wStep, C);
+            const base = famRoots.reduce((best, r) => Math.hypot(r.re, r.im) < Math.hypot(best.re, best.im) ? r : best, famRoots[0]);
+            families.push({ base, step: zStep });
+        };
+
+        if (kind === 'tan') {
+            collectFamily(invVal, { re: Math.PI, im: 0 });
+        } else if (kind === 'sin') {
+            collectFamily(invVal, { re: 2 * Math.PI, im: 0 });
+            collectFamily(this._cSub({ re: Math.PI, im: 0 }, invVal), { re: 2 * Math.PI, im: 0 });
+        } else { // cos
+            collectFamily(invVal, { re: 2 * Math.PI, im: 0 });
+            collectFamily({ re: -invVal.re, im: -invVal.im }, { re: 2 * Math.PI, im: 0 });
+        }
+        if (!roots.length) return null;
+
+        const periodic = families
+            .map(f => (Math.abs(f.step.re) < 1e-6 * Math.max(1, Math.abs(f.step.im)) || Math.abs(f.step.im) < 1e-6 * Math.max(1, Math.abs(f.step.re))) ? f : null)
+            .filter(Boolean);
+        return { roots, periodic: periodic.length ? periodic : null };
     }
 
     // Closed-form solver for zeta(C*z+D) = 0 (or any A+B*zeta(C*z+D)=K that reduces to that),
@@ -5514,6 +5611,12 @@ class Komplexiti {
                     const expResult = this._tryExpLogPowSubstitution(lhs, rhs, varName, scope);
                     if (expResult?.roots?.length) {
                         return this._withNumericPoles({ type: 'equation', variable: varName, roots: expResult.roots, periodic: expResult.periodic, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                    }
+                }
+                if (/(?<![a-zA-Z])(?:sin|cos|tan)\(/.test(hExpr)) {
+                    const trigResult = this._tryTrigSubstitution(lhs, rhs, varName, scope);
+                    if (trigResult?.roots?.length) {
+                        return this._withNumericPoles({ type: 'equation', variable: varName, roots: trigResult.roots, periodic: trigResult.periodic, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
                     }
                 }
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
@@ -6591,22 +6694,22 @@ class Komplexiti {
             rootsEl.style.display = 'flex';
             rootsEl.innerHTML     = '';
             const varName = c.equationVar || 'z';
-            if (c.periodic && fmt === 'cartesian') {
-                // Collapse a whole periodic root family (e.g. e^z=100000 has infinitely many
-                // roots spaced 2*pi*i apart) into one "z_n = base + step*n*i" entry rather than
-                // listing every individual branch. Only cartesian has a clean closed form in n -
-                // exponential/trig fall through to listing every branch individually below, since
-                // r_n=|base+n*step*i| and theta_n=arg(...) don't simplify to a formula in n.
-                const { base, stepIm } = c.periodic;
-                const piN = this._niceMultipleOfPiWithN(Math.abs(stepIm));
-                const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(stepIm))}n`;
-                const baseLatex = this.formatComplexLatex(base.re, base.im, 'cartesian');
-                const isExact = this._isExactComplex(base.re, base.im, 'cartesian');
-                const rel = isExact ? '=' : '\\approx ';
-                const wrapper = document.createElement('div');
-                wrapper.title = `${varName}_n ${isExact ? '=' : '\u2248'} ${this.formatComplexPlain(base.re, base.im, 'cartesian')} + ${this.formatNumberShort(Math.abs(stepIm))}ni, for any integer n`;
-                wrapper.appendChild(makeMF(`${varName}_n${rel}${baseLatex}+${this._appendImaginaryUnit(stepLatex)},\\ n\\in\\mathbb{Z}`, 18));
-                rootsEl.appendChild(wrapper);
+            if (c.periodic?.length && fmt === 'cartesian') {
+                // Collapse each periodic root family (e.g. e^z=100000 has infinitely many roots
+                // spaced 2*pi*i apart; sin/cos each have TWO interleaved families) into one
+                // "z_n = base + step*n" entry per family, rather than listing every branch. Only
+                // cartesian has a clean closed form in n - exponential/trig fall through to
+                // listing every branch individually below, since r_n=|...| and theta_n=arg(...)
+                // don't simplify to a formula in n.
+                for (const { base, step } of c.periodic) {
+                    const rendered = this._renderPeriodicFamily(base, step);
+                    if (!rendered) continue;
+                    const isExact = this._isExactComplex(base.re, base.im, 'cartesian');
+                    const wrapper = document.createElement('div');
+                    wrapper.title = `${varName}_n, for any integer n`;
+                    wrapper.appendChild(makeMF(`${varName}_n${isExact ? '=' : '\\approx '}${rendered},\\ n\\in\\mathbb{Z}`, 18));
+                    rootsEl.appendChild(wrapper);
+                }
             } else if (c.trivialZeta) {
                 // Compact form for the zeta function's infinite family of real trivial zeros
                 // (z_n = slope*n + intercept, n=1,2,3,...) rather than listing every one found.
@@ -6687,9 +6790,9 @@ class Komplexiti {
                                 const thLatex = this.niceAngleLatex(theta) ?? this.formatNumberShort(theta);
                                 const rPart = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
                                 if (fmt === 'exponential') {
-                                    wrapper.appendChild(makeMF(`${varName}\\approx${rPart}e^{\\pm i${thLatex}}`, 22));
+                                    wrapper.appendChild(makeMF(`${varName}\\approx${this._safeLatexConcat(rPart, 'e')}^{\\pm i${thLatex}}`, 22));
                                 } else {
-                                    wrapper.appendChild(makeMF(`${varName}\\approx${rPart}\\cos(${thLatex})\\pm${rPart}i\\sin(${thLatex})`, 18));
+                                    wrapper.appendChild(makeMF(`${varName}\\approx${rPart}\\cos(${thLatex})\\pm${this._appendImaginaryUnit(rPart)}\\sin(${thLatex})`, 18));
                                 }
                             }
                         } else {
@@ -6724,7 +6827,7 @@ class Komplexiti {
                         const rPart  = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
                         const label  = `${varName}_{${k + 1}}`;
                         wrapper.appendChild(makeMF(`${label}${rel}${rPart}\\cos(${thStr})`, mfSize));
-                        wrapper.appendChild(makeMF(`\\phantom{${label}${rel}}+${rPart}i\\sin(${thStr})`, mfSize));
+                        wrapper.appendChild(makeMF(`\\phantom{${label}${rel}}+${this._appendImaginaryUnit(rPart)}\\sin(${thStr})`, mfSize));
                     }
                 } else {
                     wrapper.appendChild(makeMF(`${varName}_{${k + 1}}${rel}${this.formatComplexLatex(root.re, root.im, fmt)}`, mfSize));
@@ -7067,10 +7170,14 @@ class Komplexiti {
     }
 
     // A bare LaTeX command name like \pi or \varphi (not already closed by a brace/digit) would
-    // otherwise swallow a directly-appended "i" as part of its own name (e.g. "\pi" + "i" renders
-    // as the undefined command "\pii") - insert a thin space to terminate it first.
+    // otherwise swallow a directly-appended letter as part of its own name (e.g. "\pi" + "i"
+    // renders as the undefined command "\pii", "\pi" + "e" as "\pie") - insert a thin space to
+    // terminate it first whenever that risk exists.
+    _safeLatexConcat(latex, suffix) {
+        return /\\[a-zA-Z]+$/.test(latex) ? `${latex}\\,${suffix}` : `${latex}${suffix}`;
+    }
     _appendImaginaryUnit(coeffLatex) {
-        return /\\[a-zA-Z]+$/.test(coeffLatex) ? `${coeffLatex}\\,i` : `${coeffLatex}i`;
+        return this._safeLatexConcat(coeffLatex, 'i');
     }
 
     // ---- Nice-number helpers (adapted from Graphiti) ----
@@ -7223,6 +7330,26 @@ class Komplexiti {
         return null;
     }
 
+    // Renders one periodic root family ("z_n = base + n*step") as LaTeX, for a step that is
+    // purely imaginary (e.g. e^z=c) or purely real (e.g. tan(z)=c) - the only two cases with a
+    // clean axis-aligned closed form; a general complex step returns null (caller should skip it).
+    _renderPeriodicFamily(base, step) {
+        const baseLatex = this.formatComplexLatex(base.re, base.im, 'cartesian');
+        const isImagStep = Math.abs(step.re) < 1e-6 * Math.max(1, Math.abs(step.im)) && Math.abs(step.im) > 1e-9;
+        const isRealStep = Math.abs(step.im) < 1e-6 * Math.max(1, Math.abs(step.re)) && Math.abs(step.re) > 1e-9;
+        if (isImagStep) {
+            const piN = this._niceMultipleOfPiWithN(Math.abs(step.im));
+            const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(step.im))}n`;
+            return `${baseLatex}+${this._appendImaginaryUnit(stepLatex)}`;
+        }
+        if (isRealStep) {
+            const piN = this._niceMultipleOfPiWithN(Math.abs(step.re));
+            const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(step.re))}n`;
+            return `${baseLatex}+${stepLatex}`;
+        }
+        return null;
+    }
+
     // Whether a value renders as an exact closed form (see niceRealLatex/niceAngleLatex) rather
     // than falling back to a raw decimal - used to decide "=" vs "\approx" independent of how the
     // value was computed, since a numeric search that lands on a recognisable value (e.g. 5π/2) is
@@ -7248,7 +7375,7 @@ class Komplexiti {
                 const thStr = this.niceAngleLatex(absθ)          ?? this.formatNumberShort(absθ);
                 const sign  = theta < -1e-10 ? '-' : '';
                 const rPart = Math.abs(r - 1) < 1e-9 ? '' : rStr;
-                return `${rPart}e^{${sign}i${thStr}}`;
+                return `${this._safeLatexConcat(rPart, 'e')}^{${sign}i${thStr}}`;
             }
             case 'trig': {
                 if (r < 1e-10) return '0';
