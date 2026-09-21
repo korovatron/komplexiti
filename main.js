@@ -2154,7 +2154,7 @@ class Komplexiti {
             const prevIdx   = this.expressionColors.indexOf(prevColor);
             color = this.expressionColors[(prevIdx + 1) % this.expressionColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, polesApproximate: false, essentialSingularities: null, essentialSingularitiesApproximate: false, periodic: null, trivialZeta: null, nonTrivialZeros: null, equationVar: null, locus: null, hasParseError: false };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, polesApproximate: false, essentialSingularities: null, essentialSingularitiesApproximate: false, periodic: null, trivialZeta: null, nonTrivialZeros: null, polesPeriodic: null, gammaPolePeriodic: null, equationVar: null, locus: null, hasParseError: false };
         this.expressions.push(c);
         this.createExpressionUI(c, { skipFocus });
         this.saveExpressions();
@@ -2268,6 +2268,8 @@ class Komplexiti {
             c.periodic = null;
             c.trivialZeta = null;
             c.nonTrivialZeros = null;
+            c.polesPeriodic = null;
+            c.gammaPolePeriodic = null;
             c.equationVar = null;
             c.equationLhs = null;
             c.equationRhs = null;
@@ -2307,6 +2309,8 @@ class Komplexiti {
                     c.periodic = eq.periodic ?? null;
                     c.trivialZeta = eq.trivialZeta ?? null;
                     c.nonTrivialZeros = eq.nonTrivialZeros ?? null;
+                    c.polesPeriodic = eq.polesPeriodic ?? null;
+                    c.gammaPolePeriodic = eq.gammaPolePeriodic ?? null;
                     c.equationVar = eq.variable;
                     c.equationLhs = eq.lhs ?? null;
                     c.equationRhs = eq.rhs ?? null;
@@ -2656,7 +2660,21 @@ class Komplexiti {
                     c.hasParseError = parsed === null;
                     c.errorMessage  = parsed === null ? 'Cannot evaluate expression' : '';
                 } else if (!assignment && (raw.includes('=') || /[<>]/.test(raw) || /\\leq|\\geq|\\le(?![a-zA-Z])|\\ge(?![a-zA-Z])|\\lt(?![a-zA-Z])|\\gt(?![a-zA-Z])/.test(raw))) {
-                    const eq = this.parseEquation(raw, c.id);
+                    // parseEquation can be expensive (several closed-form solver attempts, each
+                    // doing AST scans/symbolic derivatives) - cascadeEvaluate re-runs it for every
+                    // OTHER equation card on every keystroke typed into ANY card, across multiple
+                    // passes, so cache the result per-card and skip re-parsing when neither the
+                    // raw latex nor the (small) scope of named constants it depends on has changed.
+                    const scopeKey = Object.keys(scope).sort().map(k => `${k}:${scope[k].re},${scope[k].im}`).join('|');
+                    let eq;
+                    if (c._eqCacheRaw === raw && c._eqCacheScopeKey === scopeKey) {
+                        eq = c._eqCacheResult;
+                    } else {
+                        eq = this.parseEquation(raw, c.id);
+                        c._eqCacheRaw = raw;
+                        c._eqCacheScopeKey = scopeKey;
+                        c._eqCacheResult = eq;
+                    }
                     if (eq) {
                         c.type = eq.type;
                         c.roots = eq.roots ?? null;
@@ -2668,6 +2686,8 @@ class Komplexiti {
                         c.periodic = eq.periodic ?? null;
                         c.trivialZeta = eq.trivialZeta ?? null;
                         c.nonTrivialZeros = eq.nonTrivialZeros ?? null;
+                        c.polesPeriodic = eq.polesPeriodic ?? null;
+                        c.gammaPolePeriodic = eq.gammaPolePeriodic ?? null;
                         c.equationVar = eq.variable;
                         c.equationLhs = eq.lhs ?? null;
                         c.equationRhs = eq.rhs ?? null;
@@ -2693,6 +2713,8 @@ class Komplexiti {
                         c.periodic = null;
                         c.trivialZeta = null;
                         c.nonTrivialZeros = null;
+                        c.polesPeriodic = null;
+                        c.gammaPolePeriodic = null;
                         c.equationVar = null;
                         c.locus = null;
                         c.compoundParts = null;
@@ -5232,7 +5254,29 @@ class Komplexiti {
         const periodic = families
             .map(f => (Math.abs(f.step.re) < 1e-6 * Math.max(1, Math.abs(f.step.im)) || Math.abs(f.step.im) < 1e-6 * Math.max(1, Math.abs(f.step.re))) ? f : null)
             .filter(Boolean);
-        return { roots, periodic: periodic.length ? periodic : null };
+
+        // tan's poles (from its internal sin/cos division) sit at C*z+D = pi/2 + n*pi, for ANY
+        // target K - not just K=0 - so they're solved in closed form here too, unbounded by the
+        // generic numeric pole search's [-10,10]^2 box. sin/cos are entire (no poles anywhere).
+        let poles = null, polesPeriodic = null;
+        if (kind === 'tan') {
+            const poleStep = { re: Math.PI, im: 0 };
+            const found = [];
+            for (let n = -5; n <= 5; n++) {
+                const w = this._cAdd({ re: Math.PI / 2, im: 0 }, this._cMul(poleStep, { re: n, im: 0 }));
+                const z = toZ(w);
+                if (isFinite(z.re) && isFinite(z.im) && found.every(p => Math.hypot(p.re - z.re, p.im - z.im) > 1e-6)) found.push(z);
+            }
+            if (found.length) {
+                poles = found;
+                const zStep = this._cDiv(poleStep, C);
+                if (Math.abs(zStep.re) < 1e-6 * Math.max(1, Math.abs(zStep.im)) || Math.abs(zStep.im) < 1e-6 * Math.max(1, Math.abs(zStep.re))) {
+                    const base = found.reduce((best, r) => Math.hypot(r.re, r.im) < Math.hypot(best.re, best.im) ? r : best, found[0]);
+                    polesPeriodic = [{ base, step: zStep }];
+                }
+            }
+        }
+        return { roots, periodic: periodic.length ? periodic : null, poles, polesPeriodic };
     }
 
     // Closed-form solver for zeta(C*z+D) = 0 (or any A+B*zeta(C*z+D)=K that reduces to that),
@@ -5316,7 +5360,21 @@ class Komplexiti {
         // a complex affine map is mathematically fine but not worth the extra LaTeX complexity.
         const trivialZeta = (Math.abs(slope.im) < 1e-9 && Math.abs(intercept.im) < 1e-9)
             ? { slope: slope.re, intercept: intercept.re } : null;
-        return { roots: [...trivialRoots, ...nonTrivialRoots], trivialZeta, nonTrivialRoots };
+
+        // zeta itself has a single simple pole at w=1, independent of the target K - computing it
+        // here in closed form lets the caller skip the (much slower, ~80ms measured) generic
+        // numeric pole search entirely for the common zeta(...)=0 case.
+        let poles = null;
+        const zPole = this._cDiv(this._cSub({ re: 1, im: 0 }, D), C);
+        if (isFinite(zPole.re) && isFinite(zPole.im)) {
+            try {
+                const ev = { ...scope, [varName]: math.complex(zPole.re, zPole.im) };
+                const val = lhsNode.evaluate(ev);
+                const mag = typeof val === 'number' ? Math.abs(val) : Math.hypot(val?.re ?? 0, val?.im ?? 0);
+                if (!isFinite(mag) || mag > 1e6) poles = [zPole];
+            } catch { poles = [zPole]; } // evaluating exactly at the pole may legitimately throw
+        }
+        return { roots: [...trivialRoots, ...nonTrivialRoots], trivialZeta, nonTrivialRoots, poles };
     }
 
     // Scans the expression tree for division nodes whose denominator is a plain polynomial in
@@ -5407,15 +5465,65 @@ class Komplexiti {
         return 'pole';
     }
 
+    // Closed-form pole finder for gamma(C*z+D) - its poles are always at C*z+D = 0,-1,-2,-3,...,
+    // independent of the surrounding expression/target value (same "poles don't depend on K" fact
+    // used for tan/zeta), so this is much faster and unbounded by the [-10,10]^2 grid compared to
+    // the generic numeric pole search. Gamma's poles are always simple (finite-order), never
+    // essential, so no _classifySingularity check is needed here.
+    _findGammaPoles(hExpr, varName, scope) {
+        let root;
+        try { root = math.parse(hExpr); } catch { return null; }
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        const containsVar = node => varRe.test(node.toString());
+        let argNode = null;
+        root.traverse(node => {
+            if (argNode) return;
+            if (node.type === 'FunctionNode' && node.fn?.name === 'gamma' && node.args?.length === 1 && containsVar(node.args[0])) {
+                argNode = node.args[0];
+            }
+        });
+        if (!argNode) return null;
+
+        const argStr = argNode.toString();
+        const argCoeffs = this._extractPolynomialCoeffs(argStr, varName, scope, 1);
+        if (!argCoeffs || argCoeffs.length !== 2 || !this._matchesPolynomialApproximation(argStr, argCoeffs, varName, scope)) return null;
+        const [D, C] = argCoeffs;
+        if (Math.hypot(C.re, C.im) < 1e-12) return null;
+
+        const poles = [];
+        for (let n = 0; n <= 10; n++) {
+            const z = this._cDiv(this._cSub({ re: -n, im: 0 }, D), C);
+            if (!isFinite(z.re) || !isFinite(z.im)) continue;
+            try {
+                const val = root.evaluate({ ...scope, [varName]: math.complex(z.re, z.im) });
+                const mag = typeof val === 'number' ? Math.abs(val) : Math.hypot(val?.re ?? 0, val?.im ?? 0);
+                if (!isFinite(mag) || mag > 1e6) poles.push(z);
+            } catch { poles.push(z); } // evaluating exactly at the pole may legitimately throw
+        }
+        if (!poles.length) return null;
+
+        // Only expose the compact "n=0,1,2,..." form when slope/intercept are real.
+        const slope     = this._cDiv({ re: -1, im: 0 }, C);
+        const intercept = this._cDiv({ re: -D.re, im: -D.im }, C);
+        const gammaPolePeriodic = (Math.abs(slope.im) < 1e-9 && Math.abs(intercept.im) < 1e-9)
+            ? { slope: slope.re, intercept: intercept.re } : null;
+        return { poles, gammaPolePeriodic };
+    }
+
     // Attaches poles to an equation result when the expression contains a division, or gamma()/
-    // zeta() (whose poles aren't a division at all: gamma at 0,-1,-2,..., zeta's single pole at
-    // s=1) - used by fallback paths that can't go through math.rationalize. Prefers exact
-    // denominator roots; falls back to the approximate numeric grid search only if that finds nothing.
+    // zeta()/tan() (whose poles aren't a division at all: gamma at 0,-1,-2,..., zeta's single pole
+    // at s=1, tan's poles at pi/2+n*pi from its internal sin/cos division) - used by fallback
+    // paths that can't go through math.rationalize. Prefers exact denominator roots; falls back to
+    // the approximate numeric grid search only if that finds nothing.
     // Each candidate is further classified as a true pole or an essential singularity (see
     // _classifySingularity) - only math.rationalize's fully-symbolic path (elsewhere in
     // parseEquation) is guaranteed rational-function-only and can skip this classification.
     _withNumericPoles(result, lhs, rhs, varName, scope, hExpr) {
-        if (!/\//.test(hExpr) && !/(?<![a-zA-Z])(?:gamma|zeta)\(/.test(hExpr)) return result;
+        if (!/\//.test(hExpr) && !/(?<![a-zA-Z])(?:gamma|zeta|tan)\(/.test(hExpr)) return result;
+        if (/(?<![a-zA-Z])gamma\(/.test(hExpr)) {
+            const gp = this._findGammaPoles(hExpr, varName, scope);
+            if (gp) return { ...result, poles: gp.poles, gammaPolePeriodic: gp.gammaPolePeriodic };
+        }
         const classify = (pts) => {
             if (!pts?.length) return { poles: null, essential: null };
             const poles = [], essential = [];
@@ -5545,7 +5653,11 @@ class Komplexiti {
                     if (/(?<![a-zA-Z])zeta\(/.test(hExpr)) {
                         const zetaResult = this._tryZetaTrivialZeros(lhs, rhs, varName, scope);
                         if (zetaResult?.roots?.length) {
-                            return this._withNumericPoles({ type: 'equation', variable: varName, roots: zetaResult.roots, trivialZeta: zetaResult.trivialZeta, nonTrivialZeros: zetaResult.nonTrivialRoots?.length ? zetaResult.nonTrivialRoots : null, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                            const base = { type: 'equation', variable: varName, roots: zetaResult.roots, trivialZeta: zetaResult.trivialZeta, nonTrivialZeros: zetaResult.nonTrivialRoots?.length ? zetaResult.nonTrivialRoots : null, lhs, rhs };
+                            // Closed-form zeta pole (exact, no ~80ms generic grid search needed)
+                            // bypasses _withNumericPoles entirely, same as the tan closed form.
+                            if (zetaResult.poles?.length) return { ...base, poles: zetaResult.poles };
+                            return this._withNumericPoles(base, lhs, rhs, varName, scope, hExpr);
                         }
                     }
                     // conj(z) = f(z) → multiply both sides by z: |z|² = z·f(z), which is often real-valued
@@ -5566,8 +5678,15 @@ class Komplexiti {
             // quotient-rule differentiation causes the expression tree (and denominator power)
             // to grow exponentially with each derivative, which can freeze the tab before the
             // maxDeg loop even finishes. Rational expressions go straight to the rationalize path below.
+            // Also skip it for sin/cos/tan/exp/log/log10/log2 - none of these can ever actually BE
+            // a polynomial, so the up-to-6 symbolic derivatives this attempt performs (expensive:
+            // ~15-50ms per call, measured) are always wasted work that _matchesPolynomialApproximation
+            // would reject anyway; skipping goes straight to the (cheaper) rationalize/substitution
+            // fallbacks below with the same end result. This matters a lot in practice since
+            // cascadeEvaluate re-parses every OTHER equation card on every keystroke typed anywhere.
             const hasDivision = /\//.test(hExpr);
-            let coeffs = hasDivision ? null : this._extractPolynomialCoeffs(hExpr, varName, scope);
+            const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|exp|log|log10|log2)\(/.test(hExpr);
+            let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffs(hExpr, varName, scope);
             let fromRationalize = false;
             let poles = null; // denominator roots where the expression genuinely blows up
             let holes = null; // denominator roots that are also numerator roots - removable, finite limit
@@ -5616,7 +5735,14 @@ class Komplexiti {
                 if (/(?<![a-zA-Z])(?:sin|cos|tan)\(/.test(hExpr)) {
                     const trigResult = this._tryTrigSubstitution(lhs, rhs, varName, scope);
                     if (trigResult?.roots?.length) {
-                        return this._withNumericPoles({ type: 'equation', variable: varName, roots: trigResult.roots, periodic: trigResult.periodic, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                        const base = { type: 'equation', variable: varName, roots: trigResult.roots, periodic: trigResult.periodic, lhs, rhs };
+                        // Closed-form tan poles (exact, unbounded by the search box) bypass the
+                        // generic numeric pole search entirely, rather than letting it overwrite
+                        // them with an approximate result.
+                        if (trigResult.poles?.length) {
+                            return { ...base, poles: trigResult.poles, polesPeriodic: trigResult.polesPeriodic };
+                        }
+                        return this._withNumericPoles(base, lhs, rhs, varName, scope, hExpr);
                     }
                 }
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
@@ -6629,7 +6755,37 @@ class Komplexiti {
         // since both can carry poles/holes (e.g. arg((z-1)/(z+1))=pi/4 is a locus with a pole at z=-1).
         const renderPolesHoles = () => {
             const varName = c.equationVar || 'z';
-            if (c.poles?.length) {
+            if (c.polesPeriodic?.length) {
+                // Compact form for a periodic pole family (e.g. tan(z)=0's poles at pi/2+n*pi) -
+                // exact and unbounded by the search box, unlike the generic numeric pole search.
+                polesContainer.classList.add('visible');
+                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
+                polesList.innerHTML = '';
+                for (const { base, step } of c.polesPeriodic) {
+                    const rendered = this._renderPeriodicFamily(base, step);
+                    if (!rendered) continue;
+                    const wrapper = document.createElement('div');
+                    wrapper.title = `${varName}_n makes the expression undefined, for any integer n`;
+                    wrapper.appendChild(makeMF(`${varName}_n=${rendered},\\ n\\in\\mathbb{Z}`, 17));
+                    polesList.appendChild(wrapper);
+                }
+            } else if (c.gammaPolePeriodic) {
+                // Compact form for gamma's poles at C*z+D = 0,-1,-2,... (n=0,1,2,... only, unlike
+                // tan's two-sided family) - same underlying maths as trivialZeta's roots display.
+                polesContainer.classList.add('visible');
+                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
+                polesList.innerHTML = '';
+                const { slope, intercept } = c.gammaPolePeriodic;
+                const coeffLatex = Math.abs(slope - 1) < 1e-9 ? 'n'
+                    : Math.abs(slope + 1) < 1e-9 ? '-n'
+                    : `${this.niceRealLatex(slope) ?? this.formatNumberShort(slope)}n`;
+                const konstLatex = Math.abs(intercept) < 1e-9 ? ''
+                    : (intercept > 0 ? '+' : '') + (this.niceRealLatex(intercept) ?? this.formatNumberShort(intercept));
+                const wrapper = document.createElement('div');
+                wrapper.title = `Poles of \u0393: ${varName}_n = ${coeffLatex}${konstLatex}, for n=0,1,2,...`;
+                wrapper.appendChild(makeMF(`${varName}_n=${coeffLatex}${konstLatex},\\ n=0,1,2,\\ldots`, 17));
+                polesList.appendChild(wrapper);
+            } else if (c.poles?.length) {
                 polesContainer.classList.add('visible');
                 if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
                 polesList.innerHTML = '';
