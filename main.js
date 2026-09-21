@@ -3958,27 +3958,25 @@ class Komplexiti {
             this._locusRetraceTimer = null;
             let retraced = false;
             const vp = this.viewport;
+            const pb = this._paddedLocusBounds();
             for (const c of this.expressions) {
                 if (c.type === 'compound-locus' && c.compoundParts) {
                     const parts = c.compoundParts;
-                    const anyStale = parts.some(p => {
-                        const cc = p._locusCache;
-                        return !(cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY);
-                    });
+                    const anyStale = parts.some(p => !this._isLocusCacheFresh(p._locusCache, vp));
                     if (anyStale) {
                         const combined = parts.length === 2 && parts[0].locus.lhs === parts[1].locus.lhs
                             ? this._traceCompoundPartsWithShade(parts[0].locus, parts[1].locus, parts[0].equationVar, parts[0].id)
                             : null;
                         if (combined) {
                             for (let i = 0; i < 2; i++) {
-                                parts[i]._locusCache = { ...combined[i], minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                                parts[i]._locusCache = { ...combined[i], ...pb };
                             }
                         } else {
                             for (const part of parts) {
                                 part._locusCache = {
                                     segments: this._traceLocusSegments(part.locus, part.equationVar, part.id),
                                     shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id),
-                                    minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
+                                    ...pb
                                 };
                             }
                         }
@@ -3986,9 +3984,7 @@ class Komplexiti {
                     }
                 }
                 if (c.type !== 'locus' || !c.locus || !c.equationVar) continue;
-                const cached = c._locusCache;
-                if (cached && cached.minX === vp.minX && cached.maxX === vp.maxX &&
-                    cached.minY === vp.minY && cached.maxY === vp.maxY) continue;
+                if (this._isLocusCacheFresh(c._locusCache, vp)) continue;
                 if (c.locus.fastPath) {
                     // Fast-path loci need a shade grid rebuild only (segments come from geometry)
                     if (!c.locus.inequality) continue;
@@ -3997,7 +3993,7 @@ class Komplexiti {
                     c._locusCache = {
                         segments: null,
                         shadeGrid: this._buildLocusShadeGrid(c.locus, c.equationVar, c.id),
-                        minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
+                        ...pb
                     };
                 } else {
                     c._locusCache = {
@@ -4005,7 +4001,7 @@ class Komplexiti {
                         shadeGrid: c.locus.inequality
                             ? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id)
                             : null,
-                        minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY
+                        ...pb
                     };
                 }
                 retraced = true;
@@ -4137,19 +4133,50 @@ class Komplexiti {
         return null;
     }
 
+    // Fraction of extra world-space margin the numeric locus tracer/shader (below) computes
+    // beyond the visible viewport on each side - mirrors _COLOR_LAYER_PAD's rationale: a moderate
+    // pan or zoom-out then finds the curve/shading already there instead of missing at the edge
+    // until the debounced _scheduleLocusRetrace fires.
+    get _LOCUS_PAD() { return 0.3; }
+
+    _paddedLocusBounds() {
+        const vp = this.viewport;
+        const spanX = vp.maxX - vp.minX, spanY = vp.maxY - vp.minY;
+        const PAD = this._LOCUS_PAD;
+        return {
+            minX: vp.minX - spanX * PAD, maxX: vp.maxX + spanX * PAD,
+            minY: vp.minY - spanY * PAD, maxY: vp.maxY + spanY * PAD
+        };
+    }
+
+    // A cached locus trace/shade is only reusable as-is if the current viewport still fits
+    // entirely inside the padded rectangle it was computed for (otherwise the curve/shading
+    // would be missing at the newly-revealed edge), and hasn't shrunk - i.e. zoomed in - so much
+    // that the fixed grid resolution used to build it would look coarse/blocky (see
+    // _isColorLayerCacheFresh, the equivalent check for domain colouring).
+    _isLocusCacheFresh(cc, vp) {
+        if (!cc) return false;
+        if (vp.minX < cc.minX || vp.maxX > cc.maxX || vp.minY < cc.minY || vp.maxY > cc.maxY) return false;
+        const vSpanX = vp.maxX - vp.minX, vSpanY = vp.maxY - vp.minY;
+        const cSpanX = cc.maxX - cc.minX, cSpanY = cc.maxY - cc.minY;
+        const maxZoomIn = 3; // viewport may shrink to at most 1/3 of the cached rectangle's span
+        return cSpanX <= vSpanX * maxZoomIn && cSpanY <= vSpanY * maxZoomIn;
+    }
+
     _traceLocusSegments(locus, varName, ownId) {
         if (!locus || typeof math === 'undefined') return [];
         // A non-scalar equation confirmed to have no roots has no curve either (see
         // _resolveNonScalarEquation) - tracing it anyway would draw a spurious contour through
         // points where |h| merely dips small without ever truly reaching zero.
         if (locus.confirmedEmpty) return [];
-        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
+        const { minX, maxX, minY, maxY } = this._paddedLocusBounds();
         const spanX = maxX - minX;
         const spanY = maxY - minY;
         if (!(spanX > 0) || !(spanY > 0)) return [];
 
-        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width / 6)));
-        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6)));
+        const padScale = 1 + 2 * this._LOCUS_PAD;
+        const cols = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.width  / 6 * padScale)));
+        const rows = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.height / 6 * padScale)));
         const dx = spanX / cols;
         const dy = spanY / rows;
         const eps = Math.max(spanX, spanY) / Math.max(cols, rows) * 0.3;
@@ -4157,6 +4184,7 @@ class Komplexiti {
         const lhsNode = math.parse(locus.lhs);
         const rhsNode = math.parse(locus.rhs);
         const values = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(Infinity));
+
 
         for (let iy = 0; iy <= rows; iy++) {
             const y = minY + iy * dy;
@@ -4239,13 +4267,14 @@ class Komplexiti {
     // region of an inequality locus. Uses the same resolution as _traceLocusSegments.
     _buildLocusShadeGrid(locus, varName, ownId) {
         if (!locus.scalar || !locus.inequality) return null;
-        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
+        const { minX, maxX, minY, maxY } = this._paddedLocusBounds();
         const spanX = maxX - minX;
         const spanY = maxY - minY;
         if (!(spanX > 0) || !(spanY > 0)) return null;
 
-        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width / 6)));
-        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6)));
+        const padScale = 1 + 2 * this._LOCUS_PAD;
+        const cols = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.width  / 6 * padScale)));
+        const rows = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.height / 6 * padScale)));
         const dx = spanX / cols;
         const dy = spanY / rows;
         const scope = this.buildExpressionScope(ownId);
@@ -4278,11 +4307,12 @@ class Komplexiti {
     // Reduces 4 full evaluations (2 trace + 2 shade) to 1, giving ~4x speedup after pan/zoom.
     _traceCompoundPartsWithShade(locus0, locus1, varName, ownId) {
         if (typeof math === 'undefined') return null;
-        const { minX, maxX, minY, maxY } = this.getVisibleWorldBounds();
+        const { minX, maxX, minY, maxY } = this._paddedLocusBounds();
         const spanX = maxX - minX, spanY = maxY - minY;
         if (!(spanX > 0) || !(spanY > 0)) return null;
-        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width / 6)));
-        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6)));
+        const padScale = 1 + 2 * this._LOCUS_PAD;
+        const cols = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.width  / 6 * padScale)));
+        const rows = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.height / 6 * padScale)));
         const dx = spanX / cols, dy = spanY / rows;
         const scope = this.buildExpressionScope(ownId);
         let lhsNode, rhs0Node, rhs1Node;
@@ -4744,9 +4774,7 @@ class Komplexiti {
                     if (c._locusCache) c._locusCache = { ...c._locusCache, shadeGrid: sg };
                 } else {
                     // Stale cache: use the existing grid this frame, rebuild after panning settles
-                    const { minX, maxX, minY, maxY } = this.viewport;
-                    const cc = c._locusCache;
-                    if (cc.minX !== minX || cc.maxX !== maxX || cc.minY !== minY || cc.maxY !== maxY) {
+                    if (!this._isLocusCacheFresh(c._locusCache, this.viewport)) {
                         this._scheduleLocusRetrace();
                     }
                 }
@@ -6993,12 +7021,10 @@ class Komplexiti {
                         if (fpKind !== 'circle' && fpKind !== 'apollonius' && fpKind !== 'ray' && fpKind !== 'line' && fpKind !== 'inscribed-arc') {
                             const vp = this.viewport;
                             const cached = c._locusCache;
-                            const fresh = cached && cached.minX === vp.minX && cached.maxX === vp.maxX &&
-                                cached.minY === vp.minY && cached.maxY === vp.maxY;
-                            if (!fresh) {
+                            if (!this._isLocusCacheFresh(cached, vp)) {
                                 if (!cached) {
                                     const shadeGrid = this._buildLocusShadeGrid(c.locus, c.equationVar, c.id);
-                                    c._locusCache = { segments: null, shadeGrid, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                                    c._locusCache = { segments: null, shadeGrid, ...this._paddedLocusBounds() };
                                 } else {
                                     this._scheduleLocusRetrace();
                                 }
@@ -7008,10 +7034,7 @@ class Komplexiti {
                 } else {
                     const vp = this.viewport;
                     const cached = c._locusCache;
-                    const fresh = cached &&
-                        cached.minX === vp.minX && cached.maxX === vp.maxX &&
-                        cached.minY === vp.minY && cached.maxY === vp.maxY;
-                    if (fresh) {
+                    if (this._isLocusCacheFresh(cached, vp)) {
                         segments = cached.segments;
                     } else if (cached) {
                         segments = cached.segments; // stale during pan/zoom; retrace deferred
@@ -7021,7 +7044,7 @@ class Komplexiti {
                         const shadeGrid = c.locus.inequality
                             ? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id)
                             : null;
-                        c._locusCache = { segments, shadeGrid, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                        c._locusCache = { segments, shadeGrid, ...this._paddedLocusBounds() };
                         // Cache just built for the first time: refresh card metadata so extrema appear
                         clearTimeout(this._metadataRefreshTimer);
                         this._metadataRefreshTimer = setTimeout(() => this.updateAllCardMetadata(), 0);
@@ -7195,14 +7218,14 @@ class Komplexiti {
             if (c.type === 'compound-locus' && c.compoundParts) {
                 // On initial build, share the LHS evaluation - skip if all parts have geometric fast paths
                 {
-                    const _pp = c.compoundParts, _vp = this.viewport;
+                    const _pp = c.compoundParts;
                     const _geomKinds = new Set(['ray', 'line', 'circle', 'apollonius']);
                     const _allGeom = _pp.every(p => _geomKinds.has(p.locus.fastPath?.kind));
                     if (!_allGeom && _pp.length === 2 && _pp[0].locus.lhs === _pp[1].locus.lhs &&
                         !_pp[0]._locusCache && !_pp[1]._locusCache) {
                         const _res = this._traceCompoundPartsWithShade(_pp[0].locus, _pp[1].locus, _pp[0].equationVar, _pp[0].id);
                         if (_res) for (let i = 0; i < 2; i++) {
-                            _pp[i]._locusCache = { ..._res[i], minX: _vp.minX, maxX: _vp.maxX, minY: _vp.minY, maxY: _vp.maxY };
+                            _pp[i]._locusCache = { ..._res[i], ...this._paddedLocusBounds() };
                         }
                     }
                 }
@@ -7215,10 +7238,9 @@ class Komplexiti {
                         if (fpKind !== 'circle' && fpKind !== 'apollonius' && fpKind !== 'ray' && fpKind !== 'line' && fpKind !== 'inscribed-arc') {
                             const vp = this.viewport;
                             const cc = part._locusCache;
-                            const fresh = cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY;
-                            if (!fresh) {
+                            if (!this._isLocusCacheFresh(cc, vp)) {
                                 if (!cc) {
-                                    part._locusCache = { segments: null, shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id), ...vp };
+                                    part._locusCache = { segments: null, shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id), ...this._paddedLocusBounds() };
                                 } else {
                                     this._scheduleLocusRetrace();
                                 }
@@ -7227,15 +7249,14 @@ class Komplexiti {
                     } else {
                         const vp = this.viewport;
                         const cc = part._locusCache;
-                        const fresh = cc && cc.minX === vp.minX && cc.maxX === vp.maxX && cc.minY === vp.minY && cc.maxY === vp.maxY;
-                        if (fresh) {
+                        if (this._isLocusCacheFresh(cc, vp)) {
                             segs = cc.segments;
                         } else if (cc) {
                             segs = cc.segments;
                             this._scheduleLocusRetrace();
                         } else {
                             segs = this._traceLocusSegments(part.locus, part.equationVar, part.id);
-                            part._locusCache = { segments: segs, shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id), minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+                            part._locusCache = { segments: segs, shadeGrid: this._buildLocusShadeGrid(part.locus, part.equationVar, part.id), ...this._paddedLocusBounds() };
                         }
                     }
                     if (!segs?.length) continue;
