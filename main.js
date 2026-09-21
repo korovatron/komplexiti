@@ -6463,6 +6463,36 @@ class Komplexiti {
                 }
             }
         }
+        // Rational multiple of the golden ratio φ=(1+√5)/2 - catches e.g. locus extrema of 1.618
+        {
+            const ratio = abs / this._PHI;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    const neg = sign < 0 ? '-' : '';
+                    if (sn === 1 && sd === 1) return `${neg}\\varphi`;
+                    if (sd === 1)             return `${neg}${sn}\\varphi`;
+                    if (sn === 1)             return `${neg}\\frac{\\varphi}{${sd}}`;
+                    return `${neg}\\frac{${sn}\\varphi}{${sd}}`;
+                }
+            }
+        }
+        // Rational multiple of 1/φ = φ-1 ≈ 0.618 - the other common golden-ratio value seen in extrema
+        {
+            const ratio = abs * this._PHI;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    const neg = sign < 0 ? '-' : '';
+                    if (sn === 1 && sd === 1) return `${neg}\\varphi^{-1}`;
+                    if (sd === 1)             return `${neg}${sn}\\varphi^{-1}`;
+                    if (sn === 1)             return `${neg}\\frac{\\varphi^{-1}}{${sd}}`;
+                    return `${neg}\\frac{${sn}\\varphi^{-1}}{${sd}}`;
+                }
+            }
+        }
         // Try integer + rational*√k forms: e.g. √2-1, 1+√2, 3+2√3
         for (const k of [2, 3, 5, 6, 7, 10, 11, 13, 14, 15]) {
             const sqK = Math.sqrt(k);
@@ -6502,6 +6532,8 @@ class Komplexiti {
     // ---- Nice-number helpers (adapted from Graphiti) ----
 
     _gcd(a, b) { return b === 0 ? a : this._gcd(b, a % b); }
+
+    get _PHI() { return (1 + Math.sqrt(5)) / 2; }
 
     // Returns an HTML string for value if it has a recognisable nice form, else null.
     // Recognises: integers, simple fractions (denom ≤ 24), and n/d·√k for k ∈ {2,3,5,6,7}.
@@ -6568,6 +6600,38 @@ class Komplexiti {
                     else if (sd === 1)              part = `${sn}&pi;`;
                     else if (sn === 1)              part = `&pi;/${sd}`;
                     else                           part = `${sn}&pi;/${sd}`;
+                    return (sign < 0 ? '-' : '') + part;
+                }
+            }
+        }
+        // Rational multiple of the golden ratio φ=(1+√5)/2
+        {
+            const ratio = abs / this._PHI;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    let part;
+                    if      (sn === 1 && sd === 1) part = '&phi;';
+                    else if (sd === 1)              part = `${sn}&phi;`;
+                    else if (sn === 1)              part = `&phi;/${sd}`;
+                    else                           part = `${sn}&phi;/${sd}`;
+                    return (sign < 0 ? '-' : '') + part;
+                }
+            }
+        }
+        // Rational multiple of 1/φ = φ-1 ≈ 0.618
+        {
+            const ratio = abs * this._PHI;
+            for (let d = 1; d <= 12; d++) {
+                const n = Math.round(ratio * d);
+                if (n > 0 && Math.abs(ratio - n / d) < tol) {
+                    const g = this._gcd(n, d); const sn = n / g; const sd = d / g;
+                    let part;
+                    if      (sn === 1 && sd === 1) part = '1/&phi;';
+                    else if (sd === 1)              part = `${sn}/&phi;`;
+                    else if (sn === 1)              part = `1/(${sd}&phi;)`;
+                    else                           part = `${sn}/(${sd}&phi;)`;
                     return (sign < 0 ? '-' : '') + part;
                 }
             }
