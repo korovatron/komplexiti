@@ -6493,11 +6493,14 @@ class Komplexiti {
                 }
             }
         }
-        // Try integer + rational*√k forms: e.g. √2-1, 1+√2, 3+2√3
+        // Try integer + rational*√k forms: e.g. √2-1, 1+√2, 3+2√3. Also tries half-integer offsets
+        // (e.g. -1/2+1/2√5 = 1/φ) since the quadratic formula with an odd linear coefficient
+        // always produces one - a common source of "nice" irrational roots in this app.
         for (const k of [2, 3, 5, 6, 7, 10, 11, 13, 14, 15]) {
             const sqK = Math.sqrt(k);
-            for (let ai = -8; ai <= 8; ai++) {
-                if (ai === 0) continue;
+            for (let half = -16; half <= 16; half++) {
+                if (half === 0) continue;
+                const ai = half / 2;
                 const residual = value - ai;
                 if (Math.abs(residual) < tol) continue;
                 const ratio = residual / sqK;
@@ -6510,9 +6513,11 @@ class Komplexiti {
                     const sqrtFrac = sd === 1
                         ? (absN === 1 ? `\\sqrt{${k}}` : `${absN}\\sqrt{${k}}`)
                         : (absN === 1 ? `\\frac{\\sqrt{${k}}}{${sd}}` : `\\frac{${absN}\\sqrt{${k}}}{${sd}}`);
-                    if (ai < 0 && sn > 0) return `${sqrtFrac}${ai}`;
-                    if (ai > 0 && sn > 0) return `${ai}+${sqrtFrac}`;
-                    return `${ai}${sn > 0 ? '+' : '-'}${sqrtFrac}`;
+                    const offMag = Math.abs(half) % 2 === 0 ? `${Math.abs(half) / 2}` : `\\frac{${Math.abs(half)}}{2}`;
+                    const offStr = ai < 0 ? `-${offMag}` : offMag;
+                    if (ai < 0 && sn > 0) return `${sqrtFrac}${offStr}`;
+                    if (ai > 0 && sn > 0) return `${offStr}+${sqrtFrac}`;
+                    return `${offStr}${sn > 0 ? '+' : '-'}${sqrtFrac}`;
                 }
             }
         }
