@@ -7070,13 +7070,13 @@ class Komplexiti {
                     extremaList.appendChild(makeMF(`|z|_{\\max}${rel}${fmtVal(extrema.modMax)}`, 15));
                 }
                 if (extrema.fullArgRange && extremaList) {
-                    extremaList.appendChild(makeMF('\\arg(z)\\in(-\\pi,\\,\\pi]', 15));
+                    extremaList.appendChild(makeMF('\\arg(z)\\in\\left(-\\pi,\\,\\pi\\right]', 15));
                 } else if (extrema.argMin !== null && extrema.argMax !== null && extremaList) {
                     const amin = this.niceAngleLatex(extrema.argMin) ?? this.formatNumberShort(extrema.argMin);
                     const amax = this.niceAngleLatex(extrema.argMax) ?? this.formatNumberShort(extrema.argMax);
                     const apMin = this._isExactAngle(extrema.argMin) ? '' : '\\approx ';
                     const apMax = this._isExactAngle(extrema.argMax) ? '' : '\\approx ';
-                    extremaList.appendChild(makeMF(`\\arg(z)\\in[${apMin}${amin},\\,${apMax}${amax}]`, 15));
+                    extremaList.appendChild(makeMF(`\\arg(z)\\in\\left[${apMin}${amin},\\,${apMax}${amax}\\right]`, 15));
                 }
             } else {
                 hideExtrema();
