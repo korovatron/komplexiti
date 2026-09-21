@@ -2154,7 +2154,7 @@ class Komplexiti {
             const prevIdx   = this.expressionColors.indexOf(prevColor);
             color = this.expressionColors[(prevIdx + 1) % this.expressionColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, polesApproximate: false, essentialSingularities: null, essentialSingularitiesApproximate: false, periodic: null, equationVar: null, locus: null, hasParseError: false };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, polesApproximate: false, essentialSingularities: null, essentialSingularitiesApproximate: false, periodic: null, trivialZeta: null, nonTrivialZeros: null, equationVar: null, locus: null, hasParseError: false };
         this.expressions.push(c);
         this.createExpressionUI(c, { skipFocus });
         this.saveExpressions();
@@ -2266,6 +2266,8 @@ class Komplexiti {
             c.essentialSingularities = null;
             c.essentialSingularitiesApproximate = false;
             c.periodic = null;
+            c.trivialZeta = null;
+            c.nonTrivialZeros = null;
             c.equationVar = null;
             c.equationLhs = null;
             c.equationRhs = null;
@@ -2303,6 +2305,8 @@ class Komplexiti {
                     c.essentialSingularities = eq.essentialSingularities ?? null;
                     c.essentialSingularitiesApproximate = eq.essentialSingularitiesApproximate ?? false;
                     c.periodic = eq.periodic ?? null;
+                    c.trivialZeta = eq.trivialZeta ?? null;
+                    c.nonTrivialZeros = eq.nonTrivialZeros ?? null;
                     c.equationVar = eq.variable;
                     c.equationLhs = eq.lhs ?? null;
                     c.equationRhs = eq.rhs ?? null;
@@ -2662,6 +2666,8 @@ class Komplexiti {
                         c.essentialSingularities = eq.essentialSingularities ?? null;
                         c.essentialSingularitiesApproximate = eq.essentialSingularitiesApproximate ?? false;
                         c.periodic = eq.periodic ?? null;
+                        c.trivialZeta = eq.trivialZeta ?? null;
+                        c.nonTrivialZeros = eq.nonTrivialZeros ?? null;
                         c.equationVar = eq.variable;
                         c.equationLhs = eq.lhs ?? null;
                         c.equationRhs = eq.rhs ?? null;
@@ -2685,6 +2691,8 @@ class Komplexiti {
                         c.essentialSingularities = null;
                         c.essentialSingularitiesApproximate = false;
                         c.periodic = null;
+                        c.trivialZeta = null;
+                        c.nonTrivialZeros = null;
                         c.equationVar = null;
                         c.locus = null;
                         c.compoundParts = null;
@@ -5130,6 +5138,90 @@ class Komplexiti {
         return { roots, periodic };
     }
 
+    // Closed-form solver for zeta(C*z+D) = 0 (or any A+B*zeta(C*z+D)=K that reduces to that),
+    // producing the known infinite family of trivial zeros (zeta(w)=0 for w=-2,-4,-6,...) as a
+    // compact linear form z_n = slope*n + intercept (n=1,2,3,...) rather than being limited to
+    // whichever handful land inside the generic numeric search's bounded [-10,10]^2 grid. Does NOT
+    // find non-trivial (critical-strip) zeros - those have no known closed form.
+    _tryZetaTrivialZeros(lhs, rhs, varName, scope) {
+        const hExpr = `(${lhs}) - (${rhs})`;
+        let root;
+        try { root = math.parse(hExpr); } catch { return null; }
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        const containsVar = node => varRe.test(node.toString());
+
+        const candidates = [];
+        root.traverse(node => {
+            if (node.type === 'FunctionNode' && node.fn?.name === 'zeta' && node.args?.length === 1 && containsVar(node.args[0])) {
+                candidates.push({ node, argNode: node.args[0] });
+            }
+        });
+        if (candidates.length !== 1) return null;
+        const { node, argNode } = candidates[0];
+
+        // Inner argument must be genuinely affine in varName: C*z + D
+        const argStr = argNode.toString();
+        const argCoeffs = this._extractPolynomialCoeffs(argStr, varName, scope, 1);
+        if (!argCoeffs || argCoeffs.length !== 2 || !this._matchesPolynomialApproximation(argStr, argCoeffs, varName, scope)) return null;
+        const [D, C] = argCoeffs;
+        if (Math.hypot(C.re, C.im) < 1e-12) return null;
+
+        // Substitute the zeta(...) call with a fresh symbol; the rest of the equation must be
+        // affine in it (A + B*u = 0), i.e. varName must not appear anywhere else.
+        let u = 'zetaSub';
+        if (scope.hasOwnProperty(u) || u === varName) u = 'zetaSubVar';
+        if (scope.hasOwnProperty(u) || u === varName) return null;
+        let hSub;
+        try {
+            hSub = root.transform(n => (n === node ? new math.SymbolNode(u) : n)).toString();
+        } catch { return null; }
+        const outerCoeffs = this._extractPolynomialCoeffs(hSub, u, scope, 1);
+        if (!outerCoeffs || outerCoeffs.length !== 2 || !this._matchesPolynomialApproximation(hSub, outerCoeffs, u, scope)) return null;
+        const [A, B] = outerCoeffs;
+        if (Math.hypot(B.re, B.im) < 1e-12) return null;
+        const u0 = this._cDiv({ re: -A.re, im: -A.im }, B);
+        if (Math.hypot(u0.re, u0.im) > 1e-6) return null; // only zeta(...)=0 has a known closed form
+
+        // The trivial zeros are at w = -2, -4, -6, ... ; z_n = (w_n - D)/C = slope*n + intercept
+        const slope     = this._cDiv({ re: -2, im: 0 }, C);
+        const intercept = this._cDiv({ re: -D.re, im: -D.im }, C);
+
+        let lhsNode, rhsNode;
+        try { lhsNode = math.parse(lhs); rhsNode = math.parse(rhs); } catch { return null; }
+        const verify = z => {
+            if (!isFinite(z.re) || !isFinite(z.im)) return false;
+            try {
+                const ev = { ...scope, [varName]: math.complex(z.re, z.im) };
+                return this._equationDifferenceMagnitude(lhsNode.evaluate(ev), rhsNode.evaluate(ev)) < 1e-4;
+            } catch { return false; }
+        };
+        const trivialRoots = [];
+        for (let n = 1; n <= 20; n++) {
+            const z = this._cAdd(this._cMul(slope, { re: n, im: 0 }), intercept);
+            if (verify(z)) trivialRoots.push(z);
+        }
+        if (!trivialRoots.length) return null;
+
+        // First few known non-trivial zeros (w = 1/2 +- i*t_k, published high-precision computed
+        // constants - Riemann Hypothesis says they all lie on this critical line, verified for
+        // every known zero but unproven in general). No closed form exists for these; unlike the
+        // trivial zeros this is just a small lookup table, mapped through the same affine inverse.
+        const KNOWN_NONTRIVIAL_T = [14.134725141734693790, 21.022039638771554993, 25.010857580145688763];
+        const nonTrivialRoots = [];
+        for (const t of KNOWN_NONTRIVIAL_T) {
+            for (const wIm of [t, -t]) {
+                const z = this._cDiv(this._cSub({ re: 0.5, im: wIm }, D), C);
+                if (verify(z)) nonTrivialRoots.push(z);
+            }
+        }
+
+        // Only expose the compact "n form" when slope/intercept are real (i.e. C, D are real) -
+        // a complex affine map is mathematically fine but not worth the extra LaTeX complexity.
+        const trivialZeta = (Math.abs(slope.im) < 1e-9 && Math.abs(intercept.im) < 1e-9)
+            ? { slope: slope.re, intercept: intercept.re } : null;
+        return { roots: [...trivialRoots, ...nonTrivialRoots], trivialZeta, nonTrivialRoots };
+    }
+
     // Scans the expression tree for division nodes whose denominator is a plain polynomial in
     // varName (no nested division/abs/arg/conj, so it can't blow up under differentiation) and
     // solves that denominator exactly. Catches poles like z=i in |z^2+conj(z)|/(z-i)=1, which the
@@ -5353,6 +5445,12 @@ class Komplexiti {
                 // generically 0-dimensional (isolated points).  Try to find them directly
                 // before falling back to the contour tracer.
                 if (!locus.scalar) {
+                    if (/(?<![a-zA-Z])zeta\(/.test(hExpr)) {
+                        const zetaResult = this._tryZetaTrivialZeros(lhs, rhs, varName, scope);
+                        if (zetaResult?.roots?.length) {
+                            return this._withNumericPoles({ type: 'equation', variable: varName, roots: zetaResult.roots, trivialZeta: zetaResult.trivialZeta, nonTrivialZeros: zetaResult.nonTrivialRoots?.length ? zetaResult.nonTrivialRoots : null, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                        }
+                    }
                     // conj(z) = f(z) → multiply both sides by z: |z|² = z·f(z), which is often real-valued
                     const conjPat = new RegExp(`^conj\\(${varName}\\)$`);
                     if (conjPat.test(lhs) && !/(?<![a-zA-Z])conj\(/.test(rhs)) {
@@ -6114,7 +6212,10 @@ class Komplexiti {
         const off = document.createElement('canvas');
         off.width  = cols;
         off.height = rows;
-        const offCtx = off.getContext('2d');
+        // willReadFrequently: this canvas is later read repeatedly via getImageData for the axis
+        // colour samples (_buildAxisColorSamples) - the option must be set here, at first context
+        // creation, since a later getContext('2d') call just returns the same existing context.
+        const offCtx = off.getContext('2d', { willReadFrequently: true });
         const imgData = offCtx.createImageData(cols, rows);
         const data = imgData.data;
 
@@ -6493,7 +6594,9 @@ class Komplexiti {
             if (c.periodic && fmt === 'cartesian') {
                 // Collapse a whole periodic root family (e.g. e^z=100000 has infinitely many
                 // roots spaced 2*pi*i apart) into one "z_n = base + step*n*i" entry rather than
-                // listing every individual branch.
+                // listing every individual branch. Only cartesian has a clean closed form in n -
+                // exponential/trig fall through to listing every branch individually below, since
+                // r_n=|base+n*step*i| and theta_n=arg(...) don't simplify to a formula in n.
                 const { base, stepIm } = c.periodic;
                 const piN = this._niceMultipleOfPiWithN(Math.abs(stepIm));
                 const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(stepIm))}n`;
@@ -6504,6 +6607,99 @@ class Komplexiti {
                 wrapper.title = `${varName}_n ${isExact ? '=' : '\u2248'} ${this.formatComplexPlain(base.re, base.im, 'cartesian')} + ${this.formatNumberShort(Math.abs(stepIm))}ni, for any integer n`;
                 wrapper.appendChild(makeMF(`${varName}_n${rel}${baseLatex}+${this._appendImaginaryUnit(stepLatex)},\\ n\\in\\mathbb{Z}`, 18));
                 rootsEl.appendChild(wrapper);
+            } else if (c.trivialZeta) {
+                // Compact form for the zeta function's infinite family of real trivial zeros
+                // (z_n = slope*n + intercept, n=1,2,3,...) rather than listing every one found.
+                // These are always real, so exponential/trig also have a clean closed form
+                // whenever the whole family shares one sign: theta is the constant 0 or pi, and
+                // the magnitude r_n is just the same linear-in-n form with that sign divided out.
+                const { slope, intercept } = c.trivialZeta;
+                const linearTerm = (coeff, konst) => {
+                    const coeffLatex = Math.abs(coeff - 1) < 1e-9 ? 'n'
+                        : Math.abs(coeff + 1) < 1e-9 ? '-n'
+                        : `${this.niceRealLatex(coeff) ?? this.formatNumberShort(coeff)}n`;
+                    const konstLatex = Math.abs(konst) < 1e-9 ? ''
+                        : (konst > 0 ? '+' : '') + (this.niceRealLatex(konst) ?? this.formatNumberShort(konst));
+                    return `${coeffLatex}${konstLatex}`;
+                };
+                const label = `${varName}_n`;
+                // Filter out any known non-trivial zeros (c.nonTrivialZeros, always complex with
+                // a large imaginary part) before checking sign consistency - c.roots holds both
+                // families concatenated, but only the real trivial-zero subset belongs here.
+                const trivialRootsOnly = c.roots.filter(r => Math.abs(r.im) < 1e-6);
+                const allPos = trivialRootsOnly.every(r => r.re > 1e-9);
+                const allNeg = trivialRootsOnly.every(r => r.re < -1e-9);
+                if (fmt === 'cartesian') {
+                    const wrapper = document.createElement('div');
+                    wrapper.title = `Trivial zeros of \u03b6: ${label} = ${this.formatNumberShort(slope)}n${intercept ? (intercept > 0 ? '+' : '') + this.formatNumberShort(intercept) : ''}, for n=1,2,3,...`;
+                    wrapper.appendChild(makeMF(`${label}=${linearTerm(slope, intercept)},\\ n=1,2,3,\\ldots`, 18));
+                    rootsEl.appendChild(wrapper);
+                } else if (allPos || allNeg) {
+                    const sign = allPos ? 1 : -1;
+                    const rTerm = linearTerm(sign * slope, sign * intercept);
+                    const thetaLatex = allPos ? '0' : '\\pi';
+                    const wrapper = document.createElement('div');
+                    wrapper.title = `Trivial zeros of \u03b6, for n=1,2,3,...`;
+                    if (fmt === 'exponential') {
+                        wrapper.appendChild(makeMF(`${label}=${rTerm}e^{i${thetaLatex}}`, 22));
+                    } else {
+                        wrapper.appendChild(makeMF(`${label}=${rTerm}\\cos(${thetaLatex})`, 18));
+                        wrapper.appendChild(makeMF(`\\phantom{${label}=}+${rTerm}i\\sin(${thetaLatex})`, 18));
+                    }
+                    rootsEl.appendChild(wrapper);
+                } else {
+                    // Mixed signs (rare, only possible for small n if the intercept is large) -
+                    // no single constant theta covers the whole family, so list individually.
+                    for (const [k, root] of trivialRootsOnly.entries()) {
+                        const wrapper = document.createElement('div');
+                        wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=${this.formatComplexLatex(root.re, root.im, fmt)}`, fmt === 'exponential' ? 22 : 18));
+                        rootsEl.appendChild(wrapper);
+                    }
+                }
+                if (c.nonTrivialZeros?.length) {
+                    // First few known non-trivial zeros (no closed form) - each conjugate pair
+                    // (same real part, opposite imaginary part) collapses into one "re +- im i"
+                    // entry rather than two near-identical lines.
+                    const zeros = c.nonTrivialZeros;
+                    const used = new Array(zeros.length).fill(false);
+                    for (let i = 0; i < zeros.length; i++) {
+                        if (used[i]) continue;
+                        const a = zeros[i];
+                        let pairIdx = -1;
+                        for (let j = i + 1; j < zeros.length; j++) {
+                            if (used[j]) continue;
+                            const b = zeros[j];
+                            if (Math.abs(a.re - b.re) < 1e-6 && Math.abs(a.im + b.im) < 1e-6 && Math.abs(a.im) > 1e-9) { pairIdx = j; break; }
+                        }
+                        const wrapper = document.createElement('div');
+                        if (pairIdx >= 0) {
+                            used[i] = true; used[pairIdx] = true;
+                            const re = a.re, imAbs = Math.abs(a.im);
+                            wrapper.title = `Known non-trivial zero pair of \u03b6 (critical strip) - no closed form, numerically computed`;
+                            if (fmt === 'cartesian') {
+                                const reLatex = this.niceRealLatex(re) ?? this.formatNumberShort(re);
+                                const imLatex = this.niceRealLatex(imAbs) ?? this.formatNumberShort(imAbs);
+                                wrapper.appendChild(makeMF(`${varName}\\approx${reLatex}\\pm${this._appendImaginaryUnit(imLatex)}`, 18));
+                            } else {
+                                const r = Math.hypot(re, imAbs);
+                                const theta = Math.atan2(imAbs, re);
+                                const rLatex = this.niceRealLatex(r) ?? this.formatNumberShort(r);
+                                const thLatex = this.niceAngleLatex(theta) ?? this.formatNumberShort(theta);
+                                const rPart = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
+                                if (fmt === 'exponential') {
+                                    wrapper.appendChild(makeMF(`${varName}\\approx${rPart}e^{\\pm i${thLatex}}`, 22));
+                                } else {
+                                    wrapper.appendChild(makeMF(`${varName}\\approx${rPart}\\cos(${thLatex})\\pm${rPart}i\\sin(${thLatex})`, 18));
+                                }
+                            }
+                        } else {
+                            used[i] = true;
+                            wrapper.title = `Known non-trivial zero of \u03b6 (critical strip) - no closed form, numerically computed`;
+                            wrapper.appendChild(makeMF(`${varName}\\approx${this.formatComplexLatex(a.re, a.im, fmt)}`, fmt === 'exponential' ? 22 : 18));
+                        }
+                        rootsEl.appendChild(wrapper);
+                    }
+                }
             } else {
             for (const [k, root] of c.roots.entries()) {
                 if (!isFinite(root.re) || !isFinite(root.im)) continue;
