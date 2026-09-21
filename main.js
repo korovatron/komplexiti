@@ -5848,8 +5848,12 @@ class Komplexiti {
         const spanX = maxX - minX, spanY = maxY - minY;
 
         const padScale = 1 + 2 * PAD;
-        const cols = Math.max(96, Math.min(220, Math.round(this.canvas.width  / 6 * padScale)));
-        const rows = Math.max(96, Math.min(220, Math.round(this.canvas.height / 6 * padScale)));
+        // Scale the resolution clamp bounds by the same padScale as the world area, so the
+        // visible viewport gets the same pixel density as before padding was added - otherwise
+        // the extra world-space coverage would just dilute a fixed pixel budget into a blurrier
+        // result for the part of the bitmap that's actually on screen most of the time.
+        const cols = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.width  / 6 * padScale)));
+        const rows = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.height / 6 * padScale)));
 
         const off = document.createElement('canvas');
         off.width  = cols;
@@ -5866,11 +5870,17 @@ class Komplexiti {
         const imArr  = new Float64Array(cellCount);
         const lmArr  = new Float64Array(cellCount);
         const valid  = new Uint8Array(cellCount);
+        // Tracks which cells fall within the originally-visible (unpadded) viewport, so the
+        // lightness scale below can be calibrated from just that region - otherwise the padded
+        // margin's far-field values (see _COLOR_LAYER_PAD) would skew the whole layer darker.
+        const insideVisible = new Uint8Array(cellCount);
         for (let iy = 0; iy < rows; iy++) {
             const y = maxY - (iy + 0.5) / rows * spanY;
+            const yInside = y >= vb.minY && y <= vb.maxY;
             for (let ix = 0; ix < cols; ix++) {
                 const x = minX + (ix + 0.5) / cols * spanX;
                 const cell = iy * cols + ix;
+                if (yInside && x >= vb.minX && x <= vb.maxX) insideVisible[cell] = 1;
                 try {
                     const val = this._mathValueToComplex(compiled.evaluate({ ...scope, [varName]: math.complex(x, y) }));
                     const m = val ? Math.hypot(val.re, val.im) : NaN;
@@ -5887,8 +5897,11 @@ class Komplexiti {
         // Pass 2: convert to colour. Use the 90th percentile of log1p(|w|) (not the raw max or
         // even the raw 90th percentile) as the lightness reference scale - this stays robust
         // both to a single near-pole outlier and to a far field that grows quickly with |z|.
+        // Calibrated from the visible region only (see insideVisible above) so the result matches
+        // what it would have been without the padded margin.
         const sortedLm = [];
-        for (let cell = 0; cell < cellCount; cell++) if (valid[cell]) sortedLm.push(lmArr[cell]);
+        for (let cell = 0; cell < cellCount; cell++) if (valid[cell] && insideVisible[cell]) sortedLm.push(lmArr[cell]);
+        if (!sortedLm.length) for (let cell = 0; cell < cellCount; cell++) if (valid[cell]) sortedLm.push(lmArr[cell]);
         sortedLm.sort((a, b) => a - b);
         const p90 = sortedLm.length ? sortedLm[Math.floor(0.9 * (sortedLm.length - 1))] : 0;
         const lightScale = p90 > 0 ? p90 / 3 : 1;
@@ -5932,8 +5945,7 @@ class Komplexiti {
                 : null;
         } else {
             const cc = this._colorLayerCache;
-            const fresh = vp.minX >= cc.minX && vp.maxX <= cc.maxX && vp.minY >= cc.minY && vp.maxY <= cc.maxY;
-            if (!fresh) this._scheduleColorLayerRetrace();
+            if (!this._isColorLayerCacheFresh(cc, vp)) this._scheduleColorLayerRetrace();
         }
         const cache = this._colorLayerCache;
         if (!cache?.canvas) return;
@@ -5966,8 +5978,7 @@ class Komplexiti {
             }
             const vp = this.viewport;
             const cc = this._colorLayerCache;
-            if (cc && cc.exprId === c.id &&
-                vp.minX >= cc.minX && vp.maxX <= cc.maxX && vp.minY >= cc.minY && vp.maxY <= cc.maxY) return; // already fresh
+            if (cc && cc.exprId === c.id && this._isColorLayerCacheFresh(cc, vp)) return; // already fresh
             const built = this._buildColorLayerCanvas(c);
             this._colorLayerCache = built
                 ? {
@@ -5983,6 +5994,20 @@ class Komplexiti {
     // viewport on each side (see _buildColorLayerCanvas) - the larger this is, the more a pan or
     // zoom-out can move before exposing a blank edge, at the cost of a coarser/larger bitmap.
     get _COLOR_LAYER_PAD() { return 0.3; }
+
+    // A cached colour-layer bitmap is only reusable as-is if the current viewport (a) still
+    // fits entirely inside the padded rectangle it was built for (otherwise part of the screen
+    // would be blank), and (b) hasn't shrunk - i.e. zoomed in - so much relative to that
+    // rectangle that the fixed-resolution bitmap would need stretching well beyond the density
+    // it was built at (e.g. zooming back in to the original view after a big zoom-out, which
+    // would otherwise silently keep showing the coarse zoomed-out bitmap, just blown up).
+    _isColorLayerCacheFresh(cc, vp) {
+        if (vp.minX < cc.minX || vp.maxX > cc.maxX || vp.minY < cc.minY || vp.maxY > cc.maxY) return false;
+        const vSpanX = vp.maxX - vp.minX, vSpanY = vp.maxY - vp.minY;
+        const cSpanX = cc.maxX - cc.minX, cSpanY = cc.maxY - cc.minY;
+        const maxZoomIn = 3; // viewport may shrink to at most 1/3 of the cached rectangle's span
+        return cSpanX <= vSpanX * maxZoomIn && cSpanY <= vSpanY * maxZoomIn;
+    }
 
     // Precomputes cheap-to-query background samples for the axis lines/labels from the small
     // offscreen colour-layer bitmap (not the full-resolution on-screen canvas) - called once
