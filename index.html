@@ -1348,15 +1348,15 @@
         }
         .extrema-visibility-toggle { border-color: #fff; }
 
-        .poles-info-container, .holes-info-container {
+        .poles-info-container, .holes-info-container, .essential-info-container {
             display: none;
             flex-direction: column;
             gap: 4px;
             margin-top: 8px;
             padding-top: 8px;
         }
-        .poles-info-container.visible, .holes-info-container.visible { display: flex; }
-        .poles-info-title, .holes-info-title {
+        .poles-info-container.visible, .holes-info-container.visible, .essential-info-container.visible { display: flex; }
+        .poles-info-title, .holes-info-title, .essential-info-title {
             display: inline-flex;
             align-self: flex-start;
             font-size: 11px;
@@ -1368,7 +1368,7 @@
             border-radius: 999px;
             padding: 3px 8px;
         }
-        .poles-equation-list, .holes-equation-list {
+        .poles-equation-list, .holes-equation-list, .essential-equation-list {
             display: flex;
             flex-direction: column;
             gap: 2px;
@@ -1376,7 +1376,7 @@
             user-select: none;
             -webkit-user-select: none;
         }
-        .poles-visibility-toggle, .holes-visibility-toggle { border-color: #fff; }
+        .poles-visibility-toggle, .holes-visibility-toggle, .essential-visibility-toggle { border-color: #fff; }
 
         .shape-info-title {
             display: inline-flex;
@@ -2068,6 +2068,12 @@
                                 <strong>Zeta Function</strong>
                             </div>
                             <div class="example-description">&zeta;(z) with trivial zeros, its pole, and phase/modulus colouring</div>
+                        </div>
+                        <div class="demo-set-item" data-demo-set="essential-singularity">
+                            <div class="example-formula">
+                                <strong>Essential Singularity</strong>
+                            </div>
+                            <div class="example-description">e<sup>1/z</sup>=0, no roots but an essential singularity at z=0, with phase/modulus colouring</div>
                         </div>
                     </div>
                 </div>

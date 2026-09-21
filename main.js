@@ -2154,7 +2154,7 @@ class Komplexiti {
             const prevIdx   = this.expressionColors.indexOf(prevColor);
             color = this.expressionColors[(prevIdx + 1) % this.expressionColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, polesApproximate: false, equationVar: null, locus: null, hasParseError: false };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, polesApproximate: false, essentialSingularities: null, essentialSingularitiesApproximate: false, periodic: null, equationVar: null, locus: null, hasParseError: false };
         this.expressions.push(c);
         this.createExpressionUI(c, { skipFocus });
         this.saveExpressions();
@@ -2200,7 +2200,7 @@ class Komplexiti {
             <div class="poles-info-container">
                 <div class="metadata-title-row">
                     <button class="metadata-visibility-toggle poles-visibility-toggle" aria-label="Toggle poles on diagram" title="Toggle poles on diagram" tabindex="-1"></button>
-                    <div class="poles-info-title">Poles (undefined at)</div>
+                    <div class="poles-info-title">Poles</div>
                 </div>
                 <div class="poles-equation-list"></div>
             </div>
@@ -2210,6 +2210,13 @@ class Komplexiti {
                     <div class="holes-info-title">Holes (removable)</div>
                 </div>
                 <div class="holes-equation-list"></div>
+            </div>
+            <div class="essential-info-container">
+                <div class="metadata-title-row">
+                    <button class="metadata-visibility-toggle essential-visibility-toggle" aria-label="Toggle essential singularities on diagram" title="Toggle essential singularities on diagram" tabindex="-1"></button>
+                    <div class="essential-info-title">Essential Singularities</div>
+                </div>
+                <div class="essential-equation-list"></div>
             </div>
             <div class="centre-info-container">
                 <div class="metadata-title-row">
@@ -2256,6 +2263,9 @@ class Komplexiti {
             c.poles = null;
             c.holes = null;
             c.polesApproximate = false;
+            c.essentialSingularities = null;
+            c.essentialSingularitiesApproximate = false;
+            c.periodic = null;
             c.equationVar = null;
             c.equationLhs = null;
             c.equationRhs = null;
@@ -2290,6 +2300,9 @@ class Komplexiti {
                     c.poles = eq.poles ?? null;
                     c.holes = eq.holes ?? null;
                     c.polesApproximate = eq.polesApproximate ?? false;
+                    c.essentialSingularities = eq.essentialSingularities ?? null;
+                    c.essentialSingularitiesApproximate = eq.essentialSingularitiesApproximate ?? false;
+                    c.periodic = eq.periodic ?? null;
                     c.equationVar = eq.variable;
                     c.equationLhs = eq.lhs ?? null;
                     c.equationRhs = eq.rhs ?? null;
@@ -2359,6 +2372,13 @@ class Komplexiti {
         const holesToggleBtn = card.querySelector('.holes-visibility-toggle');
         holesToggleBtn.addEventListener('click', () => {
             c.showHoles = (c.showHoles === true) ? false : true;
+            this.updateCardMetadata(c);
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        });
+
+        const essentialToggleBtn = card.querySelector('.essential-visibility-toggle');
+        essentialToggleBtn.addEventListener('click', () => {
+            c.showEssentialSingularities = (c.showEssentialSingularities === true) ? false : true;
             this.updateCardMetadata(c);
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -2639,6 +2659,9 @@ class Komplexiti {
                         c.poles = eq.poles ?? null;
                         c.holes = eq.holes ?? null;
                         c.polesApproximate = eq.polesApproximate ?? false;
+                        c.essentialSingularities = eq.essentialSingularities ?? null;
+                        c.essentialSingularitiesApproximate = eq.essentialSingularitiesApproximate ?? false;
+                        c.periodic = eq.periodic ?? null;
                         c.equationVar = eq.variable;
                         c.equationLhs = eq.lhs ?? null;
                         c.equationRhs = eq.rhs ?? null;
@@ -2659,6 +2682,9 @@ class Komplexiti {
                         c.poles = null;
                         c.holes = null;
                         c.polesApproximate = false;
+                        c.essentialSingularities = null;
+                        c.essentialSingularitiesApproximate = false;
+                        c.periodic = null;
                         c.equationVar = null;
                         c.locus = null;
                         c.compoundParts = null;
@@ -3658,7 +3684,23 @@ class Komplexiti {
                 x -= stepX; y -= stepY;
                 if (Math.hypot(stepX, stepY) < 1e-10) break;
             }
-            if (mag(evalH(x, y)) > 1e-6) continue;
+            const finalMag = mag(evalH(x, y));
+            if (finalMag > 1e-6) continue;
+
+            // Reject false positives from a monotonic slide toward an essential singularity
+            // (e.g. e^(1/z)=0, which has no roots but decays to 0 as z->0 along the negative
+            // real axis, so Newton "converges" partway down that slope). A genuine zero of an
+            // analytic function is a true local minimum of |h| at ANY radius, not just the
+            // coarse search-grid step - check finer neighbours all have larger magnitude.
+            const fineR = 1e-4;
+            let isGenuineMin = true;
+            for (let k = 0; k < 8; k++) {
+                const theta = (k / 8) * 2 * Math.PI;
+                const nm = mag(evalH(x + fineR * Math.cos(theta), y + fineR * Math.sin(theta)));
+                if (nm < finalMag) { isGenuineMin = false; break; }
+            }
+            if (!isGenuineMin) continue;
+
             const isDup = roots.some(r => Math.hypot(r.re - x, r.im - y) < 1e-4);
             if (!isDup) roots.push({ re: x, im: y });
         }
@@ -4968,6 +5010,126 @@ class Komplexiti {
         return valid.length > 0 ? valid : null;
     }
 
+    // Closed-form solver for equations where the ONLY appearance of varName is inside a single
+    // invertible transcendental term with an affine argument: A + B*exp(C*z+D) = K, A + B*ln(C*z+D)
+    // = K, or A + B*a^(C*z+D) = K (constant complex base a != 1) - e.g. "3+2e^{z}=10" or
+    // "5e^{2z-1}=100000". This exists because the generic fallback (_findComplexEquationRootsNumerically)
+    // only searches a bounded [-10,10]^2 grid, so real solutions - or periodic families of complex
+    // solutions - that land outside that box are silently missed (or, worse, an empty search
+    // wrongly reports "no roots" via confirmedEmpty even though a solution genuinely exists just
+    // outside the box). exp/pow inversion is periodic (root families spaced 2*pi*i/C or 2*pi*i/(C*ln(a))
+    // apart); ln inversion is single-valued. Returns null if the equation doesn't match this shape
+    // (mixed/duplicated occurrences, non-affine argument, etc.), letting callers fall back as before.
+    _tryExpLogPowSubstitution(lhs, rhs, varName, scope) {
+        const hExpr = `(${lhs}) - (${rhs})`;
+        let root;
+        try { root = math.parse(hExpr); } catch { return null; }
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        const containsVar = node => varRe.test(node.toString());
+
+        const candidates = [];
+        root.traverse(node => {
+            if (node.type === 'FunctionNode' && node.args?.length === 1 &&
+                (node.fn?.name === 'exp' || node.fn?.name === 'log' || node.fn?.name === 'log10' || node.fn?.name === 'log2')) {
+                if (containsVar(node.args[0])) candidates.push({ kind: node.fn.name, node, argNode: node.args[0] });
+            } else if (node.type === 'OperatorNode' && node.op === '^' && node.args?.length === 2) {
+                if (!containsVar(node.args[0]) && containsVar(node.args[1])) {
+                    candidates.push({ kind: 'pow', node, argNode: node.args[1], baseNode: node.args[0] });
+                }
+            }
+        });
+        if (candidates.length !== 1) return null;
+        const { kind, node, argNode, baseNode } = candidates[0];
+
+        // Inner argument must be genuinely affine in varName: C*z + D
+        const argStr = argNode.toString();
+        const argCoeffs = this._extractPolynomialCoeffs(argStr, varName, scope, 1);
+        if (!argCoeffs || argCoeffs.length !== 2 || !this._matchesPolynomialApproximation(argStr, argCoeffs, varName, scope)) return null;
+        const [D, C] = argCoeffs;
+        if (Math.hypot(C.re, C.im) < 1e-12) return null;
+
+        // For a^(...), the base must be a constant (already guaranteed by containsVar check above)
+        // and nonzero/not equal to 1 (ln(a)=0 would make the argument unrecoverable).
+        let lnBase = { re: 0, im: 0 };
+        if (kind === 'pow') {
+            let baseVal;
+            try {
+                const v = baseNode.evaluate(scope);
+                baseVal = typeof v === 'number' ? { re: v, im: 0 } : { re: v?.re ?? 0, im: v?.im ?? 0 };
+            } catch { return null; }
+            const baseMag = Math.hypot(baseVal.re, baseVal.im);
+            if (baseMag < 1e-12 || Math.hypot(baseVal.re - 1, baseVal.im) < 1e-9) return null;
+            lnBase = { re: Math.log(baseMag), im: Math.atan2(baseVal.im, baseVal.re) };
+        }
+
+        // Substitute the whole candidate node with a fresh symbol; the rest of the equation must
+        // be affine in it (A + B*u = 0), i.e. varName must not appear anywhere else.
+        let u = 'expSub';
+        if (scope.hasOwnProperty(u) || u === varName) u = 'expSubVar';
+        if (scope.hasOwnProperty(u) || u === varName) return null;
+        let hSub;
+        try {
+            hSub = root.transform(n => (n === node ? new math.SymbolNode(u) : n)).toString();
+        } catch { return null; }
+        const outerCoeffs = this._extractPolynomialCoeffs(hSub, u, scope, 1);
+        if (!outerCoeffs || outerCoeffs.length !== 2 || !this._matchesPolynomialApproximation(hSub, outerCoeffs, u, scope)) return null;
+        const [A, B] = outerCoeffs;
+        if (Math.hypot(B.re, B.im) < 1e-12) return null;
+        const u0 = this._cDiv({ re: -A.re, im: -A.im }, B);
+
+        // Invert the candidate function to recover the argument's value(s), then invert the
+        // affine map (ARG = C*z + D) to get z. exp/pow inversion is periodic (2*pi*i steps);
+        // ln/log10/log2 inversion is single-valued.
+        const argValues = [];
+        let zStep = null; // complex step between consecutive periodic roots, or null if single-valued
+        if (kind === 'log' || kind === 'log10' || kind === 'log2') {
+            const base = kind === 'log' ? Math.E : (kind === 'log10' ? 10 : 2);
+            const ea = Math.pow(base, u0.re);
+            const ang = u0.im * Math.log(base);
+            argValues.push({ re: ea * Math.cos(ang), im: ea * Math.sin(ang) });
+        } else {
+            // exp(ARG)=u0, or a^ARG=u0 i.e. exp(ARG*ln(a))=u0
+            const mag = Math.hypot(u0.re, u0.im);
+            if (mag < 1e-300) return null; // exp/a^x is never 0
+            const lnMag = Math.log(mag), theta = Math.atan2(u0.im, u0.re);
+            const divisor = kind === 'pow' ? lnBase : { re: 1, im: 0 };
+            // A modest window of periodic copies (rather than all infinitely many) keeps the
+            // roots list usable; k=0 (the principal branch) is always included, which is what
+            // actually matters for fixing the "wrongly reports no roots" bug for out-of-box cases.
+            for (let k = -5; k <= 5; k++) {
+                argValues.push(this._cDiv({ re: lnMag, im: theta + 2 * Math.PI * k }, divisor));
+            }
+            // The step between consecutive ARG values (2*pi*i/divisor) carries through the affine
+            // map's division by C into z-space - this is what lets the card collapse the whole
+            // family into one "z_n = base + n*step" entry instead of listing every branch.
+            zStep = this._cDiv(this._cDiv({ re: 0, im: 2 * Math.PI }, divisor), C);
+        }
+
+        let lhsNode, rhsNode;
+        try { lhsNode = math.parse(lhs); rhsNode = math.parse(rhs); } catch { return null; }
+        const roots = [];
+        for (const arg of argValues) {
+            const z = this._cDiv(this._cSub(arg, D), C);
+            if (!isFinite(z.re) || !isFinite(z.im)) continue;
+            try {
+                const ev = { ...scope, [varName]: math.complex(z.re, z.im) };
+                const diff = this._equationDifferenceMagnitude(lhsNode.evaluate(ev), rhsNode.evaluate(ev));
+                if (diff < 1e-4 && roots.every(r => Math.hypot(r.re - z.re, r.im - z.im) > 1e-6)) roots.push(z);
+            } catch { /* skip */ }
+        }
+        if (!roots.length) return null;
+
+        // Only expose the collapsed "n form" when the step is purely imaginary (i.e. C is real) -
+        // a general complex step is mathematically just as periodic but not worth the LaTeX
+        // complexity of rendering a non-axis-aligned parametric line for a rarer case.
+        let periodic = null;
+        if (zStep && Math.abs(zStep.re) < 1e-6 * Math.max(1, Math.abs(zStep.im))) {
+            const base = roots.reduce((best, r) => Math.abs(r.im) < Math.abs(best.im) ? r : best, roots[0]);
+            periodic = { base, stepIm: zStep.im };
+        }
+        return { roots, periodic };
+    }
+
     // Scans the expression tree for division nodes whose denominator is a plain polynomial in
     // varName (no nested division/abs/arg/conj, so it can't blow up under differentiation) and
     // solves that denominator exactly. Catches poles like z=i in |z^2+conj(z)|/(z-i)=1, which the
@@ -5018,16 +5180,71 @@ class Komplexiti {
         return (poles.length || holes.length) ? { poles: poles.length ? poles : null, holes: holes.length ? holes : null } : null;
     }
 
+    // Distinguishes a true pole (|h| -> infinity consistently in every direction, finite Laurent
+    // order) from an essential singularity (direction-dependent, per Casorati-Weierstrass/Picard -
+    // e.g. e^(1/z) at z=0 blows up along the positive real axis, decays to 0 along the negative
+    // real axis, and oscillates along the imaginary axis). Heuristic, since we only have numeric
+    // sampling: probe |h| at two radii around the candidate along several directions. A pole's
+    // growth rate as the radius shrinks (log of the magnitude ratio) is roughly the same in every
+    // direction; an essential singularity's is wildly inconsistent (and can even be negative,
+    // i.e. shrinking rather than growing, in some directions).
+    _classifySingularity(x0, y0, hExpr, varName, scope) {
+        let hNode;
+        try { hNode = math.parse(hExpr); } catch { return 'pole'; }
+        const evalMag = (x, y) => {
+            try {
+                const v = hNode.evaluate({ ...scope, [varName]: math.complex(x, y) });
+                const re = typeof v === 'number' ? v : (v?.re ?? 0);
+                const im = typeof v === 'number' ? 0 : (v?.im ?? 0);
+                const m = Math.hypot(re, im);
+                return isFinite(m) ? m : Infinity;
+            } catch { return Infinity; }
+        };
+        const dirs = 12, rOuter = 0.08, rInner = 0.02;
+        const ratios = [];
+        let minInner = Infinity, maxInner = 0;
+        for (let k = 0; k < dirs; k++) {
+            const theta = (k / dirs) * 2 * Math.PI;
+            const mOuter = evalMag(x0 + rOuter * Math.cos(theta), y0 + rOuter * Math.sin(theta));
+            const mInner = evalMag(x0 + rInner * Math.cos(theta), y0 + rInner * Math.sin(theta));
+            if (isFinite(mInner)) { minInner = Math.min(minInner, mInner); maxInner = Math.max(maxInner, mInner); }
+            if (isFinite(mOuter) && isFinite(mInner) && mOuter > 1e-9) ratios.push(Math.log(mInner / mOuter));
+        }
+        if (minInner < 1 && maxInner > 1e4) return 'essential';
+        if (!ratios.length) return 'essential';
+        const meanRatio = ratios.reduce((a, b) => a + b, 0) / ratios.length;
+        const spread = Math.max(...ratios) - Math.min(...ratios);
+        if (meanRatio <= 0.5 || spread > 3) return 'essential';
+        return 'pole';
+    }
+
     // Attaches poles to an equation result when the expression contains a division, or gamma()/
     // zeta() (whose poles aren't a division at all: gamma at 0,-1,-2,..., zeta's single pole at
     // s=1) - used by fallback paths that can't go through math.rationalize. Prefers exact
     // denominator roots; falls back to the approximate numeric grid search only if that finds nothing.
+    // Each candidate is further classified as a true pole or an essential singularity (see
+    // _classifySingularity) - only math.rationalize's fully-symbolic path (elsewhere in
+    // parseEquation) is guaranteed rational-function-only and can skip this classification.
     _withNumericPoles(result, lhs, rhs, varName, scope, hExpr) {
         if (!/\//.test(hExpr) && !/(?<![a-zA-Z])(?:gamma|zeta)\(/.test(hExpr)) return result;
+        const classify = (pts) => {
+            if (!pts?.length) return { poles: null, essential: null };
+            const poles = [], essential = [];
+            for (const p of pts) {
+                const bucket = this._classifySingularity(p.re, p.im, hExpr, varName, scope) === 'essential' ? essential : poles;
+                bucket.push(p);
+            }
+            return { poles: poles.length ? poles : null, essential: essential.length ? essential : null };
+        };
         const exact = this._findPolesFromDenominators(hExpr, varName, scope);
-        if (exact) return { ...result, poles: exact.poles, holes: exact.holes ?? result.holes ?? null };
-        const poles = this._findPolesNumerically(lhs, rhs, varName, scope);
-        return poles ? { ...result, poles, polesApproximate: true } : result;
+        if (exact) {
+            const { poles, essential } = classify(exact.poles);
+            return { ...result, poles, essentialSingularities: essential, holes: exact.holes ?? result.holes ?? null };
+        }
+        const numericPoles = this._findPolesNumerically(lhs, rhs, varName, scope);
+        if (!numericPoles) return result;
+        const { poles, essential } = classify(numericPoles);
+        return { ...result, poles, polesApproximate: !!poles, essentialSingularities: essential, essentialSingularitiesApproximate: !!essential };
     }
 
     // Shared resolution for a non-scalar (complex-valued) equation once a candidate `locus` has
@@ -5195,6 +5412,12 @@ class Komplexiti {
                     const sqrtRoots = this._trySqrtSubstitution(lhs, rhs, varName, scope);
                     if (sqrtRoots?.length) return { type: 'equation', variable: varName, roots: sqrtRoots, lhs, rhs };
                 }
+                if (/exp\(|log\(|log10\(|log2\(|\^/.test(hExpr)) {
+                    const expResult = this._tryExpLogPowSubstitution(lhs, rhs, varName, scope);
+                    if (expResult?.roots?.length) {
+                        return this._withNumericPoles({ type: 'equation', variable: varName, roots: expResult.roots, periodic: expResult.periodic, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                    }
+                }
                 const locus = this._buildLocus(lhs, rhs, varName, scope);
                 if (locus && !locus.scalar) {
                     // Non-scalar difference (e.g. a^z = c) is generically isolated points, not a curve
@@ -5305,6 +5528,9 @@ class Komplexiti {
             ],
             'zeta-function': [
                 { latex: '\\zeta\\left(z\\right)=0', colorMode: true, showPoles: true }
+            ],
+            'essential-singularity': [
+                { latex: 'e^{\\frac{1}{z}}=0', colorMode: true, showEssentialSingularities: true }
             ]
         };
 
@@ -5329,12 +5555,14 @@ class Komplexiti {
             const colorMode = typeof item !== 'string' && item.colorMode === true;
             const showPoles = typeof item !== 'string' && item.showPoles === true;
             const showHoles = typeof item !== 'string' && item.showHoles === true;
+            const showEssential = typeof item !== 'string' && item.showEssentialSingularities === true;
             this.addExpression({ skipFocus: true });
             const expr = this.expressions[this.expressions.length - 1];
             expr.latex = latex;
             if (fmt) expr.cardRootFmt = fmt;
             if (showPoles) expr.showPoles = true;
             if (showHoles) expr.showHoles = true;
+            if (showEssential) expr.showEssentialSingularities = true;
             if (colorMode) pendingColorModeId = expr.id;
             // Dispatching 'input' synchronously (rather than waiting for createExpressionUI's own
             // deferred requestAnimationFrame) is required so assignment items (e.g. "a=2-2i") get
@@ -6145,6 +6373,10 @@ class Komplexiti {
         const holesList      = card.querySelector('.holes-equation-list');
         const holesToggle    = card.querySelector('.holes-visibility-toggle');
         const hideHoles = () => { if (holesContainer) holesContainer.classList.remove('visible'); if (holesList) holesList.innerHTML = ''; };
+        const essentialContainer = card.querySelector('.essential-info-container');
+        const essentialList      = card.querySelector('.essential-equation-list');
+        const essentialToggle    = card.querySelector('.essential-visibility-toggle');
+        const hideEssential = () => { if (essentialContainer) essentialContainer.classList.remove('visible'); if (essentialList) essentialList.innerHTML = ''; };
         const centreContainer = card.querySelector('.centre-info-container');
         const centreList      = card.querySelector('.centre-equation-list');
         const centreToggle    = card.querySelector('.centre-visibility-toggle');
@@ -6154,7 +6386,7 @@ class Komplexiti {
         const extremaToggle    = card.querySelector('.extrema-visibility-toggle');
         const hideExtrema = () => { if (extremaContainer) extremaContainer.classList.remove('visible'); if (extremaList) extremaList.innerHTML = ''; };
 
-        const hide = () => { container.classList.remove('visible'); hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); };
+        const hide = () => { container.classList.remove('visible'); hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); hideEssential(); };
 
         const colorToggleBtn = card.querySelector('.expr-color-toggle-btn');
         if (colorToggleBtn) {
@@ -6226,6 +6458,23 @@ class Komplexiti {
             } else {
                 hideHoles();
             }
+            if (c.essentialSingularities?.length) {
+                essentialContainer.classList.add('visible');
+                if (essentialToggle) essentialToggle.classList.toggle('is-hidden', c.showEssentialSingularities !== true);
+                essentialList.innerHTML = '';
+                for (const es of c.essentialSingularities) {
+                    if (!isFinite(es.re) || !isFinite(es.im)) continue;
+                    const wrapper = document.createElement('div');
+                    const isExact = this._isExactComplex(es.re, es.im, 'cartesian');
+                    const esRel = isExact ? '=' : '\\approx ';
+                    const approxNote = isExact ? '' : ' (approximate)';
+                    wrapper.title = `${varName} ${isExact ? '=' : '\u2248'} ${this.formatComplexPlain(es.re, es.im, 'cartesian')} is an essential singularity (the expression behaves wildly nearby, with no finite or infinite limit)${approxNote}`;
+                    wrapper.appendChild(makeMF(`${varName}${esRel}${this.formatComplexLatex(es.re, es.im, 'cartesian')}`, 17));
+                    essentialList.appendChild(wrapper);
+                }
+            } else {
+                hideEssential();
+            }
         };
 
         if (c.type === 'equation' && c.roots?.length) {
@@ -6240,11 +6489,26 @@ class Komplexiti {
             valueEl.textContent   = fmtNames[fmt];
             rootsEl.style.display = 'flex';
             rootsEl.innerHTML     = '';
+            const varName = c.equationVar || 'z';
+            if (c.periodic && fmt === 'cartesian') {
+                // Collapse a whole periodic root family (e.g. e^z=100000 has infinitely many
+                // roots spaced 2*pi*i apart) into one "z_n = base + step*n*i" entry rather than
+                // listing every individual branch.
+                const { base, stepIm } = c.periodic;
+                const piN = this._niceMultipleOfPiWithN(Math.abs(stepIm));
+                const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(stepIm))}n`;
+                const baseLatex = this.formatComplexLatex(base.re, base.im, 'cartesian');
+                const isExact = this._isExactComplex(base.re, base.im, 'cartesian');
+                const rel = isExact ? '=' : '\\approx ';
+                const wrapper = document.createElement('div');
+                wrapper.title = `${varName}_n ${isExact ? '=' : '\u2248'} ${this.formatComplexPlain(base.re, base.im, 'cartesian')} + ${this.formatNumberShort(Math.abs(stepIm))}ni, for any integer n`;
+                wrapper.appendChild(makeMF(`${varName}_n${rel}${baseLatex}+${this._appendImaginaryUnit(stepLatex)},\\ n\\in\\mathbb{Z}`, 18));
+                rootsEl.appendChild(wrapper);
+            } else {
             for (const [k, root] of c.roots.entries()) {
                 if (!isFinite(root.re) || !isFinite(root.im)) continue;
                 // Full-precision tooltip in current display format
                 const toSub   = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
-                const varName = c.equationVar || 'z';
                 const tooltip = `${varName}${toSub(k + 1)} = ${this.formatComplexPlain(root.re, root.im, fmt)}`;
                 const wrapper = document.createElement('div');
                 wrapper.title = tooltip;
@@ -6272,6 +6536,7 @@ class Komplexiti {
 
                 rootsEl.appendChild(wrapper);
             }
+            }
             container.classList.add('visible');
 
         } else if (c.type === 'compound-locus' && c.compoundParts) {
@@ -6281,7 +6546,7 @@ class Komplexiti {
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
             valueEl.textContent    = 'region';
-            hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles();
+            hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); hideEssential();
             container.classList.add('visible');
 
         } else if (c.type === 'locus' && c.locus) {
@@ -6364,7 +6629,7 @@ class Komplexiti {
             container.classList.add('visible');
 
         } else if (c.type === 'value' && c.re !== null && c.im !== null) {
-            hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles();
+            hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); hideEssential();
             container.classList.remove('is-equation');
             badge.textContent      = 'Constant';
             valueEl.style.display  = '';
@@ -6598,10 +6863,18 @@ class Komplexiti {
         const aStr = this.niceRealLatex(re)          ?? this.formatNumberShort(re);
         const bAbs = this.niceRealLatex(Math.abs(im)) ?? this.formatNumberShort(Math.abs(im));
         const bStr = bAbs === '1' ? '' : bAbs;
+        const iUnit = this._appendImaginaryUnit(bStr);
         if (Math.abs(im) < 1e-10) return aStr;
-        if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${bStr}i` : `${bStr}i`;
+        if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${iUnit}` : iUnit;
         const sign = im < -1e-10 ? '-' : '+';
-        return `${aStr}${sign}${bStr}i`;
+        return `${aStr}${sign}${iUnit}`;
+    }
+
+    // A bare LaTeX command name like \pi or \varphi (not already closed by a brace/digit) would
+    // otherwise swallow a directly-appended "i" as part of its own name (e.g. "\pi" + "i" renders
+    // as the undefined command "\pii") - insert a thin space to terminate it first.
+    _appendImaginaryUnit(coeffLatex) {
+        return /\\[a-zA-Z]+$/.test(coeffLatex) ? `${coeffLatex}\\,i` : `${coeffLatex}i`;
     }
 
     // ---- Nice-number helpers (adapted from Graphiti) ----
@@ -6729,6 +7002,26 @@ class Komplexiti {
                 const absN = Math.abs(sn);
                 if (sd === 1) return absN === 1 ? `${neg}\\pi` : `${neg}${absN}\\pi`;
                 return absN === 1 ? `${neg}\\frac{\\pi}{${sd}}` : `${neg}\\frac{${absN}\\pi}{${sd}}`;
+            }
+        }
+        return null;
+    }
+
+    // Like niceAngleLatex, but expresses a rational multiple of pi as a coefficient of "n" instead
+    // of a fixed number - used to render a whole periodic root family as one "z_n = base + kn*pi*i"
+    // entry (see c.periodic) rather than listing every individual branch.
+    _niceMultipleOfPiWithN(value) {
+        if (!isFinite(value) || Math.abs(value) < 1e-9) return null;
+        for (let d = 1; d <= 30; d++) {
+            const nd      = value / Math.PI * d;
+            const rounded = Math.round(nd);
+            if (rounded === 0) continue;
+            if (Math.abs(nd - rounded) < 0.002) {
+                const g     = this._gcd(Math.abs(rounded), d);
+                const sd    = d / g;
+                const absN  = Math.abs(rounded) / g;
+                const coeff = absN === 1 ? 'n' : `${absN}n`;
+                return sd === 1 ? `${coeff}\\pi` : `\\frac{${coeff}\\pi}{${sd}}`;
             }
         }
         return null;
@@ -6943,6 +7236,33 @@ class Komplexiti {
                         ctx.font = `italic ${fSize - 4}px Arial`;
                         ctx.fillStyle = c.color;
                         ctx.fillText(`H${toSub(k + 1)}`, pt.x + dotR + 3, pt.y - dotR - 1);
+                    }
+                    ctx.restore();
+                }
+            }
+            // Essential singularities (6-spoke asterisk, distinguishing them from the pole's ×
+            // and the hole's open circle) - hidden until opted in via their own toggle.
+            if (c.showEssentialSingularities === true && c.essentialSingularities?.length) {
+                for (let k = 0; k < c.essentialSingularities.length; k++) {
+                    const es = c.essentialSingularities[k];
+                    if (!isFinite(es.re) || !isFinite(es.im)) continue;
+                    const pt = this.worldToScreen(es.re, es.im);
+                    const s  = dotR * 0.9;
+                    ctx.save();
+                    ctx.strokeStyle = c.color;
+                    ctx.lineWidth   = strokeWidth * 0.7;
+                    ctx.globalAlpha = 0.9;
+                    ctx.beginPath();
+                    for (let spoke = 0; spoke < 3; spoke++) {
+                        const ang = (spoke / 3) * Math.PI;
+                        ctx.moveTo(pt.x - s * Math.cos(ang), pt.y - s * Math.sin(ang));
+                        ctx.lineTo(pt.x + s * Math.cos(ang), pt.y + s * Math.sin(ang));
+                    }
+                    ctx.stroke();
+                    if (c.equationVar) {
+                        ctx.font = `italic ${fSize - 4}px Arial`;
+                        ctx.fillStyle = c.color;
+                        ctx.fillText(`E${toSub(k + 1)}`, pt.x + s + 3, pt.y - s - 1);
                     }
                     ctx.restore();
                 }
@@ -8372,6 +8692,24 @@ class Komplexiti {
                     lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(r)}" fill="${bgColor}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}"/>`);
                     if (c.equationVar) {
                         lines.push(`<text x="${sn(pt.x + dotR + 3)}" y="${sn(pt.y - dotR - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize - 4}px" font-style="italic" dominant-baseline="auto">H${toSub(k + 1)}</text>`);
+                    }
+                }
+            }
+            // Essential singularities (6-spoke asterisk) - only drawn if opted in via the card toggle.
+            if (c.showEssentialSingularities === true && c.essentialSingularities?.length) {
+                for (let k = 0; k < c.essentialSingularities.length; k++) {
+                    const es = c.essentialSingularities[k];
+                    if (!isFinite(es.re) || !isFinite(es.im)) continue;
+                    const pt = this.worldToScreen(es.re, es.im);
+                    const s  = dotR * 0.9;
+                    for (let spoke = 0; spoke < 3; spoke++) {
+                        const ang = (spoke / 3) * Math.PI;
+                        const x1 = pt.x - s * Math.cos(ang), y1 = pt.y - s * Math.sin(ang);
+                        const x2 = pt.x + s * Math.cos(ang), y2 = pt.y + s * Math.sin(ang);
+                        lines.push(`<line x1="${sn(x1)}" y1="${sn(y1)}" x2="${sn(x2)}" y2="${sn(y2)}" stroke="${color}" stroke-width="${sw(baseStroke * 0.7)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
+                    }
+                    if (c.equationVar) {
+                        lines.push(`<text x="${sn(pt.x + s + 3)}" y="${sn(pt.y - s - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize - 4}px" font-style="italic" dominant-baseline="auto">E${toSub(k + 1)}</text>`);
                     }
                 }
             }
