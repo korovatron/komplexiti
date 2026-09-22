@@ -7106,6 +7106,15 @@ class Komplexiti {
             return mf;
         };
 
+        // Small pill badge (styled like the card's other metadata badges) showing a root/pole's
+        // multiplicity, e.g. "x4" - appended alongside the math-field, not baked into its LaTeX.
+        const makeMultiplicityBadge = m => {
+            const span = document.createElement('span');
+            span.className = 'multiplicity-badge';
+            span.textContent = `\u00d7${m}`;
+            return span;
+        };
+
         // Populates the Poles/Holes card sections; shared by the equation and locus branches
         // since both can carry poles/holes (e.g. arg((z-1)/(z+1))=pi/4 is a locus with a pole at z=-1).
         const renderPolesHoles = () => {
@@ -7163,13 +7172,16 @@ class Komplexiti {
                 for (const pole of c.poles) {
                     if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
                     const wrapper = document.createElement('div');
+                    wrapper.style.display = 'flex';
+                    wrapper.style.alignItems = 'center';
+                    wrapper.style.gap = '6px';
                     const isExact = this._isExactComplex(pole.re, pole.im, 'cartesian');
                     const poleRel = isExact ? '=' : '\\approx ';
                     const approxNote = isExact ? '' : ' (approximate)';
                     const multNote = pole.multiplicity > 1 ? ` (multiplicity ${pole.multiplicity})` : '';
-                    const multLatex = pole.multiplicity > 1 ? `\\ (\\times${pole.multiplicity})` : '';
                     wrapper.title = `${varName} ${isExact ? '=' : '\u2248'} ${this.formatComplexPlain(pole.re, pole.im, 'cartesian')} makes the expression undefined (division by zero)${approxNote}${multNote}`;
-                    wrapper.appendChild(makeMF(`${varName}${poleRel}${this.formatComplexLatex(pole.re, pole.im, 'cartesian')}${multLatex}`, 17));
+                    wrapper.appendChild(makeMF(`${varName}${poleRel}${this.formatComplexLatex(pole.re, pole.im, 'cartesian')}`, 17));
+                    if (pole.multiplicity > 1) wrapper.appendChild(makeMultiplicityBadge(pole.multiplicity));
                     polesList.appendChild(wrapper);
                 }
             } else {
@@ -7358,12 +7370,11 @@ class Komplexiti {
                 const mfSize = fmt === 'exponential' ? 22 : 18;
                 const isExact = this._isExactComplex(root.re, root.im, fmt);
                 const rel = isExact ? '=' : '\\approx ';
-                const multLatex = root.multiplicity > 1 ? `\\ (\\times${root.multiplicity})` : '';
 
                 if (fmt === 'trig') {
                     const r = Math.hypot(root.re, root.im);
                     if (r < 1e-10) {
-                        wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=0${multLatex}`, mfSize));
+                        wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=0`, mfSize));
                     } else {
                         const theta  = Math.atan2(root.im, root.re);
                         const rLatex = this.niceRealLatex(r) ?? this.formatNumberShort(r);
@@ -7371,10 +7382,15 @@ class Komplexiti {
                         const rPart  = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
                         const label  = `${varName}_{${k + 1}}`;
                         wrapper.appendChild(makeMF(`${label}${rel}${rPart}\\cos(${thStr})`, mfSize));
-                        wrapper.appendChild(makeMF(`\\phantom{${label}${rel}}+${this._appendImaginaryUnit(rPart)}\\sin(${thStr})${multLatex}`, mfSize));
+                        wrapper.appendChild(makeMF(`\\phantom{${label}${rel}}+${this._appendImaginaryUnit(rPart)}\\sin(${thStr})`, mfSize));
                     }
+                    if (root.multiplicity > 1) wrapper.appendChild(makeMultiplicityBadge(root.multiplicity));
                 } else {
-                    wrapper.appendChild(makeMF(`${varName}_{${k + 1}}${rel}${this.formatComplexLatex(root.re, root.im, fmt)}${multLatex}`, mfSize));
+                    wrapper.style.display = 'flex';
+                    wrapper.style.alignItems = 'center';
+                    wrapper.style.gap = '6px';
+                    wrapper.appendChild(makeMF(`${varName}_{${k + 1}}${rel}${this.formatComplexLatex(root.re, root.im, fmt)}`, mfSize));
+                    if (root.multiplicity > 1) wrapper.appendChild(makeMultiplicityBadge(root.multiplicity));
                 }
 
                 rootsEl.appendChild(wrapper);
