@@ -5331,6 +5331,39 @@ class Komplexiti {
     // (w = n*pi + atan(k)). Uses mathjs's complex-capable asin/acos/atan directly. Fixes the same
     // box-truncation issue as _tryExpLogPowSubstitution (e.g. sin(x)=0 only showed roots within
     // +-10 from the generic grid search before).
+    // sin/cos each produce TWO interleaved root families (e.g. sin(z)=0's "0+2n*pi" and
+    // "-pi+2n*pi"). When two families share the same step and their bases are offset by exactly
+    // half that step (mod step), they describe alternating points of a SINGLE arithmetic
+    // progression with half the step - e.g. those two families together are just all integer
+    // multiples of pi ("n*pi"), not two separate lines. Detect and merge such pairs so the card
+    // shows one compact entry instead of two whenever this simplification applies.
+    _mergeInterleavedPeriodicFamilies(families) {
+        const used = new Array(families.length).fill(false);
+        const merged = [];
+        for (let i = 0; i < families.length; i++) {
+            if (used[i]) continue;
+            let matchedWith = -1;
+            for (let j = i + 1; j < families.length; j++) {
+                if (used[j]) continue;
+                const a = families[i], b = families[j];
+                if (Math.hypot(a.step.re - b.step.re, a.step.im - b.step.im) > 1e-6) continue;
+                const halfStep = { re: a.step.re / 2, im: a.step.im / 2 };
+                const ratio = this._cDiv(this._cSub(b.base, a.base), halfStep);
+                if (Math.abs(ratio.im) > 1e-6) continue;
+                const nearestOdd = 2 * Math.round((ratio.re - 1) / 2) + 1;
+                if (Math.abs(ratio.re - nearestOdd) > 1e-6) continue;
+                matchedWith = j;
+                break;
+            }
+            if (matchedWith === -1) { merged.push(families[i]); continue; }
+            const a = families[i], b = families[matchedWith];
+            const base = Math.hypot(a.base.re, a.base.im) <= Math.hypot(b.base.re, b.base.im) ? a.base : b.base;
+            merged.push({ base, step: { re: a.step.re / 2, im: a.step.im / 2 } });
+            used[i] = used[matchedWith] = true;
+        }
+        return merged;
+    }
+
     _tryTrigSubstitution(lhs, rhs, varName, scope) {
         const hExpr = `(${lhs}) - (${rhs})`;
         let root;
@@ -5415,9 +5448,9 @@ class Komplexiti {
         }
         if (!roots.length) return null;
 
-        const periodic = families
+        const periodic = this._mergeInterleavedPeriodicFamilies(families
             .map(f => (Math.abs(f.step.re) < 1e-6 * Math.max(1, Math.abs(f.step.im)) || Math.abs(f.step.im) < 1e-6 * Math.max(1, Math.abs(f.step.re))) ? f : null)
-            .filter(Boolean);
+            .filter(Boolean));
 
         // tan's poles (from its internal sin/cos division) sit at C*z+D = pi/2 + n*pi, for ANY
         // target K - not just K=0 - so they're solved in closed form here too, unbounded by the
