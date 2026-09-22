@@ -4945,15 +4945,18 @@ class Komplexiti {
 
     // Tries the safe (maxDeg=6) extraction, then retries at maxDeg=10 if that fails - shared by
     // the fast rational-equation split below and mirrors the same two-step retry used inline in
-    // parseEquation for the plain-polynomial fast path.
+    // parseEquation for the plain-polynomial fast path. Bails immediately for sin/cos/tan/exp/log
+    // (never genuinely polynomials): being entire functions, a high-enough-order Taylor
+    // truncation can still pass _matchesPolynomialApproximation's fixed sample-point check purely
+    // by local convergence, which would otherwise misidentify e.g. sin(z) as some degree-9
+    // "polynomial" and solve for its (nonexistent) extra roots.
     _extractPolynomialCoeffsSafe(expr, varName, scope) {
+        if (/(?<![a-zA-Z])(?:sin|cos|tan|exp|log|log10|log2)\(/.test(expr)) return null;
         let c = this._extractPolynomialCoeffs(expr, varName, scope);
         if (c && c.length >= 2 && !this._matchesPolynomialApproximation(expr, c, varName, scope)) c = null;
         if (!c || c.length < 2) {
             const higher = this._extractPolynomialCoeffs(expr, varName, scope, 10);
             if (higher && higher.length >= 2 && this._matchesPolynomialApproximation(expr, higher, varName, scope)) {
-                c = higher;
-            } else if (!c && higher) {
                 c = higher;
             }
         }
@@ -4995,8 +4998,8 @@ class Komplexiti {
     // 20s+) on a denominator that's a product of powers of total degree >= 5, even with a genuine
     // division present. Returns null (falls through to math.rationalize) if either side combines
     // more than one division. Otherwise returns { done:true, result } when the numerator provably
-    // has no roots (only poles/holes to report), or { coeffs, poles, holes } for the caller to
-    // solve normally.
+    // has no roots (only poles/holes to report), or { coeffs, poles, holes, polesPeriodic } for
+    // the caller to solve normally.
     _tryFastRationalEquation(lhs, rhs, varName, scope) {
         const L = this._splitSingleFraction(lhs);
         const R = this._splitSingleFraction(rhs);
@@ -5011,15 +5014,33 @@ class Komplexiti {
 
         const numCoeffs = this._extractPolynomialCoeffsSafe(numExpr, varName, scope);
         if (!numCoeffs) return null;
-        const denCoeffs = (denExpr === '1') ? null : this._extractPolynomialCoeffsSafe(denExpr, varName, scope);
-        if (denExpr !== '1' && !denCoeffs) return null;
 
-        let poles = null, holes = null;
-        if (denCoeffs && denCoeffs.length >= 2) {
-            const denRoots = this._solvePolynomial(denCoeffs).filter(p => isFinite(p.re) && isFinite(p.im));
-            const holeCandidates = denRoots.filter(p => Math.hypot(this._cPolyEval(numCoeffs, p).re, this._cPolyEval(numCoeffs, p).im) < 1e-6);
-            poles = denRoots.filter(p => !holeCandidates.some(h => Math.hypot(h.re - p.re, h.im - p.im) < 1e-9));
-            holes = holeCandidates;
+        let poles = null, holes = null, polesPeriodic = null;
+        if (denExpr !== '1') {
+            const denCoeffs = this._extractPolynomialCoeffsSafe(denExpr, varName, scope);
+            if (denCoeffs && denCoeffs.length >= 2) {
+                const denRoots = this._solvePolynomial(denCoeffs).filter(p => isFinite(p.re) && isFinite(p.im));
+                const holeCandidates = denRoots.filter(p => Math.hypot(this._cPolyEval(numCoeffs, p).re, this._cPolyEval(numCoeffs, p).im) < 1e-6);
+                poles = denRoots.filter(p => !holeCandidates.some(h => Math.hypot(h.re - p.re, h.im - p.im) < 1e-9));
+                holes = holeCandidates;
+            } else if (/(?<![a-zA-Z])(?:sin|cos|tan)\(/.test(denExpr)) {
+                // Denominator isn't a plain polynomial but may be a single sin/cos/tan(affine)
+                // term - reuse _tryTrigSubstitution to solve denExpr=0 (its zeros are exactly
+                // this equation's poles) in exact closed form as a periodic family, rather than
+                // falling back to the generic numeric grid search. That fallback is both
+                // imprecise and prone to outright WRONG spurious complex "poles" for a function
+                // like sin, whose only zeros are real (verified: 1/sin(z)=0 previously reported
+                // bogus poles near 5.35+-3.15i that don't mathematically exist).
+                const denZeros = this._tryTrigSubstitution(denExpr, '0', varName, scope);
+                if (!denZeros?.roots?.length) return null;
+                const holeCandidates = denZeros.roots.filter(p => Math.hypot(this._cPolyEval(numCoeffs, p).re, this._cPolyEval(numCoeffs, p).im) < 1e-6);
+                poles = denZeros.roots.filter(p => !holeCandidates.some(h => Math.hypot(h.re - p.re, h.im - p.im) < 1e-9));
+                holes = holeCandidates.length ? holeCandidates : null;
+                // The compact "base+n*step" form only stays valid if nothing was excluded as a hole.
+                polesPeriodic = holeCandidates.length ? null : denZeros.periodic;
+            } else {
+                return null; // denominator isn't a recognisable polynomial or trig form
+            }
         }
 
         if (numCoeffs.length < 2) {
@@ -5030,9 +5051,10 @@ class Komplexiti {
             return { done: true, result: {
                 type: 'locus', variable: varName, roots: null, locus,
                 poles: poles?.length ? poles : null, holes: holes?.length ? holes : null,
+                polesPeriodic: polesPeriodic?.length ? polesPeriodic : null,
             } };
         }
-        return { coeffs: numCoeffs, poles, holes };
+        return { coeffs: numCoeffs, poles, holes, polesPeriodic };
     }
 
     // Dispatches to the appropriate solver by degree; used for both equation roots and poles.
@@ -5887,6 +5909,7 @@ class Komplexiti {
             let fromRationalize = false;
             let poles = null; // denominator roots where the expression genuinely blows up
             let holes = null; // denominator roots that are also numerator roots - removable, finite limit
+            let polesPeriodic = null; // compact {base,step} form when poles come from a closed-form trig denominator
 
             // Discard Taylor series before trying rationalization: a degree-6 series for 1/(z+1)
             // looks non-null but fails the approximation check, blocking the rational path.
@@ -5923,6 +5946,7 @@ class Komplexiti {
                     fromRationalize = true;
                     poles = fast.poles;
                     holes = fast.holes;
+                    polesPeriodic = fast.polesPeriodic;
                 }
             }
 
@@ -6007,6 +6031,7 @@ class Komplexiti {
                         type: 'equation', variable: varName, roots: valid, lhs, rhs,
                         poles: validPoles?.length ? validPoles : null,
                         holes: validHoles?.length ? validHoles : null,
+                        polesPeriodic: polesPeriodic?.length ? polesPeriodic : null,
                     };
                 }
             }
