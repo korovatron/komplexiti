@@ -7723,18 +7723,20 @@ class Komplexiti {
     // purely imaginary (e.g. e^z=c) or purely real (e.g. tan(z)=c) - the only two cases with a
     // clean axis-aligned closed form; a general complex step returns null (caller should skip it).
     _renderPeriodicFamily(base, step) {
-        const baseLatex = this.formatComplexLatex(base.re, base.im, 'cartesian');
+        const baseIsZero = Math.hypot(base.re, base.im) < 1e-9;
+        const baseLatex  = this.formatComplexLatex(base.re, base.im, 'cartesian');
         const isImagStep = Math.abs(step.re) < 1e-6 * Math.max(1, Math.abs(step.im)) && Math.abs(step.im) > 1e-9;
         const isRealStep = Math.abs(step.im) < 1e-6 * Math.max(1, Math.abs(step.re)) && Math.abs(step.re) > 1e-9;
         if (isImagStep) {
             const piN = this._niceMultipleOfPiWithN(Math.abs(step.im));
             const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(step.im))}n`;
-            return `${baseLatex}+${this._appendImaginaryUnit(stepLatex)}`;
+            const nLatex = this._appendImaginaryUnit(stepLatex);
+            return baseIsZero ? nLatex : `${baseLatex}+${nLatex}`;
         }
         if (isRealStep) {
             const piN = this._niceMultipleOfPiWithN(Math.abs(step.re));
             const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(step.re))}n`;
-            return `${baseLatex}+${stepLatex}`;
+            return baseIsZero ? stepLatex : `${baseLatex}+${stepLatex}`;
         }
         return null;
     }
