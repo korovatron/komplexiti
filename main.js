@@ -6248,6 +6248,9 @@ class Komplexiti {
             ],
             'essential-singularity': [
                 { latex: 'e^{\\frac{1}{z}}=0', colorMode: true, showEssentialSingularities: true }
+            ],
+            'rational-function': [
+                { latex: '\\frac{z^2-1}{z^2+1}=0', colorMode: true }
             ]
         };
 
