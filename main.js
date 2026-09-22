@@ -5994,8 +5994,25 @@ class Komplexiti {
                             return { type: 'equation', variable: varName, roots: recip.roots, reciprocalGammaRoots: recip.reciprocalGammaRoots, lhs, rhs };
                         }
                     }
-                    // conj(z) = f(z) → multiply both sides by z: |z|² = z·f(z), which is often real-valued
+                    // conj(z) = C (C not depending on z) has the single exact root z = conj(C) -
+                    // handle this directly rather than falling into the "multiply by z" rewrite
+                    // below: |z|^2 = z*C degenerates to a NON-NEGATIVE function merely touching
+                    // zero at one point (not crossing it), which the curve tracer can't represent
+                    // as a locus, so it silently reported no roots at all for e.g. conj(z)=0.
+                    const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
                     const conjPat = new RegExp(`^conj\\(${varName}\\)$`);
+                    if (conjPat.test(lhs) && !varRe.test(rhs)) {
+                        try {
+                            const cVal = this._mathValueToComplex(math.evaluate(rhs, scope));
+                            if (cVal) return { type: 'equation', variable: varName, roots: [{ re: cVal.re, im: -cVal.im }], lhs, rhs };
+                        } catch { /* fall through to the generic handling below */ }
+                    } else if (conjPat.test(rhs) && !varRe.test(lhs)) {
+                        try {
+                            const cVal = this._mathValueToComplex(math.evaluate(lhs, scope));
+                            if (cVal) return { type: 'equation', variable: varName, roots: [{ re: cVal.re, im: -cVal.im }], lhs, rhs };
+                        } catch { /* fall through to the generic handling below */ }
+                    }
+                    // conj(z) = f(z) → multiply both sides by z: |z|² = z·f(z), which is often real-valued
                     if (conjPat.test(lhs) && !/(?<![a-zA-Z])conj\(/.test(rhs)) {
                         const rew = this._buildLocus(`abs(${varName})^2`, `(${varName}) * (${rhs})`, varName, scope);
                         if (rew?.scalar) return { type: 'locus', variable: varName, roots: null, locus: rew };
