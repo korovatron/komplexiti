@@ -5697,8 +5697,26 @@ class Komplexiti {
                 coeffs = null;
             }
 
-            // Rationalize to find exact roots of rational equations like 1/(z+1) = 1
-            if (!coeffs || coeffs.length < 2) {
+            // The cheap default (maxDeg=6) attempt above can fail simply because the polynomial's
+            // true degree is higher (e.g. (z-1)^4*(z+2)^3 is degree 7) - retry once with a higher
+            // cap before falling through to math.rationalize below, which (unlike this safe
+            // differentiation approach) can effectively hang - verified NOT to return within 20s -
+            // when asked to expand/simplify a product of powers of degree >= 5, even though such
+            // expressions contain no division at all. Only worth retrying when there's a real
+            // chance this is a plain polynomial (no division, not sin/cos/tan/exp/log).
+            if ((!coeffs || coeffs.length < 2) && !isNeverPolynomial) {
+                const higherDeg = this._extractPolynomialCoeffs(hExpr, varName, scope, 10);
+                if (higherDeg && higherDeg.length >= 2 && this._matchesPolynomialApproximation(hExpr, higherDeg, varName, scope)) {
+                    coeffs = higherDeg;
+                }
+            }
+
+            // Rationalize to find exact roots of rational equations like 1/(z+1) = 1. Only attempted
+            // when the expression genuinely contains a division: math.rationalize's simplify/expand
+            // step can take an extremely long time (effectively hangs the tab) on pure polynomial
+            // products of powers like (z-1)^4*(z+2)^3, and it offers no benefit there anyway since
+            // there's no fraction to clear - the differentiation attempts above already cover that case.
+            if ((!coeffs || coeffs.length < 2) && hasDivision) {
                 try {
                     const rat = math.rationalize(hExpr, {}, true);
                     if (rat?.numerator) {
