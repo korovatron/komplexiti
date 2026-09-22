@@ -5294,16 +5294,27 @@ class Komplexiti {
         return this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
     }
 
-    // Solves "sqrt(inner) = 0" (or "0 = sqrt(inner)") by solving inner = 0 directly, instead of
-    // handing the whole sqrt-wrapped equation to the generic numeric root finder. This matters
-    // because sqrt(u) has an unbounded derivative (1/(2*sqrt(u))) at its own zero u=0 - a genuine
-    // branch-point/cusp, not a numerical fluke - so the finite-difference Jacobian used by
-    // _findComplexEquationRootsNumerically's Newton refinement becomes singular exactly AT any
-    // true root (confirmed via manual tracing: straddling the root along the real axis flips
+    // Solves "sqrt(inner) = target" (or "target = sqrt(inner)") for a z-independent constant
+    // target, by solving inner = target^2 directly instead of handing the whole sqrt-wrapped
+    // equation to the generic numeric root finder. This matters because sqrt(u) has a branch cut
+    // along the negative real axis - a genuine discontinuity, not a numerical fluke - so whenever
+    // target^2 lands on (or at) that cut (e.g. target=0, or any purely imaginary target such as
+    // target=i, since i^2=-1), the finite-difference Jacobian used by
+    // _findComplexEquationRootsNumerically's Newton refinement becomes unreliable exactly AT any
+    // true root (confirmed via manual tracing: straddling such a root along the real axis flips
     // sqrt between real and purely-imaginary output, since the radicand changes sign there).
-    // Genuine equations like sqrt(1-1/z^2+z^3)=0 (5 true roots, matching z^5+z^2-1=0) were
-    // silently reported as having no roots at all. Only handles target=0 (sqrt(u)=0 iff u=0, no
-    // branch ambiguity); a nonzero target would need an extra sign/branch check this doesn't do.
+    // Genuine equations like sqrt(1-1/z^2+z^3)=0 or =i (5 true roots each, matching z^5+z^2-1=0 /
+    // z^5+2z^2-1=0 respectively) were silently reported as having no roots, or only some found by
+    // luck. Squaring can introduce extraneous candidates, but here inner(z) is the SAME constant
+    // (target^2) at every root by construction, so there's no per-root branch ambiguity to check -
+    // only a single global one (is target actually the principal sqrt of target^2, or is it -target,
+    // in which case there are NO solutions at all). Deliberately does NOT verify each root by
+    // re-evaluating sqrt(inner(root)) numerically and comparing to target: since target^2 sits
+    // exactly on the branch cut for these problem cases, a per-root computed `inner` value carries
+    // tiny floating-point noise that can land on either side of the cut, flipping the sign of a
+    // freshly-evaluated sqrt() essentially at random and wrongly rejecting/accepting roots (this
+    // was the actual bug - confirmed inner(root) is correctly -1 for every root of sqrt(...)=i, but
+    // math.sqrt(complex(-1, 1e-15)) = i while math.sqrt(complex(-1,-1e-15)) = -i).
     _trySqrtEqualsZero(lhs, rhs, varName, scope) {
         const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
         let sqrtSide, otherSide;
@@ -5316,19 +5327,31 @@ class Komplexiti {
         if (node.type !== 'FunctionNode' || node.fn?.name !== 'sqrt' || node.args?.length !== 1) return null;
         let target;
         try { target = this._mathValueToComplex(math.evaluate(otherSide, scope)); } catch { return null; }
-        if (!target || Math.hypot(target.re, target.im) > 1e-9) return null; // only target===0 handled
+        if (!target) return null;
+        const targetSq = this._cMul(target, target);
+        // The principal sqrt of a FIXED complex number is single-valued and exact (no per-root
+        // noise here, targetSq is computed directly from target, not from an evaluated root).
+        let principalRoot;
+        try { principalRoot = math.sqrt(math.complex(targetSq.re, targetSq.im)); } catch { return null; }
+        if (Math.hypot(principalRoot.re - target.re, principalRoot.im - target.im) > 1e-6) {
+            return []; // target is the "wrong" branch (sqrt always yields -target here): no solutions
+        }
+        const targetSqStr = `(${targetSq.re})+(${targetSq.im})*i`;
         const innerStr = node.args[0].toString();
-        const innerRoots = this._solveGeneralEquation(innerStr, '0', varName, scope);
+        const innerRoots = this._solveGeneralEquation(innerStr, targetSqStr, varName, scope);
         if (!innerRoots) return null;
         if (!innerRoots.length) return [];
-        // Verify each candidate against the ORIGINAL sqrt-wrapped equation as a numerical safety net.
-        let lhsNode, rhsNode;
-        try { lhsNode = math.parse(lhs); rhsNode = math.parse(rhs); } catch { return null; }
+        // Sanity-check each candidate solves inner=target^2 (plain magnitude compare, no sqrt
+        // involved, so this is NOT sensitive to the branch cut, unlike re-evaluating the original
+        // sqrt-wrapped equation would be).
+        let innerNode;
+        try { innerNode = math.parse(innerStr); } catch { return null; }
         const valid = [];
         for (const r of innerRoots) {
             try {
                 const ev   = { ...scope, [varName]: math.complex(r.re, r.im) };
-                const diff = this._equationDifferenceMagnitude(lhsNode.evaluate(ev), rhsNode.evaluate(ev));
+                const val  = this._mathValueToComplex(innerNode.evaluate(ev));
+                const diff = Math.hypot(val.re - targetSq.re, val.im - targetSq.im);
                 if (diff < 1e-4) valid.push(r);
             } catch { /* skip - likely a pole */ }
         }
@@ -6030,9 +6053,9 @@ class Komplexiti {
             // General polynomial solver via symbolic differentiation
             const hExpr  = `(${lhs}) - (${rhs})`;
 
-            // sqrt(inner) = 0 (or 0 = sqrt(inner)): solve inner = 0 directly rather than letting
-            // the generic numeric root finder near the outer sqrt's own branch point (see
-            // _trySqrtEqualsZero for why that finder fails there).
+            // sqrt(inner) = const (or const = sqrt(inner)): solve inner = const^2 directly rather
+            // than letting the generic numeric root finder near the outer sqrt's own branch cut
+            // (see _trySqrtEqualsZero for why that finder fails there).
             if (/(?<![a-zA-Z])sqrt\(/.test(hExpr)) {
                 const sqrtRoots = this._trySqrtEqualsZero(lhs, rhs, varName, scope);
                 if (sqrtRoots) {
@@ -7466,14 +7489,14 @@ class Komplexiti {
                             wrapper.title = `Known non-trivial zero pair of \u03b6 (critical strip) - no closed form, numerically computed`;
                             if (fmt === 'cartesian') {
                                 const reLatex = this.niceRealLatex(re) ?? this.formatNumberShort(re);
-                                const imLatex = this.niceRealLatex(imAbs) ?? this.formatNumberShort(imAbs);
+                                const imLatex = this._wrapCompoundCoefficient(this.niceRealLatex(imAbs) ?? this.formatNumberShort(imAbs));
                                 wrapper.appendChild(makeMF(`${varName}\\approx${reLatex}\\pm${this._appendImaginaryUnit(imLatex)}`, 18));
                             } else {
                                 const r = Math.hypot(re, imAbs);
                                 const theta = Math.atan2(imAbs, re);
                                 const rLatex = this.niceRealLatex(r) ?? this.formatNumberShort(r);
                                 const thLatex = this.niceAngleLatex(theta) ?? this.formatNumberShort(theta);
-                                const rPart = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
+                                const rPart = Math.abs(r - 1) < 1e-9 ? '' : this._wrapCompoundCoefficient(rLatex);
                                 if (fmt === 'exponential') {
                                     wrapper.appendChild(makeMF(`${varName}\\approx${this._safeLatexConcat(rPart, 'e')}^{\\pm i${thLatex}}`, 22));
                                 } else {
@@ -7510,7 +7533,7 @@ class Komplexiti {
                         const theta  = Math.atan2(root.im, root.re);
                         const rLatex = this.niceRealLatex(r) ?? this.formatNumberShort(r);
                         const thStr  = this.niceAngleLatex(theta) ?? this.formatNumberShort(theta);
-                        const rPart  = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
+                        const rPart  = Math.abs(r - 1) < 1e-9 ? '' : this._wrapCompoundCoefficient(rLatex);
                         const label  = `${varName}_{${k + 1}}`;
                         wrapper.appendChild(makeMF(`${label}${rel}${rPart}\\cos(${thStr})`, mfSize));
                         wrapper.appendChild(makeMF(`\\phantom{${label}${rel}}+${this._appendImaginaryUnit(rPart)}\\sin(${thStr})`, mfSize));
@@ -7852,7 +7875,7 @@ class Komplexiti {
     formatCartesianLatex(re, im) {
         const aStr = this.niceRealLatex(re)          ?? this.formatNumberShort(re);
         const bAbs = this.niceRealLatex(Math.abs(im)) ?? this.formatNumberShort(Math.abs(im));
-        const bStr = bAbs === '1' ? '' : bAbs;
+        const bStr = bAbs === '1' ? '' : this._wrapCompoundCoefficient(bAbs);
         const iUnit = this._appendImaginaryUnit(bStr);
         if (Math.abs(im) < 1e-10) return aStr;
         if (Math.abs(re) < 1e-10) return im < -1e-10 ? `-${iUnit}` : iUnit;
@@ -7869,6 +7892,16 @@ class Komplexiti {
     }
     _appendImaginaryUnit(coeffLatex) {
         return this._safeLatexConcat(coeffLatex, 'i');
+    }
+    // niceRealLatex can return a compound two-term expression (e.g. "3\sqrt{3}-4" for an
+    // integer+rational*sqrt(k) match) - concatenating that directly before another multiplicative
+    // factor (i, e^..., a trig group) reads as two separate additive terms instead of one
+    // coefficient (e.g. "3\sqrt{3}-4i" looks like "3\sqrt{3}" minus "4i", not "(3\sqrt{3}-4)i").
+    // Wrap in parentheses whenever the body (ignoring one possible leading '-') has a top-level +/-.
+    _wrapCompoundCoefficient(latex) {
+        if (!latex) return latex;
+        const body = latex.startsWith('-') ? latex.slice(1) : latex;
+        return /[+-]/.test(body) ? `\\left(${latex}\\right)` : latex;
     }
 
     // ---- Nice-number helpers (adapted from Graphiti) ----
@@ -8067,7 +8100,7 @@ class Komplexiti {
                 const absθ  = Math.abs(theta);
                 const thStr = this.niceAngleLatex(absθ)          ?? this.formatNumberShort(absθ);
                 const sign  = theta < -1e-10 ? '-' : '';
-                const rPart = Math.abs(r - 1) < 1e-9 ? '' : rStr;
+                const rPart = Math.abs(r - 1) < 1e-9 ? '' : this._wrapCompoundCoefficient(rStr);
                 return `${this._safeLatexConcat(rPart, 'e')}^{${sign}i${thStr}}`;
             }
             case 'trig': {
@@ -8075,7 +8108,7 @@ class Komplexiti {
                 const rStr  = this.niceRealLatex(r)              ?? this.formatNumberShort(r);
                 const thStr = this.niceAngleLatex(theta)         ?? this.formatNumberShort(theta);
                 const trig  = `\\cos(${thStr})+i\\sin(${thStr})`;
-                return Math.abs(r - 1) < 1e-9 ? trig : `${rStr}(${trig})`;
+                return Math.abs(r - 1) < 1e-9 ? trig : `${this._wrapCompoundCoefficient(rStr)}(${trig})`;
             }
             default:
                 return this.formatCartesianLatex(re, im);
