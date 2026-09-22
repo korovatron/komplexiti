@@ -4992,7 +4992,69 @@ class Komplexiti {
             zs = next;
             if (maxStep < 1e-12) break;
         }
-        return zs;
+        return this._clusterAndRefineRoots(zs, monic);
+    }
+
+    // Durand-Kerner jitters slightly around a root of multiplicity m > 1: its m copies converge
+    // to nearly (but not exactly) the same value, e.g. z=1+-1.4e-4i x4 for a multiplicity-4 root
+    // (verified via (z-1)^4*(z+2)^3=0). Group raw roots within clusterTol of each other and
+    // replace each group with a single value refined via multiplicity-aware Newton
+    // (z -= m*p(z)/p'(z), which converges quadratically once the true multiplicity m is known,
+    // unlike plain Newton's linear convergence on a multiple root) rather than returning m
+    // near-duplicate, numerically-noisy copies.
+    _clusterAndRefineRoots(zs, monic) {
+        const clusterTol = 1e-3;
+        const used = new Array(zs.length).fill(false);
+        const groups = [];
+        for (let i = 0; i < zs.length; i++) {
+            if (used[i]) continue;
+            const group = [zs[i]];
+            used[i] = true;
+            for (let j = i + 1; j < zs.length; j++) {
+                if (used[j]) continue;
+                if (Math.hypot(zs[j].re - zs[i].re, zs[j].im - zs[i].im) < clusterTol) {
+                    group.push(zs[j]);
+                    used[j] = true;
+                }
+            }
+            groups.push(group);
+        }
+
+        const deriv = this._cPolyDerivative(monic);
+        return groups.map(group => {
+            const m = group.length;
+            let z = {
+                re: group.reduce((s, r) => s + r.re, 0) / m,
+                im: group.reduce((s, r) => s + r.im, 0) / m,
+            };
+            if (m > 1) {
+                // Both p(z) and p'(z) vanish at a multiplicity-m root, so once z is close the
+                // ratio p/p' is noise-over-noise and the iterate can wobble back away from the
+                // root instead of settling - track the best (smallest |p(z)|) iterate seen and
+                // return that, rather than trusting whichever one the fixed loop happens to end on.
+                let best = z, bestMag = Math.hypot(this._cPolyEval(monic, z).re, this._cPolyEval(monic, z).im);
+                for (let iter = 0; iter < 20; iter++) {
+                    const dp = this._cPolyEval(deriv, z);
+                    if (Math.hypot(dp.re, dp.im) < 1e-14) break;
+                    const p    = this._cPolyEval(monic, z);
+                    const mag  = Math.hypot(p.re, p.im);
+                    if (mag < bestMag) { bestMag = mag; best = z; }
+                    const step = this._cMul({ re: m, im: 0 }, this._cDiv(p, dp));
+                    z = this._cSub(z, step);
+                    if (Math.hypot(step.re, step.im) < 1e-13) break;
+                }
+                const finalMag = Math.hypot(this._cPolyEval(monic, z).re, this._cPolyEval(monic, z).im);
+                z = finalMag < bestMag ? z : best;
+            }
+            return z;
+        });
+    }
+
+    // Derivative of coeffs = [a0, a1, ..., an] (ascending powers), returns [a1, 2a2, ..., n*an].
+    _cPolyDerivative(coeffs) {
+        const deriv = [];
+        for (let k = 1; k < coeffs.length; k++) deriv.push(this._cMul({ re: k, im: 0 }, coeffs[k]));
+        return deriv;
     }
 
     // Substitute u = sqrt(varName), varName = u*u to clear a sqrt(varName) term and solve as a polynomial.
