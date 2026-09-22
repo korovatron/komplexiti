@@ -5079,6 +5079,12 @@ class Komplexiti {
         const sqrtD = this._cSqrt(disc);
         const negA1 = { re: -a1.re, im: -a1.im };
         const two2  = { re: 2 * a2.re, im: 2 * a2.im };
+        // A near-zero discriminant is a repeated root - report it once, with multiplicity 2,
+        // rather than two identical entries (the +/- sqrtD formulas coincide when disc ~ 0).
+        if (Math.hypot(disc.re, disc.im) < 1e-9 * Math.max(1, Math.hypot(a1.re, a1.im) ** 2)) {
+            const z = this._cDiv(negA1, two2);
+            return [{ re: z.re, im: z.im, multiplicity: 2 }];
+        }
         return [
             this._cDiv(this._cAdd(negA1, sqrtD), two2),
             this._cDiv(this._cSub(negA1, sqrtD), two2)
@@ -5178,7 +5184,7 @@ class Komplexiti {
                 const finalMag = Math.hypot(this._cPolyEval(monic, z).re, this._cPolyEval(monic, z).im);
                 z = finalMag < bestMag ? z : best;
             }
-            return z;
+            return { re: z.re, im: z.im, multiplicity: m };
         });
     }
 
@@ -7156,8 +7162,10 @@ class Komplexiti {
                     const isExact = this._isExactComplex(pole.re, pole.im, 'cartesian');
                     const poleRel = isExact ? '=' : '\\approx ';
                     const approxNote = isExact ? '' : ' (approximate)';
-                    wrapper.title = `${varName} ${isExact ? '=' : '\u2248'} ${this.formatComplexPlain(pole.re, pole.im, 'cartesian')} makes the expression undefined (division by zero)${approxNote}`;
-                    wrapper.appendChild(makeMF(`${varName}${poleRel}${this.formatComplexLatex(pole.re, pole.im, 'cartesian')}`, 17));
+                    const multNote = pole.multiplicity > 1 ? ` (multiplicity ${pole.multiplicity})` : '';
+                    const multLatex = pole.multiplicity > 1 ? `\\ (\\times${pole.multiplicity})` : '';
+                    wrapper.title = `${varName} ${isExact ? '=' : '\u2248'} ${this.formatComplexPlain(pole.re, pole.im, 'cartesian')} makes the expression undefined (division by zero)${approxNote}${multNote}`;
+                    wrapper.appendChild(makeMF(`${varName}${poleRel}${this.formatComplexLatex(pole.re, pole.im, 'cartesian')}${multLatex}`, 17));
                     polesList.appendChild(wrapper);
                 }
             } else {
@@ -7338,18 +7346,20 @@ class Komplexiti {
                 if (!isFinite(root.re) || !isFinite(root.im)) continue;
                 // Full-precision tooltip in current display format
                 const toSub   = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
-                const tooltip = `${varName}${toSub(k + 1)} = ${this.formatComplexPlain(root.re, root.im, fmt)}`;
+                const multNote = root.multiplicity > 1 ? ` (multiplicity ${root.multiplicity})` : '';
+                const tooltip = `${varName}${toSub(k + 1)} = ${this.formatComplexPlain(root.re, root.im, fmt)}${multNote}`;
                 const wrapper = document.createElement('div');
                 wrapper.title = tooltip;
 
                 const mfSize = fmt === 'exponential' ? 22 : 18;
                 const isExact = this._isExactComplex(root.re, root.im, fmt);
                 const rel = isExact ? '=' : '\\approx ';
+                const multLatex = root.multiplicity > 1 ? `\\ (\\times${root.multiplicity})` : '';
 
                 if (fmt === 'trig') {
                     const r = Math.hypot(root.re, root.im);
                     if (r < 1e-10) {
-                        wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=0`, mfSize));
+                        wrapper.appendChild(makeMF(`${varName}_{${k + 1}}=0${multLatex}`, mfSize));
                     } else {
                         const theta  = Math.atan2(root.im, root.re);
                         const rLatex = this.niceRealLatex(r) ?? this.formatNumberShort(r);
@@ -7357,10 +7367,10 @@ class Komplexiti {
                         const rPart  = Math.abs(r - 1) < 1e-9 ? '' : rLatex;
                         const label  = `${varName}_{${k + 1}}`;
                         wrapper.appendChild(makeMF(`${label}${rel}${rPart}\\cos(${thStr})`, mfSize));
-                        wrapper.appendChild(makeMF(`\\phantom{${label}${rel}}+${this._appendImaginaryUnit(rPart)}\\sin(${thStr})`, mfSize));
+                        wrapper.appendChild(makeMF(`\\phantom{${label}${rel}}+${this._appendImaginaryUnit(rPart)}\\sin(${thStr})${multLatex}`, mfSize));
                     }
                 } else {
-                    wrapper.appendChild(makeMF(`${varName}_{${k + 1}}${rel}${this.formatComplexLatex(root.re, root.im, fmt)}`, mfSize));
+                    wrapper.appendChild(makeMF(`${varName}_{${k + 1}}${rel}${this.formatComplexLatex(root.re, root.im, fmt)}${multLatex}`, mfSize));
                 }
 
                 rootsEl.appendChild(wrapper);
