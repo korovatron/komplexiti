@@ -5158,7 +5158,6 @@ class Komplexiti {
             groups.push(group);
         }
 
-        const deriv = this._cPolyDerivative(monic);
         return groups.map(group => {
             const m = group.length;
             let z = {
@@ -5166,29 +5165,27 @@ class Komplexiti {
                 im: group.reduce((s, r) => s + r.im, 0) / m,
             };
             if (m > 1) {
-                // Both p(z) and p'(z) vanish at a multiplicity-m root, so once z is close the
-                // ratio p/p' is noise-over-noise and the iterate can wobble back away from the
-                // root instead of settling - track the best (smallest |p(z)|) iterate seen and
-                // return that, rather than trusting whichever one the fixed loop happens to end on.
-                let best = z, bestMag = Math.hypot(this._cPolyEval(monic, z).re, this._cPolyEval(monic, z).im);
+                // p(z) and p'(z) both vanish at a multiplicity-m root, so a plain Newton-style
+                // p/p' ratio is noise-over-noise there. But p^(m-1)(z) - the (m-1)th derivative -
+                // has a genuine SIMPLE zero at z0 (p(z)=(z-z0)^m*g(z), g(z0)!=0 implies
+                // p^(m-1)(z) = m!*(z-z0)*g(z0) + O((z-z0)^2)), so plain Newton on p^(m-1)/p^(m)
+                // converges quadratically and cleanly, with none of the wobble/instability a
+                // direct p/p' (or m*p/p') iteration suffers from this close to the root.
+                let gDeriv = monic;
+                for (let i = 0; i < m - 1; i++) gDeriv = this._cPolyDerivative(gDeriv);
+                const gDeriv2 = this._cPolyDerivative(gDeriv);
+                let best = z, bestMag = Math.hypot(this._cPolyEval(gDeriv, z).re, this._cPolyEval(gDeriv, z).im);
                 for (let iter = 0; iter < 20; iter++) {
-                    const p   = this._cPolyEval(monic, z);
-                    const mag = Math.hypot(p.re, p.im);
+                    const g   = this._cPolyEval(gDeriv, z);
+                    const mag = Math.hypot(g.re, g.im);
                     if (mag < bestMag) { bestMag = mag; best = z; }
-                    const dp = this._cPolyEval(deriv, z);
-                    if (Math.hypot(dp.re, dp.im) < 1e-14) {
-                        // p'(z) ~ m*(z-z0)^(m-1) also vanishes at the root, so it can legitimately
-                        // be this tiny even when z is only moderately close (not yet as precise as
-                        // possible) - perturb rather than aborting the whole refinement here, so
-                        // later iterations still get a chance to wobble onto a better point.
-                        z = this._cAdd(z, { re: 1e-3, im: 0 });
-                        continue;
-                    }
-                    const step = this._cMul({ re: m, im: 0 }, this._cDiv(p, dp));
+                    const gp = this._cPolyEval(gDeriv2, z);
+                    if (Math.hypot(gp.re, gp.im) < 1e-14) break;
+                    const step = this._cDiv(g, gp);
                     z = this._cSub(z, step);
-                    if (Math.hypot(step.re, step.im) < 1e-13) break;
+                    if (Math.hypot(step.re, step.im) < 1e-14) break;
                 }
-                const finalMag = Math.hypot(this._cPolyEval(monic, z).re, this._cPolyEval(monic, z).im);
+                const finalMag = Math.hypot(this._cPolyEval(gDeriv, z).re, this._cPolyEval(gDeriv, z).im);
                 z = finalMag < bestMag ? z : best;
             }
             return { re: z.re, im: z.im, multiplicity: m };
