@@ -2373,10 +2373,10 @@ class Komplexiti {
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
-        // Poles/holes markers are off by default to keep the diagram clean; opt in via the toggle.
+        // Poles are on by default (like foci/centre/extrema); holes stay opt-in below.
         const polesToggleBtn = card.querySelector('.poles-visibility-toggle');
         polesToggleBtn.addEventListener('click', () => {
-            c.showPoles = (c.showPoles === true) ? false : true;
+            c.showPoles = (c.showPoles !== false) ? false : true;
             this.updateCardMetadata(c);
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -2421,6 +2421,7 @@ class Komplexiti {
                 window.goatcounter.count({ path: 'Komplexiti - Domain Colouring toggled', event: true });
             }
             this.updateAllCardMetadata();
+            this.saveExpressions();
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
 
@@ -2528,7 +2529,8 @@ class Komplexiti {
     saveExpressions() {
         if (this.tempSession) return; // never overwrite saved state during a shared session
         const data = {
-            nextId:    this.nextExpressionId,
+            nextId:      this.nextExpressionId,
+            colorModeId: this.colorModeExpressionId,
             expressions: this.expressions
                 .filter(c => c.latex && c.latex.trim() !== '')
                 .map(c => ({
@@ -2543,6 +2545,7 @@ class Komplexiti {
 
     loadExpressions() {
         let hasLoaded = false;
+        let pendingColorModeId = null;
         try {
             const raw = localStorage.getItem('komplexiti-constants');
             if (raw) {
@@ -2557,6 +2560,9 @@ class Komplexiti {
                         this.createExpressionUI(c, { skipFocus: true });
                     }
                     hasLoaded = true;
+                    if (typeof data.colorModeId === 'number' && saved.some(item => item.id === data.colorModeId)) {
+                        pendingColorModeId = data.colorModeId;
+                    }
                 }
             }
         } catch { /* ignore corrupt data */ }
@@ -2570,6 +2576,18 @@ class Komplexiti {
         }
         // Always keep one blank tile at the bottom
         if (!this.expressions.some(c => !c.latex || c.latex.trim() === '')) this.addExpression({ skipFocus: true });
+
+        // Each card's math-field applies its latex (and dispatches its own 'input' event, which
+        // clears colour mode as an edit) on a deferred requestAnimationFrame in createExpressionUI
+        // - queuing this restore in a further requestAnimationFrame runs it after all of theirs.
+        if (pendingColorModeId !== null) {
+            requestAnimationFrame(() => {
+                this.colorModeExpressionId = pendingColorModeId;
+                this._colorLayerCache = null;
+                this.updateAllCardMetadata();
+                if (this.currentState === this.states.APP) this.drawCanvas();
+            });
+        }
     }
 
     // Returns { name, valueLaTeX } if the expression is a valid assignment, else null.
@@ -7123,7 +7141,7 @@ class Komplexiti {
                 // Compact form for a periodic pole family (e.g. tan(z)=0's poles at pi/2+n*pi) -
                 // exact and unbounded by the search box, unlike the generic numeric pole search.
                 polesContainer.classList.add('visible');
-                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
+                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles === false);
                 polesList.innerHTML = '';
                 for (const { base, step } of c.polesPeriodic) {
                     const rendered = this._renderPeriodicFamily(base, step);
@@ -7137,7 +7155,7 @@ class Komplexiti {
                 // Compact form for gamma's poles at C*z+D = 0,-1,-2,... (n=0,1,2,... only, unlike
                 // tan's two-sided family) - same underlying maths as trivialZeta's roots display.
                 polesContainer.classList.add('visible');
-                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
+                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles === false);
                 polesList.innerHTML = '';
                 const { slope, intercept } = c.gammaPolePeriodic;
                 const coeffLatex = Math.abs(slope - 1) < 1e-9 ? 'n'
@@ -7153,7 +7171,7 @@ class Komplexiti {
                 // Compact form for 1/zeta(...)=0's poles (zeta's own trivial zeros, at
                 // slope*n+intercept for n=1,2,3,...) - mirrors trivialZeta's roots display.
                 polesContainer.classList.add('visible');
-                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
+                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles === false);
                 polesList.innerHTML = '';
                 const { slope, intercept } = c.reciprocalZetaPoles;
                 const coeffLatex2 = Math.abs(slope - 1) < 1e-9 ? 'n'
@@ -7167,7 +7185,7 @@ class Komplexiti {
                 polesList.appendChild(wrapper);
             } else if (c.poles?.length) {
                 polesContainer.classList.add('visible');
-                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles !== true);
+                if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles === false);
                 polesList.innerHTML = '';
                 for (const pole of c.poles) {
                     if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
@@ -8076,10 +8094,11 @@ class Komplexiti {
             const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
 
             // Poles (×, standard pole-zero-plot notation) and holes (open circle, matching
-            // Graphiti's convention for removable discontinuities) - hidden until opted in via
-            // toggle. Applies to both 'equation' and 'locus' results (e.g. arg((z-1)/(z+1))=pi/4
-            // is a locus with a pole at z=-1), so this runs before the per-type branches below.
-            if (c.showPoles === true && c.poles?.length) {
+            // Graphiti's convention for removable discontinuities). Poles are on by default;
+            // holes stay hidden until opted in via toggle. Applies to both 'equation' and 'locus'
+            // results (e.g. arg((z-1)/(z+1))=pi/4 is a locus with a pole at z=-1), so this runs
+            // before the per-type branches below.
+            if (c.showPoles !== false && c.poles?.length) {
                 for (let k = 0; k < c.poles.length; k++) {
                     const pole = c.poles[k];
                     if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
@@ -9553,9 +9572,9 @@ class Komplexiti {
             if (!c.enabled) continue;
             const color = exprColor(c);
 
-            // Poles (×) and holes (open circle) - only drawn if opted in via the card toggle.
+            // Poles (×) shown by default; holes (open circle) only drawn if opted in via toggle.
             // Applies to both 'equation' and 'locus' results, so this runs before the per-type branches.
-            if (c.showPoles === true && c.poles?.length) {
+            if (c.showPoles !== false && c.poles?.length) {
                 for (let k = 0; k < c.poles.length; k++) {
                     const pole = c.poles[k];
                     if (!isFinite(pole.re) || !isFinite(pole.im)) continue;
