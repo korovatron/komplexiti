@@ -2390,7 +2390,7 @@ class Komplexiti {
 
         const essentialToggleBtn = card.querySelector('.essential-visibility-toggle');
         essentialToggleBtn.addEventListener('click', () => {
-            c.showEssentialSingularities = (c.showEssentialSingularities === true) ? false : true;
+            c.showEssentialSingularities = (c.showEssentialSingularities !== false) ? false : true;
             this.updateCardMetadata(c);
             if (this.currentState === this.states.APP) this.drawCanvas();
         });
@@ -7223,7 +7223,7 @@ class Komplexiti {
             }
             if (c.essentialSingularities?.length) {
                 essentialContainer.classList.add('visible');
-                if (essentialToggle) essentialToggle.classList.toggle('is-hidden', c.showEssentialSingularities !== true);
+                if (essentialToggle) essentialToggle.classList.toggle('is-hidden', c.showEssentialSingularities === false);
                 essentialList.innerHTML = '';
                 for (const es of c.essentialSingularities) {
                     if (!isFinite(es.re) || !isFinite(es.im)) continue;
@@ -8145,8 +8145,8 @@ class Komplexiti {
                 }
             }
             // Essential singularities (6-spoke asterisk, distinguishing them from the pole's ×
-            // and the hole's open circle) - hidden until opted in via their own toggle.
-            if (c.showEssentialSingularities === true && c.essentialSingularities?.length) {
+            // and the hole's open circle) - on by default, hidden only if explicitly toggled off.
+            if (c.showEssentialSingularities !== false && c.essentialSingularities?.length) {
                 for (let k = 0; k < c.essentialSingularities.length; k++) {
                     const es = c.essentialSingularities[k];
                     if (!isFinite(es.re) || !isFinite(es.im)) continue;
@@ -9599,8 +9599,8 @@ class Komplexiti {
                     }
                 }
             }
-            // Essential singularities (6-spoke asterisk) - only drawn if opted in via the card toggle.
-            if (c.showEssentialSingularities === true && c.essentialSingularities?.length) {
+            // Essential singularities (6-spoke asterisk) - on by default, hidden only if toggled off.
+            if (c.showEssentialSingularities !== false && c.essentialSingularities?.length) {
                 for (let k = 0; k < c.essentialSingularities.length; k++) {
                     const es = c.essentialSingularities[k];
                     if (!isFinite(es.re) || !isFinite(es.im)) continue;
