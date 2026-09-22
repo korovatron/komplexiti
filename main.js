@@ -2154,7 +2154,7 @@ class Komplexiti {
             const prevIdx   = this.expressionColors.indexOf(prevColor);
             color = this.expressionColors[(prevIdx + 1) % this.expressionColors.length];
         }
-        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, polesApproximate: false, essentialSingularities: null, essentialSingularitiesApproximate: false, periodic: null, trivialZeta: null, nonTrivialZeros: null, polesPeriodic: null, gammaPolePeriodic: null, equationVar: null, locus: null, hasParseError: false };
+        const c = { id, color, enabled: true, latex: '', name: null, re: null, im: null, type: 'value', roots: null, poles: null, holes: null, polesApproximate: false, essentialSingularities: null, essentialSingularitiesApproximate: false, periodic: null, trivialZeta: null, nonTrivialZeros: null, polesPeriodic: null, gammaPolePeriodic: null, reciprocalGammaRoots: null, equationVar: null, locus: null, hasParseError: false };
         this.expressions.push(c);
         this.createExpressionUI(c, { skipFocus });
         this.saveExpressions();
@@ -2270,6 +2270,7 @@ class Komplexiti {
             c.nonTrivialZeros = null;
             c.polesPeriodic = null;
             c.gammaPolePeriodic = null;
+            c.reciprocalGammaRoots = null;
             c.equationVar = null;
             c.equationLhs = null;
             c.equationRhs = null;
@@ -2311,6 +2312,7 @@ class Komplexiti {
                     c.nonTrivialZeros = eq.nonTrivialZeros ?? null;
                     c.polesPeriodic = eq.polesPeriodic ?? null;
                     c.gammaPolePeriodic = eq.gammaPolePeriodic ?? null;
+                    c.reciprocalGammaRoots = eq.reciprocalGammaRoots ?? null;
                     c.equationVar = eq.variable;
                     c.equationLhs = eq.lhs ?? null;
                     c.equationRhs = eq.rhs ?? null;
@@ -2688,6 +2690,7 @@ class Komplexiti {
                         c.nonTrivialZeros = eq.nonTrivialZeros ?? null;
                         c.polesPeriodic = eq.polesPeriodic ?? null;
                         c.gammaPolePeriodic = eq.gammaPolePeriodic ?? null;
+                        c.reciprocalGammaRoots = eq.reciprocalGammaRoots ?? null;
                         c.equationVar = eq.variable;
                         c.equationLhs = eq.lhs ?? null;
                         c.equationRhs = eq.rhs ?? null;
@@ -2715,6 +2718,7 @@ class Komplexiti {
                         c.nonTrivialZeros = null;
                         c.polesPeriodic = null;
                         c.gammaPolePeriodic = null;
+                        c.reciprocalGammaRoots = null;
                         c.equationVar = null;
                         c.locus = null;
                         c.compoundParts = null;
@@ -5729,6 +5733,37 @@ class Komplexiti {
         return { poles, gammaPolePeriodic };
     }
 
+    // "K/gamma(C*z+D) = 0" (equivalently "0 = K/gamma(...)", any nonzero constant K) has roots
+    // EXACTLY where gamma(C*z+D) blows up: gamma has simple poles at 0,-1,-2,..., and its
+    // reciprocal 1/gamma is entire with simple ZEROS at those same points. Reuses _findGammaPoles
+    // (the closed-form, unbounded pole finder for gamma) to report those as roots instead of
+    // falling back to the generic numeric root search, which only finds whichever handful land
+    // inside its bounded [-10,10]^2 grid and lists them individually rather than as a family -
+    // e.g. 1/gamma(z)=0 previously showed z=0,-1,...,-9 one by one instead of "z_n=-n,n=0,1,2,...".
+    // Only applies when one side is genuinely 0 and the other is a single fraction with a
+    // constant (z-independent) numerator over a gamma(...) denominator - anything else (a nonzero
+    // target, z appearing in the numerator too, etc.) isn't this simple reciprocal-zero pattern.
+    _tryGammaReciprocalZeros(lhs, rhs, varName, scope) {
+        const isZero = s => { try { return Math.abs(math.evaluate(s, scope)) < 1e-12; } catch { return s.trim() === '0'; } };
+        let recipExpr;
+        if (isZero(rhs)) recipExpr = lhs;
+        else if (isZero(lhs)) recipExpr = rhs;
+        else return null;
+
+        const split = this._splitSingleFraction(recipExpr);
+        if (!split || split.denominator === '1' || !/(?<![a-zA-Z])gamma\(/.test(split.denominator)) return null;
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        if (varRe.test(split.numerator)) return null; // numerator must not depend on z
+        let numVal;
+        try { numVal = math.evaluate(split.numerator, scope); } catch { return null; }
+        const numMag = typeof numVal === 'number' ? Math.abs(numVal) : Math.hypot(numVal?.re ?? 0, numVal?.im ?? 0);
+        if (numMag < 1e-12) return null; // numerator is also 0 - degenerate, not this pattern
+
+        const gp = this._findGammaPoles(`(${split.denominator}) - (0)`, varName, scope);
+        if (!gp?.poles?.length) return null;
+        return { roots: gp.poles, reciprocalGammaRoots: gp.gammaPolePeriodic };
+    }
+
     // Attaches poles to an equation result when the expression contains a division, or gamma()/
     // zeta()/tan() (whose poles aren't a division at all: gamma at 0,-1,-2,..., zeta's single pole
     // at s=1, tan's poles at pi/2+n*pi from its internal sin/cos division) - used by fallback
@@ -5877,6 +5912,15 @@ class Komplexiti {
                             // bypasses _withNumericPoles entirely, same as the tan closed form.
                             if (zetaResult.poles?.length) return { ...base, poles: zetaResult.poles };
                             return this._withNumericPoles(base, lhs, rhs, varName, scope, hExpr);
+                        }
+                    }
+                    if (/(?<![a-zA-Z])gamma\(/.test(hExpr)) {
+                        // "K/gamma(...) = 0" has roots exactly at gamma's own poles (1/gamma is
+                        // entire, zero there) - closed-form and unbounded, unlike the generic
+                        // numeric root search's bounded grid.
+                        const recip = this._tryGammaReciprocalZeros(lhs, rhs, varName, scope);
+                        if (recip?.roots?.length) {
+                            return { type: 'equation', variable: varName, roots: recip.roots, reciprocalGammaRoots: recip.reciprocalGammaRoots, lhs, rhs };
                         }
                     }
                     // conj(z) = f(z) → multiply both sides by z: |z|² = z·f(z), which is often real-valued
@@ -7124,6 +7168,19 @@ class Komplexiti {
                     wrapper.appendChild(makeMF(`${varName}_n${isExact ? '=' : '\\approx '}${rendered},\\ n\\in\\mathbb{Z}`, 18));
                     rootsEl.appendChild(wrapper);
                 }
+            } else if (c.reciprocalGammaRoots && fmt === 'cartesian') {
+                // Compact form for K/gamma(...)=0's roots (gamma's own poles, at
+                // slope*n+intercept for n=0,1,2,...) - mirrors gammaPolePeriodic's pole display.
+                const { slope, intercept } = c.reciprocalGammaRoots;
+                const coeffLatex = Math.abs(slope - 1) < 1e-9 ? 'n'
+                    : Math.abs(slope + 1) < 1e-9 ? '-n'
+                    : `${this.niceRealLatex(slope) ?? this.formatNumberShort(slope)}n`;
+                const konstLatex = Math.abs(intercept) < 1e-9 ? ''
+                    : (intercept > 0 ? '+' : '') + (this.niceRealLatex(intercept) ?? this.formatNumberShort(intercept));
+                const wrapper = document.createElement('div');
+                wrapper.title = `Zeros of 1/\u0393: ${varName}_n = ${coeffLatex}${konstLatex}, for n=0,1,2,...`;
+                wrapper.appendChild(makeMF(`${varName}_n=${coeffLatex}${konstLatex},\\ n=0,1,2,\\ldots`, 18));
+                rootsEl.appendChild(wrapper);
             } else if (c.trivialZeta) {
                 // Compact form for the zeta function's infinite family of real trivial zeros
                 // (z_n = slope*n + intercept, n=1,2,3,...) rather than listing every one found.
