@@ -5262,6 +5262,79 @@ class Komplexiti {
         return valid.length > 0 ? valid : null;
     }
 
+    // Solves lhs=rhs for varName by reusing the same polynomial/rational detection techniques as
+    // the main equation pipeline, but as a standalone step usable outside it (currently only by
+    // _trySqrtEqualsZero, to solve the argument of an outer sqrt(...)=0). Returns an array of
+    // roots (possibly empty, meaning confidently no roots), or null if inconclusive.
+    _solveGeneralEquation(lhs, rhs, varName, scope) {
+        const hExpr = `(${lhs}) - (${rhs})`;
+        const hasDivision = /\//.test(hExpr);
+        const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|exp|log|log10|log2)\(/.test(hExpr);
+        let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffsSafe(hExpr, varName, scope);
+        if ((!coeffs || coeffs.length < 2) && hasDivision) {
+            const fast = this._tryFastRationalEquation(lhs, rhs, varName, scope);
+            if (fast?.done) return []; // numerator provably has no roots
+            if (fast) coeffs = fast.coeffs;
+        }
+        if ((!coeffs || coeffs.length < 2) && hasDivision) {
+            try {
+                const rat = math.rationalize(hExpr, {}, true);
+                if (rat?.numerator) coeffs = this._extractPolynomialCoeffsSafe(rat.numerator.toString(), varName, scope);
+            } catch { /* not rationalizable */ }
+        }
+        if (coeffs && coeffs.length >= 2) return this._solvePolynomial(coeffs);
+        if (/exp\(|log\(|log10\(|log2\(|\^/.test(hExpr)) {
+            const expResult = this._tryExpLogPowSubstitution(lhs, rhs, varName, scope);
+            if (expResult?.roots?.length) return expResult.roots;
+        }
+        if (/(?<![a-zA-Z])(?:sin|cos|tan)\(/.test(hExpr)) {
+            const trigResult = this._tryTrigSubstitution(lhs, rhs, varName, scope);
+            if (trigResult?.roots?.length) return trigResult.roots;
+        }
+        return this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
+    }
+
+    // Solves "sqrt(inner) = 0" (or "0 = sqrt(inner)") by solving inner = 0 directly, instead of
+    // handing the whole sqrt-wrapped equation to the generic numeric root finder. This matters
+    // because sqrt(u) has an unbounded derivative (1/(2*sqrt(u))) at its own zero u=0 - a genuine
+    // branch-point/cusp, not a numerical fluke - so the finite-difference Jacobian used by
+    // _findComplexEquationRootsNumerically's Newton refinement becomes singular exactly AT any
+    // true root (confirmed via manual tracing: straddling the root along the real axis flips
+    // sqrt between real and purely-imaginary output, since the radicand changes sign there).
+    // Genuine equations like sqrt(1-1/z^2+z^3)=0 (5 true roots, matching z^5+z^2-1=0) were
+    // silently reported as having no roots at all. Only handles target=0 (sqrt(u)=0 iff u=0, no
+    // branch ambiguity); a nonzero target would need an extra sign/branch check this doesn't do.
+    _trySqrtEqualsZero(lhs, rhs, varName, scope) {
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        let sqrtSide, otherSide;
+        if (/^sqrt\(/.test(lhs.trim())) { sqrtSide = lhs.trim(); otherSide = rhs; }
+        else if (/^sqrt\(/.test(rhs.trim())) { sqrtSide = rhs.trim(); otherSide = lhs; }
+        else return null;
+        if (varRe.test(otherSide)) return null; // other side must be a constant
+        let node;
+        try { node = math.parse(sqrtSide); } catch { return null; }
+        if (node.type !== 'FunctionNode' || node.fn?.name !== 'sqrt' || node.args?.length !== 1) return null;
+        let target;
+        try { target = this._mathValueToComplex(math.evaluate(otherSide, scope)); } catch { return null; }
+        if (!target || Math.hypot(target.re, target.im) > 1e-9) return null; // only target===0 handled
+        const innerStr = node.args[0].toString();
+        const innerRoots = this._solveGeneralEquation(innerStr, '0', varName, scope);
+        if (!innerRoots) return null;
+        if (!innerRoots.length) return [];
+        // Verify each candidate against the ORIGINAL sqrt-wrapped equation as a numerical safety net.
+        let lhsNode, rhsNode;
+        try { lhsNode = math.parse(lhs); rhsNode = math.parse(rhs); } catch { return null; }
+        const valid = [];
+        for (const r of innerRoots) {
+            try {
+                const ev   = { ...scope, [varName]: math.complex(r.re, r.im) };
+                const diff = this._equationDifferenceMagnitude(lhsNode.evaluate(ev), rhsNode.evaluate(ev));
+                if (diff < 1e-4) valid.push(r);
+            } catch { /* skip - likely a pole */ }
+        }
+        return valid;
+    }
+
     // Closed-form solver for equations where the ONLY appearance of varName is inside a single
     // invertible transcendental term with an affine argument: A + B*exp(C*z+D) = K, A + B*ln(C*z+D)
     // = K, or A + B*a^(C*z+D) = K (constant complex base a != 1) - e.g. "3+2e^{z}=10" or
@@ -5956,6 +6029,23 @@ class Komplexiti {
 
             // General polynomial solver via symbolic differentiation
             const hExpr  = `(${lhs}) - (${rhs})`;
+
+            // sqrt(inner) = 0 (or 0 = sqrt(inner)): solve inner = 0 directly rather than letting
+            // the generic numeric root finder near the outer sqrt's own branch point (see
+            // _trySqrtEqualsZero for why that finder fails there).
+            if (/(?<![a-zA-Z])sqrt\(/.test(hExpr)) {
+                const sqrtRoots = this._trySqrtEqualsZero(lhs, rhs, varName, scope);
+                if (sqrtRoots) {
+                    if (sqrtRoots.length) {
+                        return this._withNumericPoles({ type: 'equation', variable: varName, roots: sqrtRoots, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                    }
+                    const locus = this._buildLocus(lhs, rhs, varName, scope);
+                    if (locus) {
+                        locus.confirmedEmpty = true;
+                        return this._withNumericPoles({ type: 'locus', variable: varName, roots: null, locus }, lhs, rhs, varName, scope, hExpr);
+                    }
+                }
+            }
 
             // abs/arg/conj/gamma/zeta expressions are never polynomials; skip symbolic differentiation to avoid hangs
             // Use (?<![a-zA-Z]) rather than \b so that e.g. 2conj( is also matched (digits precede no \b).
