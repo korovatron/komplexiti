@@ -4943,6 +4943,98 @@ class Komplexiti {
         return [ this._cDiv({ re: -coeffs[0].re, im: -coeffs[0].im }, coeffs[1]) ];
     }
 
+    // Tries the safe (maxDeg=6) extraction, then retries at maxDeg=10 if that fails - shared by
+    // the fast rational-equation split below and mirrors the same two-step retry used inline in
+    // parseEquation for the plain-polynomial fast path.
+    _extractPolynomialCoeffsSafe(expr, varName, scope) {
+        let c = this._extractPolynomialCoeffs(expr, varName, scope);
+        if (c && c.length >= 2 && !this._matchesPolynomialApproximation(expr, c, varName, scope)) c = null;
+        if (!c || c.length < 2) {
+            const higher = this._extractPolynomialCoeffs(expr, varName, scope, 10);
+            if (higher && higher.length >= 2 && this._matchesPolynomialApproximation(expr, higher, varName, scope)) {
+                c = higher;
+            } else if (!c && higher) {
+                c = higher;
+            }
+        }
+        return c;
+    }
+
+    // Returns { numerator, denominator } strings if expr is (or trivially is) a single fraction:
+    // a plain expression (denominator "1"), N/D, or (N/D)^k for a positive integer k. Returns
+    // null for anything that combines more than one division (e.g. a SUM of two separate
+    // fractions), which genuinely needs common-denominator algebra via math.rationalize.
+    _splitSingleFraction(expr) {
+        // mathjs preserves explicit parentheses as ParenthesisNode wrappers around the operator
+        // they enclose - unwrap them before inspecting node.type/op, e.g. "(1/(...))^2" parses
+        // to OperatorNode '^' whose base is a ParenthesisNode wrapping the '/' node, not the '/'
+        // node directly.
+        const unwrap = n => { while (n && n.type === 'ParenthesisNode') n = n.content; return n; };
+        let node;
+        try { node = unwrap(math.parse(expr)); } catch { return null; }
+        if (node.type === 'OperatorNode' && node.op === '^' && node.args.length === 2) {
+            const base = unwrap(node.args[0]), exp = unwrap(node.args[1]);
+            if (exp.type === 'ConstantNode' && Number.isInteger(exp.value) && exp.value > 0 &&
+                base.type === 'OperatorNode' && base.op === '/' && base.args.length === 2) {
+                const n = exp.value;
+                return { numerator: `(${base.args[0].toString()})^${n}`, denominator: `(${base.args[1].toString()})^${n}` };
+            }
+            return /\//.test(expr) ? null : { numerator: expr, denominator: '1' };
+        }
+        if (node.type === 'OperatorNode' && node.op === '/' && node.args.length === 2) {
+            return { numerator: node.args[0].toString(), denominator: node.args[1].toString() };
+        }
+        return /\//.test(expr) ? null : { numerator: expr, denominator: '1' };
+    }
+
+    // Fast, safe alternative to math.rationalize for an equation shaped as a single fraction on
+    // each side (optionally raised to an integer power), e.g. (1/((x-1)^3(x+2)^2))^2=0. Clears
+    // the fraction via cross-multiplication (N1*D2 - N2*D1 = 0, denominator D1*D2) and extracts
+    // numerator/denominator polynomials via the safe differentiation method instead of
+    // math.rationalize, whose internal simplify/expand can hang (verified: doesn't return within
+    // 20s+) on a denominator that's a product of powers of total degree >= 5, even with a genuine
+    // division present. Returns null (falls through to math.rationalize) if either side combines
+    // more than one division. Otherwise returns { done:true, result } when the numerator provably
+    // has no roots (only poles/holes to report), or { coeffs, poles, holes } for the caller to
+    // solve normally.
+    _tryFastRationalEquation(lhs, rhs, varName, scope) {
+        const L = this._splitSingleFraction(lhs);
+        const R = this._splitSingleFraction(rhs);
+        if (!L || !R || (L.denominator === '1' && R.denominator === '1')) return null;
+
+        const numExpr = (R.numerator.trim() === '0')
+            ? `(${L.numerator})*(${R.denominator})`
+            : `(${L.numerator})*(${R.denominator}) - (${R.numerator})*(${L.denominator})`;
+        const denExpr = (L.denominator === '1') ? R.denominator
+                      : (R.denominator === '1') ? L.denominator
+                      : `(${L.denominator})*(${R.denominator})`;
+
+        const numCoeffs = this._extractPolynomialCoeffsSafe(numExpr, varName, scope);
+        if (!numCoeffs) return null;
+        const denCoeffs = (denExpr === '1') ? null : this._extractPolynomialCoeffsSafe(denExpr, varName, scope);
+        if (denExpr !== '1' && !denCoeffs) return null;
+
+        let poles = null, holes = null;
+        if (denCoeffs && denCoeffs.length >= 2) {
+            const denRoots = this._solvePolynomial(denCoeffs).filter(p => isFinite(p.re) && isFinite(p.im));
+            const holeCandidates = denRoots.filter(p => Math.hypot(this._cPolyEval(numCoeffs, p).re, this._cPolyEval(numCoeffs, p).im) < 1e-6);
+            poles = denRoots.filter(p => !holeCandidates.some(h => Math.hypot(h.re - p.re, h.im - p.im) < 1e-9));
+            holes = holeCandidates;
+        }
+
+        if (numCoeffs.length < 2) {
+            // Numerator is a nonzero constant (or empty) - no roots, only possible poles/holes.
+            const locus = this._buildLocus(lhs, rhs, varName, scope);
+            if (!locus) return null;
+            locus.confirmedEmpty = true;
+            return { done: true, result: {
+                type: 'locus', variable: varName, roots: null, locus,
+                poles: poles?.length ? poles : null, holes: holes?.length ? holes : null,
+            } };
+        }
+        return { coeffs: numCoeffs, poles, holes };
+    }
+
     // Dispatches to the appropriate solver by degree; used for both equation roots and poles.
     _solvePolynomial(coeffs) {
         const deg = coeffs.length - 1;
@@ -4995,26 +5087,36 @@ class Komplexiti {
         return this._clusterAndRefineRoots(zs, monic);
     }
 
-    // Durand-Kerner jitters slightly around a root of multiplicity m > 1: its m copies converge
-    // to nearly (but not exactly) the same value, e.g. z=1+-1.4e-4i x4 for a multiplicity-4 root
-    // (verified via (z-1)^4*(z+2)^3=0). Group raw roots within clusterTol of each other and
-    // replace each group with a single value refined via multiplicity-aware Newton
-    // (z -= m*p(z)/p'(z), which converges quadratically once the true multiplicity m is known,
-    // unlike plain Newton's linear convergence on a multiple root) rather than returning m
-    // near-duplicate, numerically-noisy copies.
+    // Durand-Kerner jitters around a root of multiplicity m > 1: its m copies converge to nearly
+    // (but not exactly) the same value rather than the identical value, and the jitter is worse
+    // for higher m - verified up to ~0.003-0.006 spread for a multiplicity-6 root (even after
+    // increasing the iteration cap well beyond what's normally needed), vs ~1e-4 for m=4. Group
+    // raw roots within clusterTol of each other (single-linkage: a point joins a group if it's
+    // close to ANY member already in it, not just the first) and replace each group with a
+    // single value refined via multiplicity-aware Newton (z -= m*p(z)/p'(z), which converges
+    // quadratically once the true multiplicity m is known, unlike plain Newton's linear
+    // convergence on a multiple root) rather than returning m near-duplicate, noisy copies.
     _clusterAndRefineRoots(zs, monic) {
-        const clusterTol = 1e-3;
+        const clusterTol = 2e-2;
         const used = new Array(zs.length).fill(false);
         const groups = [];
         for (let i = 0; i < zs.length; i++) {
             if (used[i]) continue;
             const group = [zs[i]];
             used[i] = true;
-            for (let j = i + 1; j < zs.length; j++) {
-                if (used[j]) continue;
-                if (Math.hypot(zs[j].re - zs[i].re, zs[j].im - zs[i].im) < clusterTol) {
-                    group.push(zs[j]);
-                    used[j] = true;
+            // Single-linkage: keep scanning for any unused point close to ANY current member,
+            // repeating until no more join (handles a chain of points each close to a neighbour
+            // but not necessarily to the group's original first member).
+            let grew = true;
+            while (grew) {
+                grew = false;
+                for (let j = 0; j < zs.length; j++) {
+                    if (used[j]) continue;
+                    if (group.some(g => Math.hypot(zs[j].re - g.re, zs[j].im - g.im) < clusterTol)) {
+                        group.push(zs[j]);
+                        used[j] = true;
+                        grew = true;
+                    }
                 }
             }
             groups.push(group);
@@ -5770,6 +5872,24 @@ class Komplexiti {
                 const higherDeg = this._extractPolynomialCoeffs(hExpr, varName, scope, 10);
                 if (higherDeg && higherDeg.length >= 2 && this._matchesPolynomialApproximation(hExpr, higherDeg, varName, scope)) {
                     coeffs = higherDeg;
+                }
+            }
+
+            // Fast, safe path for a "single fraction = single fraction" shape (handles the common
+            // case of an equation like N/D = 0 or N/D = K, optionally with an outer integer power,
+            // e.g. (1/((x-1)^3(x+2)^2))^2=0) - clears the fraction via cross-multiplication and
+            // extracts numerator/denominator with the safe differentiation method. This must run
+            // BEFORE math.rationalize below: rationalize's simplify/expand can hang even when a
+            // genuine division is present, if the resulting denominator is a high-degree power
+            // product (verified: doesn't return within 20s+ once total degree >= 5).
+            if ((!coeffs || coeffs.length < 2) && hasDivision) {
+                const fast = this._tryFastRationalEquation(lhs, rhs, varName, scope);
+                if (fast?.done) return fast.result;
+                if (fast) {
+                    coeffs = fast.coeffs;
+                    fromRationalize = true;
+                    poles = fast.poles;
+                    holes = fast.holes;
                 }
             }
 
