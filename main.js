@@ -6251,6 +6251,9 @@ class Komplexiti {
             ],
             'rational-function': [
                 { latex: '\\frac{z^2-1}{z^2+1}=0', colorMode: true }
+            ],
+            'mobius-transformation': [
+                { latex: '\\frac{z-i}{2z+1}=0', colorMode: true }
             ]
         };
 
