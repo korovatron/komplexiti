@@ -5172,11 +5172,18 @@ class Komplexiti {
                 // return that, rather than trusting whichever one the fixed loop happens to end on.
                 let best = z, bestMag = Math.hypot(this._cPolyEval(monic, z).re, this._cPolyEval(monic, z).im);
                 for (let iter = 0; iter < 20; iter++) {
-                    const dp = this._cPolyEval(deriv, z);
-                    if (Math.hypot(dp.re, dp.im) < 1e-14) break;
-                    const p    = this._cPolyEval(monic, z);
-                    const mag  = Math.hypot(p.re, p.im);
+                    const p   = this._cPolyEval(monic, z);
+                    const mag = Math.hypot(p.re, p.im);
                     if (mag < bestMag) { bestMag = mag; best = z; }
+                    const dp = this._cPolyEval(deriv, z);
+                    if (Math.hypot(dp.re, dp.im) < 1e-14) {
+                        // p'(z) ~ m*(z-z0)^(m-1) also vanishes at the root, so it can legitimately
+                        // be this tiny even when z is only moderately close (not yet as precise as
+                        // possible) - perturb rather than aborting the whole refinement here, so
+                        // later iterations still get a chance to wobble onto a better point.
+                        z = this._cAdd(z, { re: 1e-3, im: 0 });
+                        continue;
+                    }
                     const step = this._cMul({ re: m, im: 0 }, this._cDiv(p, dp));
                     z = this._cSub(z, step);
                     if (Math.hypot(step.re, step.im) < 1e-13) break;
