@@ -8617,7 +8617,8 @@ class Komplexiti {
                 .map(c => ({
                     latex:       c.latex,
                     color:       c.color,
-                    cardRootFmt: c.cardRootFmt || 'cartesian'
+                    cardRootFmt: c.cardRootFmt || 'cartesian',
+                    ...(this.colorModeExpressionId === c.id ? { colorMode: true } : {})
                 }))
         };
         return JSON.stringify(state);
@@ -8656,6 +8657,9 @@ class Komplexiti {
         this.expressions = [];
         this.nextExpressionId = 1;
         if (this.expressionsContainer) this.expressionsContainer.innerHTML = '';
+        this.colorModeExpressionId = null;
+        this._colorLayerCache = null;
+        let pendingColorModeId = null;
 
         const exprs = Array.isArray(state.expressions) ? state.expressions : [];
         for (const item of exprs) {
@@ -8670,6 +8674,7 @@ class Komplexiti {
             };
             this.expressions.push(c);
             this.createExpressionUI(c, { skipFocus: true });
+            if (item.colorMode === true) pendingColorModeId = id;
         }
 
         // Ensure there is always a blank tile at the bottom
@@ -8682,6 +8687,18 @@ class Komplexiti {
         this.resetAxes();
         if (this.currentState === this.states.APP) this.drawCanvas();
         this.showTempSessionBanner();
+
+        // Each card's math-field applies its latex (and dispatches its own 'input' event, which
+        // clears colour mode as an edit) on a deferred requestAnimationFrame in createExpressionUI
+        // - queuing this restore in a further requestAnimationFrame runs it after all of theirs.
+        if (pendingColorModeId !== null) {
+            requestAnimationFrame(() => {
+                this.colorModeExpressionId = pendingColorModeId;
+                this._colorLayerCache = null;
+                this.updateAllCardMetadata();
+                if (this.currentState === this.states.APP) this.drawCanvas();
+            });
+        }
     }
 
     showTempSessionBanner() {
