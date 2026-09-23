@@ -2769,7 +2769,7 @@ class Komplexiti {
         }
         // Insert * where a variable/digit directly precedes a \function command (e.g. w\sqrt → w*\sqrt)
         // Negative lookbehind prevents matching a letter that is itself part of a LaTeX command (e.g. 'e' in \le\arctan).
-        e = e.replace(/(?<![a-zA-Z])([a-zA-Z0-9])\\(sqrt|sin|cos|tan|csc|sec|cot|ln|log|exp|sinh|cosh|tanh|arcsin|arccos|arctan|arcsinh|arccosh|arctanh|Gamma|gamma|zeta)\b/g, '$1*\\$2');
+        e = e.replace(/(?<![a-zA-Z])([a-zA-Z0-9])\\(sqrt|sin|cos|tan|csc|sec|cot|ln|log|exp|sinh|cosh|tanh|csch|sech|coth|arcsin|arccos|arctan|arcsinh|arccosh|arctanh|Gamma|gamma|zeta)\b/g, '$1*\\$2');
         for (let p = 0; p < 4; p++) {
             // Flatten exponent braces first so a braced exponent inside a \frac argument
             // (e.g. \frac{1}{z^{-2}}) doesn't defeat the [^{}]* nested-brace-free match below.
@@ -2810,6 +2810,7 @@ class Komplexiti {
         e = e.replace(/\\cos/g, 'cos').replace(/\\sin/g, 'sin').replace(/\\tan/g, 'tan');
         // csc/sec/cot map to mathjs's own complex-capable reciprocal-trig functions (csc(x)=1/sin(x) etc).
         e = e.replace(/\\csc\b/g, 'csc').replace(/\\sec\b/g, 'sec').replace(/\\cot\b/g, 'cot');
+        e = e.replace(/\\csch\b/g, 'csch').replace(/\\sech\b/g, 'sech').replace(/\\coth\b/g, 'coth');
         e = e.replace(/\\arg\b/g, 'arg');
         e = e.replace(/\\Re\b/g, 're').replace(/\\Im\b/g, 'im');
         // Both \Gamma (capital) and \gamma (lowercase) map to the Gamma function - MathLive's
@@ -2828,9 +2829,9 @@ class Komplexiti {
         if (!e) return '';
         // Split consecutive letters that aren't a known name into implicit products (user vars are single-letter only)
         // Also handles variable immediately followed by function name, e.g. zconj → z*conj
-        const knownFnNames = ['log10', 'sqrt', 'conj', 'arg', 'abs', 'gamma', 'zeta', 'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh', 'sinh', 'cosh', 'tanh', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'exp', 'log', 're', 'im', 'pi', 'Infinity', 'NaN'];
+        const knownFnNames = ['log10', 'sqrt', 'conj', 'arg', 'abs', 'gamma', 'zeta', 'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'exp', 'log', 're', 'im', 'pi', 'Infinity', 'NaN'];
         e = e.replace(/[a-zA-Z]{2,}/g, m => {
-            if (/^(sqrt|log10|log|exp|abs|gamma|zeta|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|re|im|pi|Infinity|NaN)$/.test(m)) return m;
+            if (/^(sqrt|log10|log|exp|abs|gamma|zeta|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|re|im|pi|Infinity|NaN)$/.test(m)) return m;
             // gamma is the only name users might plausibly capitalise (mathematical convention is
             // Γ, upper-case) without realising the parser only recognises lower-case - accept either.
             if (m === 'Gamma') return 'gamma';
@@ -2842,14 +2843,14 @@ class Komplexiti {
             }
             return m.split('').join('*');
         });
-        e = e.replace(/\bi\s*(sqrt|sin|cos|tan|csc|sec|cot|asin|acos|atan|sinh|cosh|tanh|asinh|acosh|atanh|log|log10|exp|conj|gamma|zeta)\s*\(/g, 'i*$1(');
+        e = e.replace(/\bi\s*(sqrt|sin|cos|tan|csc|sec|cot|asin|acos|atan|sinh|cosh|tanh|csch|sech|coth|asinh|acosh|atanh|log|log10|exp|conj|gamma|zeta)\s*\(/g, 'i*$1(');
         e = e.replace(/\)\s*i\b/g, ')*i');
         // Insert * before a trailing imaginary i that directly follows a letter or digit (e.g. wi → w*i)
         e = e.replace(/([a-zA-Z0-9])i(?=[^a-zA-Z0-9]|$)/g, (match, prefix) => prefix === 'p' ? match : `${prefix}*i`);
         // Insert * where a letter directly precedes ( but is not the end of a known function name (e.g. z\left(...) → z*(...))
         e = e.replace(/([a-zA-Z])\(/g, (_, ch, offset, str) => {
             const tail = str.slice(Math.max(0, offset - 9), offset + 1);
-            return /(sqrt|log10|log|exp|abs|conj|arg|gamma|zeta|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|re|im)$/.test(tail)
+            return /(sqrt|log10|log|exp|abs|conj|arg|gamma|zeta|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|re|im)$/.test(tail)
                 ? `${ch}(` : `${ch}*(`;
         });
         return e;
@@ -2873,7 +2874,7 @@ class Komplexiti {
 
     // Returns the single free variable name in expr, or null if there are 0 or >1.
     _findEquationVariable(expr, scope) {
-        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'gamma', 'zeta', 'Infinity', 'NaN']);
+        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'asinh', 'acosh', 'atanh', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'gamma', 'zeta', 'Infinity', 'NaN']);
         const known    = new Set(Object.keys(scope));
         const free     = new Set();
         for (const [, id] of expr.matchAll(/(?<![a-zA-Z_])([a-zA-Z][a-zA-Z0-9]*)/g)) {
@@ -5271,7 +5272,7 @@ class Komplexiti {
     _solveGeneralEquation(lhs, rhs, varName, scope) {
         const hExpr = `(${lhs}) - (${rhs})`;
         const hasDivision = /\//.test(hExpr);
-        const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|exp|log|log10|log2)\(/.test(hExpr);
+        const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|exp|log|log10|log2)\(/.test(hExpr);
         let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffsSafe(hExpr, varName, scope);
         if ((!coeffs || coeffs.length < 2) && hasDivision) {
             const fast = this._tryFastRationalEquation(lhs, rhs, varName, scope);
@@ -5289,7 +5290,7 @@ class Komplexiti {
             const expResult = this._tryExpLogPowSubstitution(lhs, rhs, varName, scope);
             if (expResult?.roots?.length) return expResult.roots;
         }
-        if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot)\(/.test(hExpr)) {
+        if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth)\(/.test(hExpr)) {
             const trigResult = this._tryTrigSubstitution(lhs, rhs, varName, scope);
             if (trigResult?.roots?.length) return trigResult.roots;
             if (trigResult?.provablyEmpty) return [];
@@ -5539,12 +5540,17 @@ class Komplexiti {
         if (exprStr.indexOf('/') === -1) return exprStr;
         let node;
         try { node = math.parse(exprStr); } catch { return exprStr; }
-        const RECIP = { sin: 'csc', cos: 'sec', tan: 'cot', csc: 'sin', sec: 'cos', cot: 'tan' };
+        const RECIP = {
+            sin: 'csc', cos: 'sec', tan: 'cot', csc: 'sin', sec: 'cos', cot: 'tan',
+            sinh: 'csch', cosh: 'sech', tanh: 'coth', csch: 'sinh', sech: 'cosh', coth: 'tanh',
+        };
         // trigFn(w)/trigFn(w) with the SAME argument collapses to a single named trig function
         // whenever the ratio is one of these clean pairs (e.g. sin(w)/cos(w) = tan(w)) - lets a
         // ratio like "sin(2z+pi/4)/cos(2z+pi/4)=0" be solved exactly like "tan(2z+pi/4)=0" rather
         // than being left as a product of two DIFFERENT trig FunctionNodes (which
-        // _tryTrigSubstitution's single-candidate detection can't handle).
+        // _tryTrigSubstitution's single-candidate detection can't handle). The hyperbolic pairs
+        // are the exact same identities with sin/cos/tan/csc/sec/cot swapped for their h-suffixed
+        // counterparts, since tanh=sinh/cosh, coth=cosh/sinh etc. mirror the circular algebra.
         const RATIO = {
             sin: { cos: 'tan', tan: 'cos' },
             cos: { sin: 'cot', cot: 'sin' },
@@ -5552,6 +5558,12 @@ class Komplexiti {
             csc: { sec: 'cot', cot: 'sec' },
             sec: { tan: 'csc', csc: 'tan' },
             cot: { cos: 'csc', csc: 'cos' },
+            sinh: { cosh: 'tanh', tanh: 'cosh' },
+            cosh: { sinh: 'coth', coth: 'sinh' },
+            tanh: { sinh: 'sech', sech: 'sinh' },
+            csch: { sech: 'coth', coth: 'sech' },
+            sech: { tanh: 'csch', csch: 'tanh' },
+            coth: { cosh: 'csch', csch: 'cosh' },
         };
         const unwrap = n => (n.type === 'ParenthesisNode' ? unwrap(n.content) : n);
         const isTrigCall = n => n.type === 'FunctionNode' && n.args?.length === 1 && RECIP[n.fn?.name];
@@ -5590,9 +5602,16 @@ class Komplexiti {
 
         // csc/sec/cot are handled as reciprocals of sin/cos/tan respectively: kind(w)=K rewrites
         // to baseKind(w)=1/K, reusing the exact same family-generation code below. Poles (from the
-        // internal division each of tan/csc/sec/cot carries) depend only on `kind`, never on K.
+        // internal division each of tan/csc/sec/cot/tanh/coth/sech/csch carries) depend only on
+        // `kind`, never on K. sinh/cosh/tanh (and their reciprocals csch/sech/coth) are handled via
+        // the identity sin(iw)=i*sinh(w), cos(iw)=cosh(w), tan(iw)=i*tanh(w): solving entirely in
+        // u=i*w space and converting back at the end (see isHyp below) reuses the exact same
+        // sin/cos/tan family/pole logic unchanged.
         const RECIPROCAL_OF = { csc: 'sin', sec: 'cos', cot: 'tan' };
-        const TRIG_NAMES = ['sin', 'cos', 'tan', 'csc', 'sec', 'cot'];
+        const HYP_BASE = { sinh: 'sin', cosh: 'cos', tanh: 'tan', csch: 'sin', sech: 'cos', coth: 'tan' };
+        const RECIP_KINDS = new Set(['csc', 'sec', 'cot', 'csch', 'sech', 'coth']);
+        const COT_LIKE = new Set(['cot', 'coth']); // K=0 solvable directly (cos=0), not a 1/0 division
+        const TRIG_NAMES = ['sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth'];
         const candidates = [];
         root.traverse(node => {
             if (node.type === 'FunctionNode' && node.args?.length === 1 && TRIG_NAMES.includes(node.fn?.name)) {
@@ -5601,13 +5620,19 @@ class Komplexiti {
         });
         if (candidates.length !== 1) return null;
         const { kind, node, argNode } = candidates[0];
-        const baseKind = RECIPROCAL_OF[kind] || kind;
+        const baseKind = RECIPROCAL_OF[kind] || HYP_BASE[kind] || kind;
+        const isHyp = !!HYP_BASE[kind];
 
         const argStr = argNode.toString();
         const argCoeffs = this._extractPolynomialCoeffs(argStr, varName, scope, 1);
         if (!argCoeffs || argCoeffs.length !== 2 || !this._matchesPolynomialApproximation(argStr, argCoeffs, varName, scope)) return null;
         const [D, C] = argCoeffs;
         if (Math.hypot(C.re, C.im) < 1e-12) return null;
+        // u=i*w affine coefficients, used below wherever the argument needs converting back to z -
+        // for the circular kinds isHyp is false so Duse/Cuse are just D/C, unchanged.
+        const iUnit = { re: 0, im: 1 };
+        const Duse = isHyp ? this._cMul(iUnit, D) : D;
+        const Cuse = isHyp ? this._cMul(iUnit, C) : C;
 
         let u = 'trigSub';
         if (scope.hasOwnProperty(u) || u === varName) u = 'trigSubVar';
@@ -5626,9 +5651,9 @@ class Komplexiti {
         // just "not found". cot(w)=0 is the one reciprocal case solvable at K=0 (cot(w)=0 iff
         // cos(w)=0, a normal affine-cosine-zero family, not a 1/0 division).
         let baseTarget = u0, cotZeroSpecialCase = false, provablyEmpty = false;
-        if (RECIPROCAL_OF[kind]) {
+        if (RECIP_KINDS.has(kind)) {
             if (Math.hypot(u0.re, u0.im) < 1e-12) {
-                if (kind === 'cot') cotZeroSpecialCase = true;
+                if (COT_LIKE.has(kind)) cotZeroSpecialCase = true;
                 else { baseTarget = null; provablyEmpty = true; }
             } else {
                 baseTarget = this._cDiv({ re: 1, im: 0 }, u0);
@@ -5644,7 +5669,7 @@ class Komplexiti {
                 return this._equationDifferenceMagnitude(lhsNode.evaluate(ev), rhsNode.evaluate(ev)) < 1e-4;
             } catch { return false; }
         };
-        const toZ = w => this._cDiv(this._cSub(w, D), C);
+        const toZ = w => this._cDiv(this._cSub(w, Duse), Cuse);
 
         // sin/cos each normally split into two interleaved w-space families (invVal and its
         // mirror), but at the extremes (sin=+-1, cos=+-1) the mirror collapses onto the SAME
@@ -5671,7 +5696,7 @@ class Komplexiti {
             roots.push(...famRoots);
             // z-space step = w-space step / C; only worth a compact "n form" if it's purely real
             // or purely imaginary (an axis-aligned parametric line - see _renderPeriodicFamily).
-            const zStep = this._cDiv(wStep, C);
+            const zStep = this._cDiv(wStep, Cuse);
             const base = famRoots.reduce((best, r) => Math.hypot(r.re, r.im) < Math.hypot(best.re, best.im) ? r : best, famRoots[0]);
             families.push({ base, step: zStep });
         };
@@ -5680,9 +5705,11 @@ class Komplexiti {
             // cot(w)=0 <=> cos(w)=0, the same family shape as tan/sec's own poles below.
             collectFamily({ re: Math.PI / 2, im: 0 }, { re: Math.PI, im: 0 });
         } else if (baseTarget) {
+            // sinh(w)=K <=> sin(iw)=iK; tanh(w)=K <=> tan(iw)=iK; cosh(w)=K <=> cos(iw)=K directly.
+            const circTarget = isHyp && baseKind !== 'cos' ? this._cMul(iUnit, baseTarget) : baseTarget;
             let inv;
             try {
-                const u0c = math.complex(baseTarget.re, baseTarget.im);
+                const u0c = math.complex(circTarget.re, circTarget.im);
                 inv = baseKind === 'sin' ? math.asin(u0c) : baseKind === 'cos' ? math.acos(u0c) : math.atan(u0c);
             } catch { inv = null; }
             if (inv) {
@@ -5712,8 +5739,8 @@ class Komplexiti {
         // in closed form here, unbounded by the generic numeric pole search's [-10,10]^2 box.
         // sin/cos are entire (no poles anywhere).
         let poles = null, polesPeriodic = null;
-        const poleBaseW = (kind === 'tan' || kind === 'sec') ? { re: Math.PI / 2, im: 0 }
-            : (kind === 'cot' || kind === 'csc') ? { re: 0, im: 0 }
+        const poleBaseW = (kind === 'tan' || kind === 'sec' || kind === 'tanh' || kind === 'sech') ? { re: Math.PI / 2, im: 0 }
+            : (kind === 'cot' || kind === 'csc' || kind === 'coth' || kind === 'csch') ? { re: 0, im: 0 }
             : null;
         if (poleBaseW) {
             const poleStep = { re: Math.PI, im: 0 };
@@ -5725,7 +5752,7 @@ class Komplexiti {
             }
             if (found.length) {
                 poles = found;
-                const zStep = this._cDiv(poleStep, C);
+                const zStep = this._cDiv(poleStep, Cuse);
                 if (Math.abs(zStep.re) < 1e-6 * Math.max(1, Math.abs(zStep.im)) || Math.abs(zStep.im) < 1e-6 * Math.max(1, Math.abs(zStep.re))) {
                     const base = found.reduce((best, r) => Math.hypot(r.re, r.im) < Math.hypot(best.re, best.im) ? r : best, found[0]);
                     polesPeriodic = [{ base, step: zStep }];
@@ -6266,7 +6293,7 @@ class Komplexiti {
             // fallbacks below with the same end result. This matters a lot in practice since
             // cascadeEvaluate re-parses every OTHER equation card on every keystroke typed anywhere.
             const hasDivision = /\//.test(hExpr);
-            const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|exp|log|log10|log2)\(/.test(hExpr);
+            const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|exp|log|log10|log2)\(/.test(hExpr);
             let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffs(hExpr, varName, scope);
             let fromRationalize = false;
             let poles = null; // denominator roots where the expression genuinely blows up
@@ -6351,20 +6378,21 @@ class Komplexiti {
                         return this._withNumericPoles({ type: 'equation', variable: varName, roots: expResult.roots, periodic: expResult.periodic, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
                     }
                 }
-                if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot)\(/.test(hExpr)) {
+                if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth)\(/.test(hExpr)) {
                     const trigResult = this._tryTrigSubstitution(lhs, rhs, varName, scope);
                     if (trigResult?.roots?.length) {
                         const base = { type: 'equation', variable: varName, roots: trigResult.roots, periodic: trigResult.periodic, lhs, rhs };
-                        // Closed-form tan/csc/sec/cot poles (exact, unbounded by the search box)
-                        // bypass the generic numeric pole search entirely, rather than letting it
-                        // overwrite them with an approximate result.
+                        // Closed-form tan/csc/sec/cot/tanh/coth/sech/csch poles (exact, unbounded
+                        // by the search box) bypass the generic numeric pole search entirely,
+                        // rather than letting it overwrite them with an approximate result.
                         if (trigResult.poles?.length) {
                             return { ...base, poles: trigResult.poles, polesPeriodic: trigResult.polesPeriodic };
                         }
                         return this._withNumericPoles(base, lhs, rhs, varName, scope, hExpr);
                     }
-                    // csc(z)=0 / sec(z)=0: provably no roots (never 0), but poles still exist in
-                    // closed form - a confirmedEmpty locus carrying the exact pole family.
+                    // csc(z)=0 / sec(z)=0 (and their hyperbolic analogues csch/sech): provably no
+                    // roots (never 0), but poles still exist in closed form - a confirmedEmpty
+                    // locus carrying the exact pole family.
                     if (trigResult?.provablyEmpty && trigResult.poles?.length) {
                         const locus = { lhs, rhs, angular: false, scalar: false, confirmedEmpty: true };
                         return { type: 'locus', variable: varName, roots: null, locus, poles: trigResult.poles, polesPeriodic: trigResult.polesPeriodic };
