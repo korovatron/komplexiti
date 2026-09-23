@@ -8634,6 +8634,8 @@ class Komplexiti {
                     const root = c.roots[k];
                     if (!isFinite(root.re) || !isFinite(root.im)) continue;
                     const pt = this.worldToScreen(root.re, root.im);
+                    // Only the Z_n label switches to adaptive black/white when colouring is on -
+                    // the dot/arrow stay in the expression's own colour, per explicit user request.
                     const rootColor = this._metadataColorFor(c, root.re, root.im);
 
                     if (this.displayMode === 'arrow') {
@@ -8645,14 +8647,14 @@ class Komplexiti {
                             const tipX = pt.x - dotR * Math.cos(ang);
                             const tipY = pt.y - dotR * Math.sin(ang);
                             ctx.save();
-                            ctx.strokeStyle = rootColor;
+                            ctx.strokeStyle = c.color;
                             ctx.lineWidth   = strokeWidth;
                             ctx.globalAlpha = 0.9;
                             ctx.beginPath();
                             ctx.moveTo(org.x, org.y);
                             ctx.lineTo(tipX, tipY);
                             ctx.stroke();
-                            ctx.fillStyle = rootColor;
+                            ctx.fillStyle = c.color;
                             ctx.beginPath();
                             ctx.moveTo(tipX, tipY);
                             ctx.lineTo(tipX - headLen * Math.cos(ang - 0.38), tipY - headLen * Math.sin(ang - 0.38));
@@ -8664,7 +8666,7 @@ class Komplexiti {
                     }
 
                     ctx.save();
-                    ctx.fillStyle   = rootColor;
+                    ctx.fillStyle   = c.color;
                     ctx.globalAlpha = 1;
                     ctx.beginPath();
                     ctx.arc(pt.x, pt.y, dotR, 0, Math.PI * 2);
