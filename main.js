@@ -5326,6 +5326,7 @@ class Komplexiti {
         if (/(?<![a-zA-Z])(?:asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth)\(/.test(hExpr)) {
             const invResult = this._tryInverseTrigSubstitution(lhs, rhs, varName, scope);
             if (invResult?.roots?.length) return invResult.roots;
+            if (invResult?.provablyEmpty) return [];
         }
         return this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
     }
@@ -5855,7 +5856,14 @@ class Komplexiti {
                 : kind === 'asech' ? math.sech(u0c) : kind === 'acsch' ? math.csch(u0c) : math.coth(u0c);
             w0 = { re: inv.re ?? inv, im: inv.im ?? 0 };
         } catch { return null; }
-        if (!isFinite(w0.re) || !isFinite(w0.im)) return null;
+        // mathjs represents an infinite/undefined Complex result (e.g. csc(0)=1/sin(0)) as
+        // {re:null,im:null} - the global isFinite() coerces null to 0 and wrongly reports "finite",
+        // silently turning a genuine divide-by-zero into a bogus root (e.g. z=(0-D)/C). Number.isFinite
+        // does not coerce, so it correctly rejects null here. A non-finite result means the target K
+        // sits exactly at the reciprocal function's own singularity - no finite root exists at all.
+        if (w0.re == null || w0.im == null || !Number.isFinite(w0.re) || !Number.isFinite(w0.im)) {
+            return { roots: [], provablyEmpty: true };
+        }
         const z = this._cDiv(this._cSub(w0, D), C);
 
         let lhsNode, rhsNode;
@@ -6483,6 +6491,12 @@ class Komplexiti {
                     const invResult = this._tryInverseTrigSubstitution(lhs, rhs, varName, scope);
                     if (invResult?.roots?.length) {
                         return { type: 'equation', variable: varName, roots: invResult.roots, lhs, rhs };
+                    }
+                    // e.g. acsc(z)=0/acot(z)=0/acoth(z)=0: target sits exactly at the reciprocal
+                    // function's own singularity (1/sin(0), 1/sinh(0), ...) - no finite root exists.
+                    if (invResult?.provablyEmpty) {
+                        const locus = { lhs, rhs, angular: false, scalar: false, confirmedEmpty: true };
+                        return { type: 'locus', variable: varName, roots: null, locus };
                     }
                 }
                 if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth)\(/.test(hExpr)) {
