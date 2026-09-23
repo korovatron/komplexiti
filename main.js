@@ -7707,7 +7707,7 @@ class Komplexiti {
             renderPolesHoles();
             const fmt = c.cardRootFmt || 'cartesian';
             const fmtNames  = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
-            badge.textContent     = 'Root format (click to change)';
+            badge.textContent     = 'Root Format';
             badge.title           = 'Click to toggle between Cartesian, Exponential and Trig form';
             valueEl.style.display = '';
             valueEl.textContent   = fmtNames[fmt];
