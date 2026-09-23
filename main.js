@@ -2787,8 +2787,22 @@ class Komplexiti {
         for (let p = 0; p < 3; p++) {
             e = e.replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt($1)');
         }
+        // \mathrm{...} (upright text, semantically a no-op here) must unwrap BEFORE \operatorname,
+        // since MathLive nests them as \operatorname{\mathrm{arccosh}} - the outer operatorname's
+        // own unwrap rule requires brace-free content, so it silently fails to fire while this
+        // nested wrapper is still present, leaving broken residual LaTeX.
+        e = e.replace(/\\mathrm\{([^{}]+)\}/g, '$1');
         // \operatorname{fn} → fn (used by the keyboard for named functions)
         e = e.replace(/\\operatorname\{([^{}]+)\}/g, '$1');
+        // Manually-typed "arcsinh"/"arccosh"/"arctanh"/"arcsin"/"arccos"/"arctan" produce a bare
+        // "arc" immediately followed by the recognised \sinh/\cosh/\tanh/\sin/\cos/\tan command -
+        // MathLive has no dedicated \arcsinh-style macro, so typing the plain word just leaves
+        // "arc" as stray unrecognised text next to the correctly-recognised inner command. Merge
+        // them into the correct inverse function name here, before those commands are converted
+        // to plain text below (otherwise "arc" would be shredded into separate multiplied letters
+        // by the implicit-multiplication letter-splitter further down).
+        e = e.replace(/\barc\\sinh\b/g, 'asinh').replace(/\barc\\cosh\b/g, 'acosh').replace(/\barc\\tanh\b/g, 'atanh');
+        e = e.replace(/\barc\\sin\b/g, 'asin').replace(/\barc\\cos\b/g, 'acos').replace(/\barc\\tan\b/g, 'atan');
         // arc* names produced by the above → mathjs equivalents. Negative lookbehind excludes a
         // backslash-prefixed form (e.g. \arcsin, inserted directly by the keyboard's sin/cos/tan
         // buttons) - matching that too would strip "arc" from "\arcsin" leaving the unrecognised
