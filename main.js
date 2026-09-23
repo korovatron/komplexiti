@@ -5521,28 +5521,55 @@ class Komplexiti {
         return merged;
     }
 
-    // Rewrites a bare "N / trigfn(w)" division into "N * reciprocalFn(w)" - an exact algebraic
-    // identity (csc=1/sin, sec=1/cos, cot=1/tan and vice versa). This matters specifically for
-    // tan/cot/csc/sec denominators: unlike sin/cos (entire, never infinite), these have their OWN
-    // poles, so "N/tan(w)=0" genuinely has roots exactly where tan(w) blows up (tan's poles become
-    // zeros of its reciprocal cot) - a fact the naive "cross-multiply to N=0*D, solve N=0" rational
-    // equation path can never discover, since it only ever looks for zeros of the numerator. Only
-    // matches when the ENTIRE denominator is a single trig FunctionNode (not e.g. "2*tan(w)" or
-    // "tan(w)+1") - deliberately narrow, letting anything more complex fall through unchanged to
-    // the existing (already-correct-for-those-shapes) rational/generic solvers.
+    // Rewrites two trig-division shapes into their exact algebraic single-function equivalent, so
+    // the closed-form solvers below (_tryTrigSubstitution) see one candidate FunctionNode instead
+    // of a division/product that they can't handle: (1) "N / trigfn(w)" -> "N * reciprocalFn(w)"
+    // (csc=1/sin, sec=1/cos, cot=1/tan and vice versa) - matters specifically for tan/cot/csc/sec
+    // denominators: unlike sin/cos (entire, never infinite), these have their OWN poles, so
+    // "N/tan(w)=0" genuinely has roots exactly where tan(w) blows up (tan's poles become zeros of
+    // its reciprocal cot) - a fact the naive "cross-multiply to N=0*D, solve N=0" rational equation
+    // path can never discover. (2) "trigfn(w) / trigfn(w)" (same argument) -> a single named trig
+    // function whenever the ratio is clean (e.g. sin(w)/cos(w) = tan(w)) - without this, a ratio
+    // like sin(w)/cos(w) is left as two SEPARATE trig FunctionNodes, which _tryTrigSubstitution's
+    // single-candidate detection rejects outright. Only matches when the ENTIRE denominator (and,
+    // for case 2, numerator) is a single trig FunctionNode (not e.g. "2*tan(w)" or "tan(w)+1") -
+    // deliberately narrow, letting anything more complex fall through unchanged to the existing
+    // (already-correct-for-those-shapes) rational/generic solvers.
     _simplifyReciprocalTrig(exprStr) {
         if (exprStr.indexOf('/') === -1) return exprStr;
         let node;
         try { node = math.parse(exprStr); } catch { return exprStr; }
         const RECIP = { sin: 'csc', cos: 'sec', tan: 'cot', csc: 'sin', sec: 'cos', cot: 'tan' };
+        // trigFn(w)/trigFn(w) with the SAME argument collapses to a single named trig function
+        // whenever the ratio is one of these clean pairs (e.g. sin(w)/cos(w) = tan(w)) - lets a
+        // ratio like "sin(2z+pi/4)/cos(2z+pi/4)=0" be solved exactly like "tan(2z+pi/4)=0" rather
+        // than being left as a product of two DIFFERENT trig FunctionNodes (which
+        // _tryTrigSubstitution's single-candidate detection can't handle).
+        const RATIO = {
+            sin: { cos: 'tan', tan: 'cos' },
+            cos: { sin: 'cot', cot: 'sin' },
+            tan: { sin: 'sec', sec: 'sin' },
+            csc: { sec: 'cot', cot: 'sec' },
+            sec: { tan: 'csc', csc: 'tan' },
+            cot: { cos: 'csc', csc: 'cos' },
+        };
         const unwrap = n => (n.type === 'ParenthesisNode' ? unwrap(n.content) : n);
+        const isTrigCall = n => n.type === 'FunctionNode' && n.args?.length === 1 && RECIP[n.fn?.name];
         let changed = false;
         let transformed;
         try {
             transformed = node.transform(n => {
                 if (n.type === 'OperatorNode' && n.op === '/' && n.args?.length === 2) {
+                    const num = unwrap(n.args[0]);
                     const den = unwrap(n.args[1]);
-                    if (den.type === 'FunctionNode' && den.args?.length === 1 && RECIP[den.fn?.name]) {
+                    if (isTrigCall(num) && isTrigCall(den) && num.args[0].toString() === den.args[0].toString()) {
+                        const resultName = RATIO[num.fn.name]?.[den.fn.name];
+                        if (resultName) {
+                            changed = true;
+                            return new math.FunctionNode(new math.SymbolNode(resultName), den.args);
+                        }
+                    }
+                    if (isTrigCall(den)) {
                         changed = true;
                         const newDen = new math.FunctionNode(new math.SymbolNode(RECIP[den.fn.name]), den.args);
                         return new math.OperatorNode('*', 'multiply', [n.args[0], newDen]);
