@@ -7600,12 +7600,16 @@ class Komplexiti {
                 polesContainer.classList.add('visible');
                 if (polesToggle) polesToggle.classList.toggle('is-hidden', c.showPoles === false);
                 polesList.innerHTML = '';
-                for (const { base, step } of c.polesPeriodic) {
-                    const rendered = this._renderPeriodicFamily(base, step);
+                for (const fam of this._mergeConjugatePeriodicFamilies(c.polesPeriodic)) {
+                    const rendered = fam.pm
+                        ? this._renderPeriodicFamilyPM(fam.baseRe, fam.imAbs, fam.step)
+                        : this._renderPeriodicFamily(fam.base, fam.step);
                     if (!rendered) continue;
                     const wrapper = document.createElement('div');
                     wrapper.title = `${varName}_n makes the expression undefined, for any integer n`;
-                    wrapper.appendChild(makeMF(`${varName}_n=${rendered},\\ n\\in\\mathbb{Z}`, 17));
+                    // n\in\mathbb{Z} on its own line so it doesn't clip off the edge of the card.
+                    wrapper.appendChild(makeMF(`${varName}_n=${rendered}`, 17));
+                    wrapper.appendChild(makeMF(`\\quad n\\in\\mathbb{Z}`, 13));
                     polesList.appendChild(wrapper);
                 }
             } else if (c.gammaPolePeriodic) {
@@ -7717,13 +7721,19 @@ class Komplexiti {
                 // cartesian has a clean closed form in n - exponential/trig fall through to
                 // listing every branch individually below, since r_n=|...| and theta_n=arg(...)
                 // don't simplify to a formula in n.
-                for (const { base, step } of c.periodic) {
-                    const rendered = this._renderPeriodicFamily(base, step);
+                for (const fam of this._mergeConjugatePeriodicFamilies(c.periodic)) {
+                    const rendered = fam.pm
+                        ? this._renderPeriodicFamilyPM(fam.baseRe, fam.imAbs, fam.step)
+                        : this._renderPeriodicFamily(fam.base, fam.step);
                     if (!rendered) continue;
-                    const isExact = this._isExactComplex(base.re, base.im, 'cartesian');
+                    const isExact = fam.pm
+                        ? (this._isExactReal(fam.baseRe) && this._isExactReal(fam.imAbs))
+                        : this._isExactComplex(fam.base.re, fam.base.im, 'cartesian');
                     const wrapper = document.createElement('div');
                     wrapper.title = `${varName}_n, for any integer n`;
-                    wrapper.appendChild(makeMF(`${varName}_n${isExact ? '=' : '\\approx '}${rendered},\\ n\\in\\mathbb{Z}`, 18));
+                    // n\in\mathbb{Z} on its own line so it doesn't clip off the edge of the card.
+                    wrapper.appendChild(makeMF(`${varName}_n${isExact ? '=' : '\\approx '}${rendered}`, 18));
+                    wrapper.appendChild(makeMF(`\\quad n\\in\\mathbb{Z}`, 14));
                     rootsEl.appendChild(wrapper);
                 }
             } else if (c.reciprocalGammaRoots && fmt === 'cartesian') {
@@ -8393,6 +8403,57 @@ class Komplexiti {
             const piN = this._niceMultipleOfPiWithN(Math.abs(step.re));
             const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(step.re))}n`;
             return baseIsZero ? stepLatex : `${baseLatex}+${stepLatex}`;
+        }
+        return null;
+    }
+
+    // Detects pairs of periodic families that are complex conjugates of each other (same step,
+    // same base real part, opposite-sign base imaginary part) and collapses each pair into a
+    // single "re +- imAbs*i" entry, exactly mirroring the nonTrivialZeros conjugate-pair merge
+    // above - avoids showing e.g. sin(z)=2's two branches as two near-identical lines.
+    _mergeConjugatePeriodicFamilies(families) {
+        const used = new Array(families.length).fill(false);
+        const merged = [];
+        for (let i = 0; i < families.length; i++) {
+            if (used[i]) continue;
+            const a = families[i];
+            let pairIdx = -1;
+            for (let j = i + 1; j < families.length; j++) {
+                if (used[j]) continue;
+                const b = families[j];
+                const sameStep = Math.abs(a.step.re - b.step.re) < 1e-6 && Math.abs(a.step.im - b.step.im) < 1e-6;
+                const conjugate = Math.abs(a.base.re - b.base.re) < 1e-6 && Math.abs(a.base.im + b.base.im) < 1e-6 && Math.abs(a.base.im) > 1e-9;
+                if (sameStep && conjugate) { pairIdx = j; break; }
+            }
+            if (pairIdx >= 0) {
+                used[i] = true; used[pairIdx] = true;
+                merged.push({ pm: true, baseRe: a.base.re, imAbs: Math.abs(a.base.im), step: a.step });
+            } else {
+                used[i] = true;
+                merged.push({ pm: false, base: a.base, step: a.step });
+            }
+        }
+        return merged;
+    }
+
+    // "re +- imAbs*i + step*n" form for a merged conjugate pair - counterpart to
+    // _renderPeriodicFamily for the non-merged (single-base) case.
+    _renderPeriodicFamilyPM(baseRe, imAbs, step) {
+        const reZero = Math.abs(baseRe) < 1e-9;
+        const reLatex = this.niceRealLatex(baseRe) ?? this.formatNumberShort(baseRe);
+        const imLatex = this._wrapCompoundCoefficient(this.niceRealLatex(imAbs) ?? this.formatNumberShort(imAbs));
+        const pmTerm = reZero ? `\\pm ${this._appendImaginaryUnit(imLatex)}` : `${this._safeLatexConcat(reLatex, '\\pm')} ${this._appendImaginaryUnit(imLatex)}`;
+        const isImagStep = Math.abs(step.re) < 1e-6 * Math.max(1, Math.abs(step.im)) && Math.abs(step.im) > 1e-9;
+        const isRealStep = Math.abs(step.im) < 1e-6 * Math.max(1, Math.abs(step.re)) && Math.abs(step.re) > 1e-9;
+        if (isImagStep) {
+            const piN = this._niceMultipleOfPiWithN(Math.abs(step.im));
+            const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(step.im))}n`;
+            return `${pmTerm}+${this._appendImaginaryUnit(stepLatex)}`;
+        }
+        if (isRealStep) {
+            const piN = this._niceMultipleOfPiWithN(Math.abs(step.re));
+            const stepLatex = piN ?? `${this.formatNumberShort(Math.abs(step.re))}n`;
+            return `${pmTerm}+${stepLatex}`;
         }
         return null;
     }
