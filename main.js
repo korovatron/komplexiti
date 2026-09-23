@@ -7459,14 +7459,29 @@ class Komplexiti {
     }
 
     // Luminance at an arbitrary world point, read from the cached colour-layer bitmap - null if
-    // outside the cached rectangle or the cache isn't ready yet.
+    // outside the cached rectangle or the cache isn't ready yet. Averaged over a small pixel
+    // neighbourhood rather than a single sample: at a pole/essential-singularity the exact point
+    // itself is often painted a degenerate fallback colour (e.g. black, for an undefined value),
+    // which doesn't represent the swirling colour actually surrounding the marker on screen.
     _colorLayerLuminanceAtWorldPoint(x, y) {
         const cache = this._colorLayerCache;
         const img = cache?.fullImageData;
         if (!img || x < cache.minX || x > cache.maxX || y < cache.minY || y > cache.maxY) return null;
         const ix = Math.min(img.width - 1, Math.max(0, Math.round((x - cache.minX) / (cache.maxX - cache.minX) * (img.width - 1))));
         const iy = Math.min(img.height - 1, Math.max(0, Math.round((cache.maxY - y) / (cache.maxY - cache.minY) * (img.height - 1))));
-        return this._luminance(img.data, (iy * img.width + ix) * 4);
+        const radius = 2;
+        let total = 0, count = 0;
+        for (let dy = -radius; dy <= radius; dy++) {
+            const py = iy + dy;
+            if (py < 0 || py >= img.height) continue;
+            for (let dx = -radius; dx <= radius; dx++) {
+                const px = ix + dx;
+                if (px < 0 || px >= img.width) continue;
+                total += this._luminance(img.data, (py * img.width + px) * 4);
+                count++;
+            }
+        }
+        return count ? total / count : null;
     }
 
     // Colour for a metadata marker (root/pole/hole/essential-singularity/focus/centre/extremum) at
