@@ -2769,7 +2769,7 @@ class Komplexiti {
         }
         // Insert * where a variable/digit directly precedes a \function command (e.g. w\sqrt → w*\sqrt)
         // Negative lookbehind prevents matching a letter that is itself part of a LaTeX command (e.g. 'e' in \le\arctan).
-        e = e.replace(/(?<![a-zA-Z])([a-zA-Z0-9])\\(sqrt|sin|cos|tan|csc|sec|cot|ln|log|exp|sinh|cosh|tanh|csch|sech|coth|arcsin|arccos|arctan|arcsinh|arccosh|arctanh|Gamma|gamma|zeta)\b/g, '$1*\\$2');
+        e = e.replace(/(?<![a-zA-Z])([a-zA-Z0-9])\\(sqrt|sin|cos|tan|csc|sec|cot|ln|log|exp|sinh|cosh|tanh|csch|sech|coth|arcsin|arccos|arctan|arcsec|arccsc|arccot|arcsinh|arccosh|arctanh|arcsech|arccsch|arccoth|Gamma|gamma|zeta)\b/g, '$1*\\$2');
         for (let p = 0; p < 4; p++) {
             // Flatten exponent braces first so a braced exponent inside a \frac argument
             // (e.g. \frac{1}{z^{-2}}) doesn't defeat the [^{}]* nested-brace-free match below.
@@ -2803,6 +2803,8 @@ class Komplexiti {
         // by the implicit-multiplication letter-splitter further down).
         e = e.replace(/\barc\\sinh\b/g, 'asinh').replace(/\barc\\cosh\b/g, 'acosh').replace(/\barc\\tanh\b/g, 'atanh');
         e = e.replace(/\barc\\sin\b/g, 'asin').replace(/\barc\\cos\b/g, 'acos').replace(/\barc\\tan\b/g, 'atan');
+        e = e.replace(/\barc\\sech\b/g, 'asech').replace(/\barc\\csch\b/g, 'acsch').replace(/\barc\\coth\b/g, 'acoth');
+        e = e.replace(/\barc\\sec\b/g, 'asec').replace(/\barc\\csc\b/g, 'acsc').replace(/\barc\\cot\b/g, 'acot');
         // arc* names produced by the above → mathjs equivalents. Negative lookbehind excludes a
         // backslash-prefixed form (e.g. \arcsin, inserted directly by the keyboard's sin/cos/tan
         // buttons) - matching that too would strip "arc" from "\arcsin" leaving the unrecognised
@@ -2810,6 +2812,8 @@ class Komplexiti {
         // of being correctly handled by the dedicated \arcsin/\arccos/\arctan rule below.
         e = e.replace(/(?<!\\)\barcsin\b/g, 'asin').replace(/(?<!\\)\barccos\b/g, 'acos').replace(/(?<!\\)\barctan\b/g, 'atan');
         e = e.replace(/(?<!\\)\barcsinh\b/g, 'asinh').replace(/(?<!\\)\barccosh\b/g, 'acosh').replace(/(?<!\\)\barctanh\b/g, 'atanh');
+        e = e.replace(/(?<!\\)\barcsec\b/g, 'asec').replace(/(?<!\\)\barccsc\b/g, 'acsc').replace(/(?<!\\)\barccot\b/g, 'acot');
+        e = e.replace(/(?<!\\)\barcsech\b/g, 'asech').replace(/(?<!\\)\barccsch\b/g, 'acsch').replace(/(?<!\\)\barccoth\b/g, 'acoth');
         e = e.replace(/\^\s*\{([^{}]+)\}/g, '^($1)');
         e = e.replace(/\{([^{}]*)\}/g, '($1)');
         // Convert LaTeX inequality operators before abs replacement to prevent \le concatenating with abs
@@ -2840,6 +2844,8 @@ class Komplexiti {
         // (not just via \operatorname{arcsinh} from the keyboard's shift-buttons) - without this,
         // the unrecognised command was silently deleted by the catch-all further down.
         e = e.replace(/\\arcsinh\b/g, 'asinh').replace(/\\arccosh\b/g, 'acosh').replace(/\\arctanh\b/g, 'atanh');
+        e = e.replace(/\\arcsec\b/g, 'asec').replace(/\\arccsc\b/g, 'acsc').replace(/\\arccot\b/g, 'acot');
+        e = e.replace(/\\arcsech\b/g, 'asech').replace(/\\arccsch\b/g, 'acsch').replace(/\\arccoth\b/g, 'acoth');
         e = e.replace(/\\sinh\b/g, 'sinh').replace(/\\cosh\b/g, 'cosh').replace(/\\tanh\b/g, 'tanh');
         e = e.replace(/\\ln\b/g, 'log').replace(/\\log\b/g, 'log10');
         e = e.replace(/\\exp\b/g, 'exp');
@@ -2851,9 +2857,9 @@ class Komplexiti {
         if (!e) return '';
         // Split consecutive letters that aren't a known name into implicit products (user vars are single-letter only)
         // Also handles variable immediately followed by function name, e.g. zconj → z*conj
-        const knownFnNames = ['log10', 'sqrt', 'conj', 'arg', 'abs', 'gamma', 'zeta', 'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'exp', 'log', 're', 'im', 'pi', 'Infinity', 'NaN'];
+        const knownFnNames = ['log10', 'sqrt', 'conj', 'arg', 'abs', 'gamma', 'zeta', 'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh', 'asec', 'acsc', 'acot', 'asech', 'acsch', 'acoth', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'exp', 'log', 're', 'im', 'pi', 'Infinity', 'NaN'];
         e = e.replace(/[a-zA-Z]{2,}/g, m => {
-            if (/^(sqrt|log10|log|exp|abs|gamma|zeta|conj|arg|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|re|im|pi|Infinity|NaN)$/.test(m)) return m;
+            if (/^(sqrt|log10|log|exp|abs|gamma|zeta|conj|arg|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|re|im|pi|Infinity|NaN)$/.test(m)) return m;
             // gamma is the only name users might plausibly capitalise (mathematical convention is
             // Γ, upper-case) without realising the parser only recognises lower-case - accept either.
             if (m === 'Gamma') return 'gamma';
@@ -2865,14 +2871,14 @@ class Komplexiti {
             }
             return m.split('').join('*');
         });
-        e = e.replace(/\bi\s*(sqrt|sin|cos|tan|csc|sec|cot|asin|acos|atan|sinh|cosh|tanh|csch|sech|coth|asinh|acosh|atanh|log|log10|exp|conj|gamma|zeta)\s*\(/g, 'i*$1(');
+        e = e.replace(/\bi\s*(sqrt|sin|cos|tan|csc|sec|cot|asin|acos|atan|asec|acsc|acot|sinh|cosh|tanh|csch|sech|coth|asinh|acosh|atanh|asech|acsch|acoth|log|log10|exp|conj|gamma|zeta)\s*\(/g, 'i*$1(');
         e = e.replace(/\)\s*i\b/g, ')*i');
         // Insert * before a trailing imaginary i that directly follows a letter or digit (e.g. wi → w*i)
         e = e.replace(/([a-zA-Z0-9])i(?=[^a-zA-Z0-9]|$)/g, (match, prefix) => prefix === 'p' ? match : `${prefix}*i`);
         // Insert * where a letter directly precedes ( but is not the end of a known function name (e.g. z\left(...) → z*(...))
         e = e.replace(/([a-zA-Z])\(/g, (_, ch, offset, str) => {
             const tail = str.slice(Math.max(0, offset - 9), offset + 1);
-            return /(sqrt|log10|log|exp|abs|conj|arg|gamma|zeta|asin|acos|atan|asinh|acosh|atanh|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|re|im)$/.test(tail)
+            return /(sqrt|log10|log|exp|abs|conj|arg|gamma|zeta|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|re|im)$/.test(tail)
                 ? `${ch}(` : `${ch}*(`;
         });
         return e;
@@ -2896,7 +2902,7 @@ class Komplexiti {
 
     // Returns the single free variable name in expr, or null if there are 0 or >1.
     _findEquationVariable(expr, scope) {
-        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'asinh', 'acosh', 'atanh', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'gamma', 'zeta', 'Infinity', 'NaN']);
+        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'asin', 'acos', 'atan', 'asec', 'acsc', 'acot', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'asinh', 'acosh', 'atanh', 'asech', 'acsch', 'acoth', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'gamma', 'zeta', 'Infinity', 'NaN']);
         const known    = new Set(Object.keys(scope));
         const free     = new Set();
         for (const [, id] of expr.matchAll(/(?<![a-zA-Z_])([a-zA-Z][a-zA-Z0-9]*)/g)) {
@@ -5002,7 +5008,7 @@ class Komplexiti {
     // by local convergence, which would otherwise misidentify e.g. sin(z) as some degree-9
     // "polynomial" and solve for its (nonexistent) extra roots.
     _extractPolynomialCoeffsSafe(expr, varName, scope) {
-        if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|exp|log|log10|log2)\(/.test(expr)) return null;
+        if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(expr)) return null;
         let c = this._extractPolynomialCoeffs(expr, varName, scope);
         if (c && c.length >= 2 && !this._matchesPolynomialApproximation(expr, c, varName, scope)) c = null;
         if (!c || c.length < 2) {
@@ -5294,7 +5300,7 @@ class Komplexiti {
     _solveGeneralEquation(lhs, rhs, varName, scope) {
         const hExpr = `(${lhs}) - (${rhs})`;
         const hasDivision = /\//.test(hExpr);
-        const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|exp|log|log10|log2)\(/.test(hExpr);
+        const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(hExpr);
         let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffsSafe(hExpr, varName, scope);
         if ((!coeffs || coeffs.length < 2) && hasDivision) {
             const fast = this._tryFastRationalEquation(lhs, rhs, varName, scope);
@@ -5317,7 +5323,7 @@ class Komplexiti {
             if (trigResult?.roots?.length) return trigResult.roots;
             if (trigResult?.provablyEmpty) return [];
         }
-        if (/(?<![a-zA-Z])(?:asin|acos|atan|asinh|acosh|atanh)\(/.test(hExpr)) {
+        if (/(?<![a-zA-Z])(?:asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth)\(/.test(hExpr)) {
             const invResult = this._tryInverseTrigSubstitution(lhs, rhs, varName, scope);
             if (invResult?.roots?.length) return invResult.roots;
         }
@@ -5811,7 +5817,7 @@ class Komplexiti {
         const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
         const containsVar = node => varRe.test(node.toString());
 
-        const INV_NAMES = ['asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh'];
+        const INV_NAMES = ['asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh', 'asec', 'acsc', 'acot', 'asech', 'acsch', 'acoth'];
         const candidates = [];
         root.traverse(node => {
             if (node.type === 'FunctionNode' && node.args?.length === 1 && INV_NAMES.includes(node.fn?.name)) {
@@ -5844,7 +5850,9 @@ class Komplexiti {
         try {
             const u0c = math.complex(u0.re, u0.im);
             const inv = kind === 'asin' ? math.sin(u0c) : kind === 'acos' ? math.cos(u0c) : kind === 'atan' ? math.tan(u0c)
-                : kind === 'asinh' ? math.sinh(u0c) : kind === 'acosh' ? math.cosh(u0c) : math.tanh(u0c);
+                : kind === 'asinh' ? math.sinh(u0c) : kind === 'acosh' ? math.cosh(u0c) : kind === 'atanh' ? math.tanh(u0c)
+                : kind === 'asec' ? math.sec(u0c) : kind === 'acsc' ? math.csc(u0c) : kind === 'acot' ? math.cot(u0c)
+                : kind === 'asech' ? math.sech(u0c) : kind === 'acsch' ? math.csch(u0c) : math.coth(u0c);
             w0 = { re: inv.re ?? inv, im: inv.im ?? 0 };
         } catch { return null; }
         if (!isFinite(w0.re) || !isFinite(w0.im)) return null;
@@ -6386,7 +6394,7 @@ class Komplexiti {
             // fallbacks below with the same end result. This matters a lot in practice since
             // cascadeEvaluate re-parses every OTHER equation card on every keystroke typed anywhere.
             const hasDivision = /\//.test(hExpr);
-            const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|exp|log|log10|log2)\(/.test(hExpr);
+            const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(hExpr);
             let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffs(hExpr, varName, scope);
             let fromRationalize = false;
             let poles = null; // denominator roots where the expression genuinely blows up
@@ -6471,7 +6479,7 @@ class Komplexiti {
                         return this._withNumericPoles({ type: 'equation', variable: varName, roots: expResult.roots, periodic: expResult.periodic, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
                     }
                 }
-                if (/(?<![a-zA-Z])(?:asin|acos|atan|asinh|acosh|atanh)\(/.test(hExpr)) {
+                if (/(?<![a-zA-Z])(?:asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth)\(/.test(hExpr)) {
                     const invResult = this._tryInverseTrigSubstitution(lhs, rhs, varName, scope);
                     if (invResult?.roots?.length) {
                         return { type: 'equation', variable: varName, roots: invResult.roots, lhs, rhs };
