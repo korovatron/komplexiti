@@ -2789,9 +2789,13 @@ class Komplexiti {
         }
         // \operatorname{fn} → fn (used by the keyboard for named functions)
         e = e.replace(/\\operatorname\{([^{}]+)\}/g, '$1');
-        // arc* names produced by the above → mathjs equivalents
-        e = e.replace(/\barcsin\b/g, 'asin').replace(/\barccos\b/g, 'acos').replace(/\barctan\b/g, 'atan');
-        e = e.replace(/\barcsinh\b/g, 'asinh').replace(/\barccosh\b/g, 'acosh').replace(/\barctanh\b/g, 'atanh');
+        // arc* names produced by the above → mathjs equivalents. Negative lookbehind excludes a
+        // backslash-prefixed form (e.g. \arcsin, inserted directly by the keyboard's sin/cos/tan
+        // buttons) - matching that too would strip "arc" from "\arcsin" leaving the unrecognised
+        // command "\asin", which then gets silently deleted by the catch-all further down instead
+        // of being correctly handled by the dedicated \arcsin/\arccos/\arctan rule below.
+        e = e.replace(/(?<!\\)\barcsin\b/g, 'asin').replace(/(?<!\\)\barccos\b/g, 'acos').replace(/(?<!\\)\barctan\b/g, 'atan');
+        e = e.replace(/(?<!\\)\barcsinh\b/g, 'asinh').replace(/(?<!\\)\barccosh\b/g, 'acosh').replace(/(?<!\\)\barctanh\b/g, 'atanh');
         e = e.replace(/\^\s*\{([^{}]+)\}/g, '^($1)');
         e = e.replace(/\{([^{}]*)\}/g, '($1)');
         // Convert LaTeX inequality operators before abs replacement to prevent \le concatenating with abs
@@ -2818,6 +2822,10 @@ class Komplexiti {
         e = e.replace(/\\(?:Gamma|gamma)\b/g, 'gamma');
         e = e.replace(/\\zeta\b/g, 'zeta');
         e = e.replace(/\\arcsin\b/g, 'asin').replace(/\\arccos\b/g, 'acos').replace(/\\arctan\b/g, 'atan');
+        // MathLive's own autocomplete can insert \arcsinh/\arccosh/\arctanh as direct commands
+        // (not just via \operatorname{arcsinh} from the keyboard's shift-buttons) - without this,
+        // the unrecognised command was silently deleted by the catch-all further down.
+        e = e.replace(/\\arcsinh\b/g, 'asinh').replace(/\\arccosh\b/g, 'acosh').replace(/\\arctanh\b/g, 'atanh');
         e = e.replace(/\\sinh\b/g, 'sinh').replace(/\\cosh\b/g, 'cosh').replace(/\\tanh\b/g, 'tanh');
         e = e.replace(/\\ln\b/g, 'log').replace(/\\log\b/g, 'log10');
         e = e.replace(/\\exp\b/g, 'exp');
@@ -4980,7 +4988,7 @@ class Komplexiti {
     // by local convergence, which would otherwise misidentify e.g. sin(z) as some degree-9
     // "polynomial" and solve for its (nonexistent) extra roots.
     _extractPolynomialCoeffsSafe(expr, varName, scope) {
-        if (/(?<![a-zA-Z])(?:sin|cos|tan|exp|log|log10|log2)\(/.test(expr)) return null;
+        if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|exp|log|log10|log2)\(/.test(expr)) return null;
         let c = this._extractPolynomialCoeffs(expr, varName, scope);
         if (c && c.length >= 2 && !this._matchesPolynomialApproximation(expr, c, varName, scope)) c = null;
         if (!c || c.length < 2) {
@@ -5272,7 +5280,7 @@ class Komplexiti {
     _solveGeneralEquation(lhs, rhs, varName, scope) {
         const hExpr = `(${lhs}) - (${rhs})`;
         const hasDivision = /\//.test(hExpr);
-        const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|exp|log|log10|log2)\(/.test(hExpr);
+        const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|exp|log|log10|log2)\(/.test(hExpr);
         let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffsSafe(hExpr, varName, scope);
         if ((!coeffs || coeffs.length < 2) && hasDivision) {
             const fast = this._tryFastRationalEquation(lhs, rhs, varName, scope);
@@ -5294,6 +5302,10 @@ class Komplexiti {
             const trigResult = this._tryTrigSubstitution(lhs, rhs, varName, scope);
             if (trigResult?.roots?.length) return trigResult.roots;
             if (trigResult?.provablyEmpty) return [];
+        }
+        if (/(?<![a-zA-Z])(?:asin|acos|atan|asinh|acosh|atanh)\(/.test(hExpr)) {
+            const invResult = this._tryInverseTrigSubstitution(lhs, rhs, varName, scope);
+            if (invResult?.roots?.length) return invResult.roots;
         }
         return this._findComplexEquationRootsNumerically(lhs, rhs, varName, scope);
     }
@@ -5765,6 +5777,73 @@ class Komplexiti {
             return null;
         }
         return { roots, periodic: periodic.length ? periodic : null, poles, polesPeriodic };
+    }
+
+    // Closed-form solver for asin/acos/atan/asinh/acosh/atanh(C*z+D) = K (single occurrence,
+    // affine argument). Unlike sin/cos/tan, these are single-valued invertible functions - no
+    // periodicity, no poles (only branch points) - so applying the compositional inverse
+    // (sin/cos/tan/sinh/cosh/tanh) to the target once gives the ONE exact root, unbounded by the
+    // generic numeric search's [-10,10]^2 box (e.g. asinh(z)=5 has root z=sinh(5)~=74.2, which the
+    // box-limited search wrongly reports as confirmedEmpty). Also sidesteps a real correctness/perf
+    // hazard: symbolically differentiating these functions repeatedly (their own derivatives
+    // involve sqrt+division, e.g. d/dw asin(w)=1/sqrt(1-w^2)) causes the same exponential
+    // expression-tree blowup as any other division-containing expression under repeated
+    // differentiation - see the isNeverPolynomial/_extractPolynomialCoeffsSafe guards, which must
+    // always exclude these names for that reason, independent of this closed-form solver existing.
+    _tryInverseTrigSubstitution(lhs, rhs, varName, scope) {
+        const hExpr = `(${lhs}) - (${rhs})`;
+        let root;
+        try { root = math.parse(hExpr); } catch { return null; }
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        const containsVar = node => varRe.test(node.toString());
+
+        const INV_NAMES = ['asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh'];
+        const candidates = [];
+        root.traverse(node => {
+            if (node.type === 'FunctionNode' && node.args?.length === 1 && INV_NAMES.includes(node.fn?.name)) {
+                if (containsVar(node.args[0])) candidates.push({ kind: node.fn.name, node, argNode: node.args[0] });
+            }
+        });
+        if (candidates.length !== 1) return null;
+        const { kind, node, argNode } = candidates[0];
+
+        const argStr = argNode.toString();
+        const argCoeffs = this._extractPolynomialCoeffs(argStr, varName, scope, 1);
+        if (!argCoeffs || argCoeffs.length !== 2 || !this._matchesPolynomialApproximation(argStr, argCoeffs, varName, scope)) return null;
+        const [D, C] = argCoeffs;
+        if (Math.hypot(C.re, C.im) < 1e-12) return null;
+
+        let u = 'invTrigSub';
+        if (scope.hasOwnProperty(u) || u === varName) u = 'invTrigSubVar';
+        if (scope.hasOwnProperty(u) || u === varName) return null;
+        let hSub;
+        try {
+            hSub = root.transform(n => (n === node ? new math.SymbolNode(u) : n)).toString();
+        } catch { return null; }
+        const outerCoeffs = this._extractPolynomialCoeffs(hSub, u, scope, 1);
+        if (!outerCoeffs || outerCoeffs.length !== 2 || !this._matchesPolynomialApproximation(hSub, outerCoeffs, u, scope)) return null;
+        const [A, B] = outerCoeffs;
+        if (Math.hypot(B.re, B.im) < 1e-12) return null;
+        const u0 = this._cDiv({ re: -A.re, im: -A.im }, B); // target value that kind(w) must equal
+
+        let w0;
+        try {
+            const u0c = math.complex(u0.re, u0.im);
+            const inv = kind === 'asin' ? math.sin(u0c) : kind === 'acos' ? math.cos(u0c) : kind === 'atan' ? math.tan(u0c)
+                : kind === 'asinh' ? math.sinh(u0c) : kind === 'acosh' ? math.cosh(u0c) : math.tanh(u0c);
+            w0 = { re: inv.re ?? inv, im: inv.im ?? 0 };
+        } catch { return null; }
+        if (!isFinite(w0.re) || !isFinite(w0.im)) return null;
+        const z = this._cDiv(this._cSub(w0, D), C);
+
+        let lhsNode, rhsNode;
+        try { lhsNode = math.parse(lhs); rhsNode = math.parse(rhs); } catch { return null; }
+        try {
+            const ev = { ...scope, [varName]: math.complex(z.re, z.im) };
+            if (this._equationDifferenceMagnitude(lhsNode.evaluate(ev), rhsNode.evaluate(ev)) >= 1e-4) return null;
+        } catch { return null; }
+
+        return { roots: [z] };
     }
 
     // Closed-form solver for zeta(C*z+D) = 0 (or any A+B*zeta(C*z+D)=K that reduces to that),
@@ -6293,7 +6372,7 @@ class Komplexiti {
             // fallbacks below with the same end result. This matters a lot in practice since
             // cascadeEvaluate re-parses every OTHER equation card on every keystroke typed anywhere.
             const hasDivision = /\//.test(hExpr);
-            const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|exp|log|log10|log2)\(/.test(hExpr);
+            const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|exp|log|log10|log2)\(/.test(hExpr);
             let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffs(hExpr, varName, scope);
             let fromRationalize = false;
             let poles = null; // denominator roots where the expression genuinely blows up
@@ -6376,6 +6455,12 @@ class Komplexiti {
                     const expResult = this._tryExpLogPowSubstitution(lhs, rhs, varName, scope);
                     if (expResult?.roots?.length) {
                         return this._withNumericPoles({ type: 'equation', variable: varName, roots: expResult.roots, periodic: expResult.periodic, lhs, rhs }, lhs, rhs, varName, scope, hExpr);
+                    }
+                }
+                if (/(?<![a-zA-Z])(?:asin|acos|atan|asinh|acosh|atanh)\(/.test(hExpr)) {
+                    const invResult = this._tryInverseTrigSubstitution(lhs, rhs, varName, scope);
+                    if (invResult?.roots?.length) {
+                        return { type: 'equation', variable: varName, roots: invResult.roots, lhs, rhs };
                     }
                 }
                 if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth)\(/.test(hExpr)) {
