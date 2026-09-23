@@ -5619,6 +5619,17 @@ class Komplexiti {
         };
         const toZ = w => this._cDiv(this._cSub(w, D), C);
 
+        // sin/cos each normally split into two interleaved w-space families (invVal and its
+        // mirror), but at the extremes (sin=+-1, cos=+-1) the mirror collapses onto the SAME
+        // points as the first family (e.g. asin(1)=pi/2 and pi-asin(1)=pi/2 are identical) -
+        // without this check the identical family gets collected and displayed a second time.
+        const sameFamily = (baseA, baseB, step) => {
+            const diff = this._cSub(baseA, baseB);
+            if (Math.abs(step.im) > 1e-9 || Math.abs(diff.im) > 1e-9 || Math.abs(step.re) < 1e-12) return false;
+            const q = diff.re / step.re;
+            return Math.abs(q - Math.round(q)) < 1e-6;
+        };
+
         const roots = [];
         const families = []; // {base, step} descriptors, one per interleaved family found
 
@@ -5652,11 +5663,15 @@ class Komplexiti {
                 if (baseKind === 'tan') {
                     collectFamily(invVal, { re: Math.PI, im: 0 });
                 } else if (baseKind === 'sin') {
-                    collectFamily(invVal, { re: 2 * Math.PI, im: 0 });
-                    collectFamily(this._cSub({ re: Math.PI, im: 0 }, invVal), { re: 2 * Math.PI, im: 0 });
+                    const wStep = { re: 2 * Math.PI, im: 0 };
+                    const altBase = this._cSub({ re: Math.PI, im: 0 }, invVal);
+                    collectFamily(invVal, wStep);
+                    if (!sameFamily(altBase, invVal, wStep)) collectFamily(altBase, wStep);
                 } else { // cos
-                    collectFamily(invVal, { re: 2 * Math.PI, im: 0 });
-                    collectFamily({ re: -invVal.re, im: -invVal.im }, { re: 2 * Math.PI, im: 0 });
+                    const wStep = { re: 2 * Math.PI, im: 0 };
+                    const altBase = { re: -invVal.re, im: -invVal.im };
+                    collectFamily(invVal, wStep);
+                    if (!sameFamily(altBase, invVal, wStep)) collectFamily(altBase, wStep);
                 }
             }
         }
