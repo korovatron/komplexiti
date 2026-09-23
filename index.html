@@ -1415,6 +1415,27 @@
             -webkit-user-select: none;
         }
 
+        .root-format-select {
+            display: none;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.3;
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 4px;
+            padding: 2px 4px;
+            cursor: pointer;
+        }
+        .root-format-select option {
+            color: var(--text-primary);
+            background: var(--bg-secondary);
+        }
+        .root-format-select:focus-visible {
+            outline: 2px solid var(--function-badge-bg, #4A90E2);
+            outline-offset: 1px;
+        }
+
         /* Roots list inside card metadata */
         .expr-card-roots {
             display: none;
@@ -1430,8 +1451,10 @@
             gap: 6px;
         }
 
-        .shape-info-container.is-equation .shape-info-title {
-            cursor: pointer;
+        /* override metadata-title-row's own align-self: flex-start (meant for the column-stacked
+           layout above) so the badge centers vertically against the taller format dropdown */
+        .shape-info-container.is-equation .metadata-title-row {
+            align-self: center;
         }
 
         /* Read-only MathLive field for root values (same as Graphiti .asymptote-equation-field) */

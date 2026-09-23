@@ -2188,6 +2188,11 @@ class Komplexiti {
                     <div class="shape-info-title"></div>
                 </div>
                 <div class="shape-info-value"></div>
+                <select class="root-format-select" title="Root format" tabindex="-1">
+                    <option value="cartesian">Cartesian</option>
+                    <option value="exponential">Exponential</option>
+                    <option value="trig">Trig</option>
+                </select>
                 <div class="expr-card-roots"></div>
             </div>
             <div class="foci-info-container">
@@ -2236,13 +2241,10 @@ class Komplexiti {
         const mathField = card.querySelector('math-field');
         const dot       = card.querySelector('.expr-color-dot');
         const removeBtn = card.querySelector('.expr-remove-btn');
-        const metaBadge = card.querySelector('.shape-info-title');
+        const formatSelect = card.querySelector('.root-format-select');
 
-        // Cycle root display format on badge click
-        metaBadge.addEventListener('click', () => {
-            if (c.type !== 'equation') return;
-            const fmts = ['cartesian', 'exponential', 'trig'];
-            c.cardRootFmt = fmts[(fmts.indexOf(c.cardRootFmt || 'cartesian') + 1) % fmts.length];
+        formatSelect.addEventListener('change', () => {
+            c.cardRootFmt = formatSelect.value;
             this.updateCardMetadata(c);
         });
 
@@ -7520,6 +7522,8 @@ class Komplexiti {
 
         const badge   = container.querySelector('.shape-info-title');
         const valueEl = container.querySelector('.shape-info-value');
+        const formatSelect = container.querySelector('.root-format-select');
+        formatSelect.style.display = 'none';
         const rootsEl = container.querySelector('.expr-card-roots');
         const fociContainer = card.querySelector('.foci-info-container');
         const fociList      = card.querySelector('.foci-equation-list');
@@ -7706,11 +7710,11 @@ class Komplexiti {
             container.classList.add('is-equation');
             renderPolesHoles();
             const fmt = c.cardRootFmt || 'cartesian';
-            const fmtNames  = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
             badge.textContent     = 'Root Format';
-            badge.title           = 'Click to toggle between Cartesian, Exponential and Trig form';
-            valueEl.style.display = '';
-            valueEl.textContent   = fmtNames[fmt];
+            badge.title           = '';
+            valueEl.style.display = 'none';
+            formatSelect.style.display = 'inline-block';
+            formatSelect.value    = fmt;
             rootsEl.style.display = 'flex';
             rootsEl.innerHTML     = '';
             const varName = c.equationVar || 'z';
