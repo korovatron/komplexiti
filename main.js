@@ -7307,7 +7307,8 @@ class Komplexiti {
             this._colorLayerCache = built
                 ? {
                     exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
-                    axisSamples: this._buildAxisColorSamples(built.canvas, built.minX, built.maxX, built.minY, built.maxY)
+                    axisSamples: this._buildAxisColorSamples(built.canvas, built.minX, built.maxX, built.minY, built.maxY),
+                    fullImageData: this._getFullImageData(built.canvas)
                 }
                 : null;
         } else {
@@ -7350,7 +7351,8 @@ class Komplexiti {
             this._colorLayerCache = built
                 ? {
                     exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
-                    axisSamples: this._buildAxisColorSamples(built.canvas, built.minX, built.maxX, built.minY, built.maxY)
+                    axisSamples: this._buildAxisColorSamples(built.canvas, built.minX, built.maxX, built.minY, built.maxY),
+                    fullImageData: this._getFullImageData(built.canvas)
                 }
                 : null;
             if (this.currentState === this.states.APP) this.drawCanvas();
@@ -7444,6 +7446,38 @@ class Komplexiti {
         if (prevColor === '#000000') return luminance < 0.42 ? '#ffffff' : '#000000';
         if (prevColor === '#ffffff') return luminance > 0.58 ? '#000000' : '#ffffff';
         return luminance > 0.5 ? '#000000' : '#ffffff';
+    }
+
+    // Cheap full-bitmap ImageData snapshot of the (small) colour-layer canvas, taken once per
+    // cache (re)build - lets metadata markers sample background luminance at an arbitrary world
+    // point (unlike axisSamples, which only cover the two axis strips) without ever calling
+    // getImageData on the live/full-resolution canvas during a redraw.
+    _getFullImageData(canvasLayer) {
+        try {
+            return canvasLayer.getContext('2d').getImageData(0, 0, canvasLayer.width, canvasLayer.height);
+        } catch { return null; }
+    }
+
+    // Luminance at an arbitrary world point, read from the cached colour-layer bitmap - null if
+    // outside the cached rectangle or the cache isn't ready yet.
+    _colorLayerLuminanceAtWorldPoint(x, y) {
+        const cache = this._colorLayerCache;
+        const img = cache?.fullImageData;
+        if (!img || x < cache.minX || x > cache.maxX || y < cache.minY || y > cache.maxY) return null;
+        const ix = Math.min(img.width - 1, Math.max(0, Math.round((x - cache.minX) / (cache.maxX - cache.minX) * (img.width - 1))));
+        const iy = Math.min(img.height - 1, Math.max(0, Math.round((cache.maxY - y) / (cache.maxY - cache.minY) * (img.height - 1))));
+        return this._luminance(img.data, (iy * img.width + ix) * 4);
+    }
+
+    // Colour for a metadata marker (root/pole/hole/essential-singularity/focus/centre/extremum) at
+    // world position (x,y): the expression's own colour normally, but black/white (matching the
+    // axis label convention) when THIS SPECIFIC expression has domain/phase colouring switched on -
+    // otherwise those markers can be hard to see against the swirling colour layer. Other
+    // expressions (colouring off, or a different expression's colouring on) are unaffected.
+    _metadataColorFor(c, x, y) {
+        if (c.id !== this.colorModeExpressionId) return c.color;
+        const luminance = this._colorLayerLuminanceAtWorldPoint(x, y);
+        return luminance === null ? c.color : (luminance > 0.5 ? '#000000' : '#ffffff');
     }
 
     getContrastingTextColor(hex) {
@@ -8523,7 +8557,8 @@ class Komplexiti {
                     const pt = this.worldToScreen(pole.re, pole.im);
                     const s  = dotR * 0.8;
                     ctx.save();
-                    ctx.strokeStyle = c.color;
+                    const poleColor = this._metadataColorFor(c, pole.re, pole.im);
+                    ctx.strokeStyle = poleColor;
                     ctx.lineWidth   = strokeWidth * 0.7;
                     ctx.globalAlpha = 0.9;
                     ctx.beginPath();
@@ -8534,7 +8569,7 @@ class Komplexiti {
                     ctx.stroke();
                     if (c.equationVar) {
                         ctx.font = `italic ${fSize - 4}px Arial`;
-                        ctx.fillStyle = c.color;
+                        ctx.fillStyle = poleColor;
                         ctx.fillText(`P${toSub(k + 1)}`, pt.x + s + 3, pt.y - s - 1);
                     }
                     ctx.restore();
@@ -8546,7 +8581,8 @@ class Komplexiti {
                     if (!isFinite(hole.re) || !isFinite(hole.im)) continue;
                     const pt = this.worldToScreen(hole.re, hole.im);
                     ctx.save();
-                    ctx.strokeStyle = c.color;
+                    const holeColor = this._metadataColorFor(c, hole.re, hole.im);
+                    ctx.strokeStyle = holeColor;
                     ctx.lineWidth   = strokeWidth * 0.7;
                     ctx.globalAlpha = 0.9;
                     ctx.fillStyle   = isLight ? '#fff' : '#1a1a1a';
@@ -8556,7 +8592,7 @@ class Komplexiti {
                     ctx.stroke();
                     if (c.equationVar) {
                         ctx.font = `italic ${fSize - 4}px Arial`;
-                        ctx.fillStyle = c.color;
+                        ctx.fillStyle = holeColor;
                         ctx.fillText(`H${toSub(k + 1)}`, pt.x + dotR + 3, pt.y - dotR - 1);
                     }
                     ctx.restore();
@@ -8571,7 +8607,8 @@ class Komplexiti {
                     const pt = this.worldToScreen(es.re, es.im);
                     const s  = dotR * 0.9;
                     ctx.save();
-                    ctx.strokeStyle = c.color;
+                    const esColor = this._metadataColorFor(c, es.re, es.im);
+                    ctx.strokeStyle = esColor;
                     ctx.lineWidth   = strokeWidth * 0.7;
                     ctx.globalAlpha = 0.9;
                     ctx.beginPath();
@@ -8583,7 +8620,7 @@ class Komplexiti {
                     ctx.stroke();
                     if (c.equationVar) {
                         ctx.font = `italic ${fSize - 4}px Arial`;
-                        ctx.fillStyle = c.color;
+                        ctx.fillStyle = esColor;
                         ctx.fillText(`E${toSub(k + 1)}`, pt.x + s + 3, pt.y - s - 1);
                     }
                     ctx.restore();
@@ -8597,6 +8634,7 @@ class Komplexiti {
                     const root = c.roots[k];
                     if (!isFinite(root.re) || !isFinite(root.im)) continue;
                     const pt = this.worldToScreen(root.re, root.im);
+                    const rootColor = this._metadataColorFor(c, root.re, root.im);
 
                     if (this.displayMode === 'arrow') {
                         const dx  = pt.x - org.x;
@@ -8607,14 +8645,14 @@ class Komplexiti {
                             const tipX = pt.x - dotR * Math.cos(ang);
                             const tipY = pt.y - dotR * Math.sin(ang);
                             ctx.save();
-                            ctx.strokeStyle = c.color;
+                            ctx.strokeStyle = rootColor;
                             ctx.lineWidth   = strokeWidth;
                             ctx.globalAlpha = 0.9;
                             ctx.beginPath();
                             ctx.moveTo(org.x, org.y);
                             ctx.lineTo(tipX, tipY);
                             ctx.stroke();
-                            ctx.fillStyle = c.color;
+                            ctx.fillStyle = rootColor;
                             ctx.beginPath();
                             ctx.moveTo(tipX, tipY);
                             ctx.lineTo(tipX - headLen * Math.cos(ang - 0.38), tipY - headLen * Math.sin(ang - 0.38));
@@ -8626,7 +8664,7 @@ class Komplexiti {
                     }
 
                     ctx.save();
-                    ctx.fillStyle   = c.color;
+                    ctx.fillStyle   = rootColor;
                     ctx.globalAlpha = 1;
                     ctx.beginPath();
                     ctx.arc(pt.x, pt.y, dotR, 0, Math.PI * 2);
@@ -8643,7 +8681,7 @@ class Komplexiti {
                         ctx.globalAlpha = 1;
                         const lx = pt.x + dotR + 4;
                         const ly = pt.y - dotR - 2;
-                        ctx.fillStyle = c.color;
+                        ctx.fillStyle = rootColor;
                         ctx.fillText(label, lx, ly);
                         ctx.restore();
                     }
@@ -8734,8 +8772,9 @@ class Komplexiti {
                     const fDotR = Math.max(3, dotR - 1.5);
                     for (const [idx, focus] of [[1, fp.focusA], [2, fp.focusB]]) {
                         const fp2 = this.worldToScreen(focus.re, focus.im);
+                        const focusColor = this._metadataColorFor(c, focus.re, focus.im);
                         ctx.save();
-                        ctx.fillStyle   = c.color;
+                        ctx.fillStyle   = focusColor;
                         ctx.globalAlpha = 0.75;
                         ctx.beginPath();
                         ctx.arc(fp2.x, fp2.y, fDotR, 0, Math.PI * 2);
@@ -8745,7 +8784,7 @@ class Komplexiti {
                         ctx.stroke();
                         ctx.globalAlpha = 0.9;
                         ctx.font      = `italic ${fSize}px Arial`;
-                        ctx.fillStyle = c.color;
+                        ctx.fillStyle = focusColor;
                         const sub = idx === 1 ? '\u2081' : '\u2082';
                         ctx.fillText(`F${sub}`, fp2.x + fDotR + 3, fp2.y - fDotR - 2);
                         ctx.restore();
@@ -8756,8 +8795,10 @@ class Komplexiti {
                 if (c.showFoci !== false && fp?.perpBisector && fp?.focusA && fp?.focusB) {
                     const aPt = this.worldToScreen(fp.focusA.re, fp.focusA.im);
                     const bPt = this.worldToScreen(fp.focusB.re, fp.focusB.im);
+                    const midX  = (fp.focusA.re + fp.focusB.re) / 2, midY = (fp.focusA.im + fp.focusB.im) / 2;
+                    const biColor = this._metadataColorFor(c, midX, midY);
                     ctx.save();
-                    ctx.strokeStyle = c.color;
+                    ctx.strokeStyle = biColor;
                     ctx.lineWidth   = 1;
                     ctx.globalAlpha = 0.6;
                     ctx.setLineDash([4, 4]);
@@ -8768,14 +8809,13 @@ class Komplexiti {
                     ctx.restore();
 
                     // Right-angle marker at the midpoint, the point where the segment crosses the locus
-                    const midX  = (fp.focusA.re + fp.focusB.re) / 2, midY = (fp.focusA.im + fp.focusB.im) / 2;
                     const midPt = this.worldToScreen(midX, midY);
                     const ulen  = Math.hypot(bPt.x - aPt.x, bPt.y - aPt.y) || 1;
                     const ux    = (bPt.x - aPt.x) / ulen, uy = (bPt.y - aPt.y) / ulen;
                     const px    = -uy, py = ux;
                     const s     = Math.max(12, dotR + 3);
                     ctx.save();
-                    ctx.strokeStyle = c.color;
+                    ctx.strokeStyle = biColor;
                     ctx.lineWidth   = 2.5;
                     ctx.globalAlpha = 0.9;
                     ctx.beginPath();
@@ -8790,8 +8830,9 @@ class Komplexiti {
                 if (c.showCentre !== false && fp?.center && (fp.kind === 'circle' || fp.kind === 'apollonius')) {
                     const cPt   = this.worldToScreen(fp.center.re, fp.center.im);
                     const cDotR = Math.max(3, dotR - 1.5);
+                    const centreColor = this._metadataColorFor(c, fp.center.re, fp.center.im);
                     ctx.save();
-                    ctx.fillStyle   = c.color;
+                    ctx.fillStyle   = centreColor;
                     ctx.globalAlpha = 0.75;
                     ctx.beginPath();
                     ctx.arc(cPt.x, cPt.y, cDotR, 0, Math.PI * 2);
@@ -8801,7 +8842,7 @@ class Komplexiti {
                     ctx.stroke();
                     ctx.globalAlpha = 0.9;
                     ctx.font      = `italic ${fSize}px Arial`;
-                    ctx.fillStyle = c.color;
+                    ctx.fillStyle = centreColor;
                     ctx.fillText('C', cPt.x + cDotR + 3, cPt.y - cDotR - 2);
                     ctx.restore();
                 }
@@ -8815,8 +8856,9 @@ class Komplexiti {
                         const drawExtrema = (pt, label, isArg, tooltipText) => {
                             if (!pt) return;
                             const sp = this.worldToScreen(pt.re, pt.im);
+                            const extremaColor = this._metadataColorFor(c, pt.re, pt.im);
                             ctx.save();
-                            ctx.strokeStyle = c.color;
+                            ctx.strokeStyle = extremaColor;
                             ctx.lineWidth   = 1;
                             ctx.globalAlpha = 0.6;
                             ctx.setLineDash([4, 4]);
@@ -8829,15 +8871,15 @@ class Komplexiti {
                             ctx.beginPath();
                             ctx.arc(sp.x, sp.y, markerR, 0, Math.PI * 2);
                             if (isArg) {
-                                ctx.strokeStyle = c.color;
+                                ctx.strokeStyle = extremaColor;
                                 ctx.lineWidth   = 1.5;
                                 ctx.stroke();
                             } else {
-                                ctx.fillStyle = c.color;
+                                ctx.fillStyle = extremaColor;
                                 ctx.fill();
                             }
                             ctx.font      = `${fSize - 4}px Arial`;
-                            ctx.fillStyle = c.color;
+                            ctx.fillStyle = extremaColor;
                             ctx.fillText(label, sp.x + markerR + 3, sp.y - markerR - 1);
                             ctx.restore();
                             if (tooltipText) this._extremaHitTargets.push({ x: sp.x, y: sp.y, r: markerR + 8, text: tooltipText });
