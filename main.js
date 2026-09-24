@@ -3954,10 +3954,16 @@ class Komplexiti {
     }
 
     // If expr is exactly "A - B" or "A + B" at the top level, returns the two operands as the
-    // {lhs, rhs} pair of the two-sided equation it came from (A=B, or A=-B for a "+").
+    // {lhs, rhs} pair of the two-sided equation it came from (A=B, or A=-B for a "+"). Unwraps a
+    // redundant enclosing ParenthesisNode first (e.g. user-typed "(arg(z-a)-pi/3)=0" parses to a
+    // ParenthesisNode wrapping the subtract node, not the subtract node directly) - without this,
+    // an otherwise-identical equation typed with an extra pair of outer parens would silently miss
+    // every fastPath shape (ray/perpendicular-bisector/etc.) that depends on this split succeeding,
+    // degrading to a generic numerically-traced "general locus" instead.
     _splitAdditiveEquationSide(expr) {
+        const unwrap = n => { while (n && n.type === 'ParenthesisNode') n = n.content; return n; };
         let node;
-        try { node = math.parse(expr); } catch { return null; }
+        try { node = unwrap(math.parse(expr)); } catch { return null; }
         if (node.type !== 'OperatorNode' || !node.args || node.args.length !== 2) return null;
         if (node.fn === 'subtract') return { lhs: node.args[0].toString(), rhs: node.args[1].toString() };
         if (node.fn === 'add') return { lhs: node.args[0].toString(), rhs: `-(${node.args[1].toString()})` };

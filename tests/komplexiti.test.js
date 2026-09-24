@@ -226,6 +226,29 @@ describe('parseEquation - line-loci demo set', () => {
         expect(fp.angle).toBeCloseTo(PI / 3);
     });
 
+    test('(arg(z-a)-pi/3)=0  wrapped in redundant outer parens is still recognised as a ray', () => {
+        const exprs = [{ id: 1, name: 'a', re: -2, im: -2 }];
+        const result = parse('\\left(\\arg\\left(z-a\\right)-\\frac{\\pi}{3}\\right)=0', exprs);
+        expect(result.type).toBe('locus');
+        const fp = result.locus.fastPath;
+        expect(fp.kind).toBe('ray');
+        expect(fp.origin.re).toBeCloseTo(-2);
+        expect(fp.origin.im).toBeCloseTo(-2);
+        expect(fp.angle).toBeCloseTo(PI / 3);
+    });
+
+    test('(|z-(2-3i)|-|z-1+2i|)=0  wrapped in redundant outer parens is still a perpendicular bisector', () => {
+        const result = parse('\\left(\\left|z-\\left(2-3i\\right)\\right|-\\left|z-1+2i\\right|\\right)=0');
+        expect(result.type).toBe('locus');
+        const fp = result.locus.fastPath;
+        expect(fp.kind).toBe('line');
+        expect(fp.perpBisector).toBe(true);
+        expect(fp.focusA.re).toBeCloseTo(2);
+        expect(fp.focusA.im).toBeCloseTo(-3);
+        expect(fp.focusB.re).toBeCloseTo(1);
+        expect(fp.focusB.im).toBeCloseTo(-2);
+    });
+
     test('(arg((z-1)/(z+1))-pi/4)(|z|-2) = 0  is the union of the arc and the circle', () => {
         const result = parse('\\left(\\arg\\left(\\frac{z-1}{z+1}\\right)-\\frac{\\pi}{4}\\right)\\left(\\left|z\\right|-2\\right)=0');
         expect(result.type).toBe('compound-locus');
