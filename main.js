@@ -6782,6 +6782,9 @@ class Komplexiti {
             'extrema': [
                 '\\left|z-\\sqrt{2}\\left(1+i\\right)\\right|=1'
             ],
+            'union-loci': [
+                { latex: '\\left(\\arg\\left(z\\right)-\\frac{\\pi}{4}\\right)\\left(\\left|z\\right|-2\\right)=0', colorMode: true }
+            ],
             'poles-and-holes': [
                 { latex: '\\frac{\\left(z-2+i\\right)\\left(z^2-z+1\\right)}{\\left(z-2+i\\right)\\left(z+1-2i\\right)}=0', showPoles: true, showHoles: true }
             ],
