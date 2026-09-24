@@ -8085,10 +8085,16 @@ class Komplexiti {
             if (c.isUnion && c.roots?.length) {
                 // Mixed union: show the same root-format UI as a plain equation, but keep the
                 // 'Union' badge (rather than 'Root Format') so it's still clear this card also
-                // draws one or more curves alongside these isolated roots.
+                // draws one or more curves alongside these isolated roots. Since the root list
+                // alone gives no hint that a curve is ALSO being drawn, prepend a small note
+                // naming it/them (e.g. "circle"), mirroring the pure-loci Union card's naming.
                 renderEquationRootsUI();
                 badge.textContent = 'Union';
                 badge.title = '';
+                const shapeNote = document.createElement('div');
+                shapeNote.style.cssText = 'font-size:13px;opacity:0.75;margin-bottom:2px;';
+                shapeNote.textContent = 'Also plots: ' + c.compoundParts.map(part => this._locusShapeLabel(part.locus)).join(' + ');
+                rootsEl.insertBefore(shapeNote, rootsEl.firstChild);
             } else {
                 badge.textContent      = c.isUnion ? 'Union' : 'Compound Inequality';
                 valueEl.style.display  = '';
