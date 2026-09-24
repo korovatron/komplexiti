@@ -1070,6 +1070,10 @@
             flex: 1;
             min-width: 0;
             display: grid;
+            /* Without an explicit column track, the grid item sizes to its content's
+               full intrinsic width and blows out past the field instead of clipping,
+               breaking long equations' internal scroll/clip behaviour. */
+            grid-template-columns: minmax(0, 1fr);
             align-items: center;
             font-size: 18px !important;
             padding: 2px 4px !important;
