@@ -297,6 +297,20 @@ describe('parseEquation - line-loci demo set', () => {
         expect(result.polesPeriodic[0].step.re).toBeCloseTo(PI);
     });
 
+    test('(|z|-1)(1/cos(z)-1) = 0  is a mixed union with a reciprocal-trig factor: compact roots AND compact poles', () => {
+        const result = parse('\\left(\\left|z\\right|-1\\right)\\left(\\frac{1}{\\cos\\left(z\\right)}-1\\right)=0');
+        expect(result.type).toBe('compound-locus');
+        expect(result.isUnion).toBe(true);
+        expect(result.loci).toHaveLength(1);
+        expect(result.loci[0].fastPath.kind).toBe('circle');
+        expect(result.periodic).toHaveLength(1);
+        expect(result.periodic[0].base.re).toBeCloseTo(0);
+        expect(result.periodic[0].step.re).toBeCloseTo(2 * PI);
+        expect(result.polesPeriodic).toHaveLength(1);
+        expect(result.polesPeriodic[0].base.re).toBeCloseTo(-PI / 2);
+        expect(result.polesPeriodic[0].step.re).toBeCloseTo(PI);
+    });
+
     test('a union carries lhs/rhs and is eligible for phase/modulus colouring', () => {
         const k = createK();
         const result = k.parseEquation('\\left(\\left|z\\right|-1\\right)\\left(\\arg\\left(z\\right)-\\frac{\\pi}{3}\\right)=0', null);

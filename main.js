@@ -6339,21 +6339,29 @@ class Komplexiti {
 
             // Not a curve - try to resolve this factor's own zero-equation to isolated roots,
             // reusing the same closed-form solvers a standalone equation of this shape would use.
-            const subHExpr = `(${subLhs}) - (${subRhs})`;
+            // Apply the same reciprocal-trig rewrite (N/tan(w) -> N*cot(w), 1/cos(w) -> sec(w),
+            // etc.) parseEquation itself applies up front - without it, e.g. "1/cos(z)-1" is left
+            // as a division wrapping a single cos(z) node, which _tryTrigSubstitution correctly
+            // recognises as non-affine-in-cos(z) and rejects, silently falling through to the
+            // generic bounded numeric search (uncompacted roots, no poles at all) instead of
+            // being solved exactly like the standalone "1/cos(z)=1"/"sec(z)=1" equation is.
+            const rSubLhs = this._simplifyReciprocalTrig(subLhs);
+            const rSubRhs = this._simplifyReciprocalTrig(subRhs);
+            const subHExpr = `(${rSubLhs}) - (${rSubRhs})`;
             let factorRoots = null, factorPeriodic = null, factorPoles = null, factorPolesPeriodic = null;
             if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth)\(/.test(subHExpr)) {
-                const tr = this._tryTrigSubstitution(subLhs, subRhs, varName, scope);
+                const tr = this._tryTrigSubstitution(rSubLhs, rSubRhs, varName, scope);
                 if (tr?.roots?.length) {
                     factorRoots = tr.roots; factorPeriodic = tr.periodic;
                     factorPoles = tr.poles; factorPolesPeriodic = tr.polesPeriodic;
                 }
             }
             if (!factorRoots && /exp\(|log\(|log10\(|log2\(|\^/.test(subHExpr)) {
-                const er = this._tryExpLogPowSubstitution(subLhs, subRhs, varName, scope);
+                const er = this._tryExpLogPowSubstitution(rSubLhs, rSubRhs, varName, scope);
                 if (er?.roots?.length) { factorRoots = er.roots; factorPeriodic = er.periodic; }
             }
             if (!factorRoots) {
-                const generic = this._solveGeneralEquation(subLhs, subRhs, varName, scope);
+                const generic = this._solveGeneralEquation(rSubLhs, rSubRhs, varName, scope);
                 if (generic?.length) factorRoots = generic;
             }
             if (!factorRoots?.length) return null; // this factor is unresolvable either way - abort
