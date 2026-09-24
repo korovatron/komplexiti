@@ -7668,6 +7668,19 @@ class Komplexiti {
         return luminance > 0.5 ? '#000' : '#fff';
     }
 
+    // Human-readable shape name for a locus (e.g. 'circle', 'perpendicular bisector', 'half-line',
+    // 'inscribed arc') - falls back to 'general locus' for a non-fastPath locus (traced purely
+    // numerically, with no recognised closed-form shape). Shared by the plain 'locus' card and
+    // each curve listed on a 'compound-locus' Union card.
+    _locusShapeLabel(locus) {
+        const fp = locus?.fastPath;
+        if (!fp) return 'general locus';
+        const lineLabel = fp.kind === 'line' ? (fp.perpBisector ? 'perpendicular bisector' : 'line') : null;
+        const joukowskiLabel = fp.kind === 'joukowski' ? `Joukowski (n=${fp.n}, ${fp.cosSign === -1 ? '\u2212' : '+'})` : null;
+        const kinds = { circle: 'circle', line: lineLabel, ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: joukowskiLabel, 'inscribed-arc': 'inscribed arc' };
+        return kinds[fp.kind] ?? fp.kind;
+    }
+
     updateAllCardMetadata() {
         for (const c of this.expressions) {
             this.updateCardMetadata(c);
@@ -8072,7 +8085,11 @@ class Komplexiti {
                 valueEl.style.display  = '';
                 rootsEl.style.display  = 'none';
                 rootsEl.innerHTML      = '';
-                valueEl.textContent    = c.isUnion ? 'combined loci' : 'region';
+                // Union: name each curve individually (e.g. "circle + inscribed arc"), matching
+                // Graphiti's convention for showing every piece of a combined locus by name.
+                valueEl.textContent    = c.isUnion
+                    ? c.compoundParts.map(part => this._locusShapeLabel(part.locus)).join(' + ')
+                    : 'region';
                 hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); hideEssential();
             }
             container.classList.add('visible');
@@ -8085,10 +8102,7 @@ class Komplexiti {
             rootsEl.innerHTML      = '';
             renderPolesHoles();
             const fp = c.locus.fastPath;
-            const lineLabel = fp?.kind === 'line' ? (fp.perpBisector ? 'perpendicular bisector' : 'line') : null;
-            const joukowskiLabel = fp?.kind === 'joukowski' ? `Joukowski (n=${fp.n}, ${fp.cosSign === -1 ? '\u2212' : '+'})` : null;
-            const kinds = { circle: 'circle', line: lineLabel, ray: 'half-line', apollonius: 'Apollonius', spiral: 'Archimedean', 'spiral-shifted': 'spiral', joukowski: joukowskiLabel, 'inscribed-arc': 'inscribed arc' };
-            valueEl.textContent = fp ? (kinds[fp.kind] ?? fp.kind) : 'locus';
+            valueEl.textContent = this._locusShapeLabel(c.locus);
             const fmtCoord = ({ re, im }) => {
                 const a = this.niceRealLatex(re)  ?? this.formatNumberShort(re);
                 const b = this.niceRealLatex(im)  ?? this.formatNumberShort(im);

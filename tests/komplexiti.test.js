@@ -284,6 +284,15 @@ describe('parseEquation - line-loci demo set', () => {
         const c = { type: result.type, isUnion: result.isUnion, equationVar: result.variable, equationLhs: result.lhs, equationRhs: result.rhs };
         expect(k._colorableLhsRhs(c)).toEqual({ lhs: result.lhs, rhs: result.rhs });
     });
+
+    test('_locusShapeLabel names each curve in a union (matching Graphiti\'s convention)', () => {
+        const k = createK();
+        const result = k.parseEquation('\\left(\\arg\\left(\\frac{z-1}{z+1}\\right)-\\frac{\\pi}{4}\\right)\\left(\\left|z\\right|-2\\right)=0', null);
+        const labels = result.loci.map(l => k._locusShapeLabel(l));
+        expect(labels.sort()).toEqual(['circle', 'inscribed arc']);
+        // A locus with no recognised fastPath (numerically-traced) falls back to a generic name.
+        expect(k._locusShapeLabel({ fastPath: null })).toBe('general locus');
+    });
 });
 
 // ---------------------------------------------------------------------------
