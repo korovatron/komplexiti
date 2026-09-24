@@ -7701,6 +7701,10 @@ class Komplexiti {
         if (!card) return;
         const container = card.querySelector('.shape-info-container');
         if (!container) return;
+        // Re-added below only for a mixed union - remove any stale copy from a previous render
+        // first, since this function mutates the template's existing elements in place rather
+        // than rebuilding the whole container from scratch each call.
+        container.querySelector('.union-locus-row')?.remove();
 
         const badge   = container.querySelector('.shape-info-title');
         const valueEl = container.querySelector('.shape-info-value');
@@ -8083,15 +8087,38 @@ class Komplexiti {
         } else if (c.type === 'compound-locus' && c.compoundParts) {
             container.classList.remove('is-equation');
             if (c.isUnion && c.roots?.length) {
-                // Mixed union: show the same root-format UI as a plain equation, including its
-                // own 'Root Format' badge (matches the dropdown right next to it) - the root list
-                // alone gives no hint that a curve is ALSO being drawn, so prepend a small note
-                // naming it/them (e.g. "circle"), mirroring the pure-loci Union card's naming.
+                // Mixed union: show the same root-format UI as a plain equation (badge, dropdown,
+                // root list), plus a separate "Locus" badge+shape-name row above it - matching the
+                // plain locus card's own badge+value convention - so it's still clear this card
+                // also draws one or more curves alongside these isolated roots.
                 renderEquationRootsUI();
-                const shapeNote = document.createElement('div');
-                shapeNote.style.cssText = 'font-size:13px;color:var(--text-secondary);margin-bottom:2px;';
-                shapeNote.textContent = 'Also plots: ' + c.compoundParts.map(part => this._locusShapeLabel(part.locus)).join(' + ');
-                rootsEl.insertBefore(shapeNote, rootsEl.firstChild);
+                const locusRow = document.createElement('div');
+                locusRow.className = 'union-locus-row';
+                // flex:0 0 100% forces this whole row onto its own line within the container's
+                // row-wrap layout, so the Root Format badge+dropdown row that follows starts fresh
+                // on the next line rather than wrapping alongside it.
+                locusRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex:0 0 100%;';
+                const locusTitleRow = document.createElement('div');
+                // Reuse .metadata-title-row (placeholder + badge, gap 5px) so this badge lines up
+                // with the Poles/Centre/Extrema badges below, which all share that same indent.
+                locusTitleRow.className = 'metadata-title-row';
+                const locusPlaceholder = document.createElement('span');
+                locusPlaceholder.className = 'metadata-visibility-placeholder';
+                locusPlaceholder.setAttribute('aria-hidden', 'true');
+                const locusBadge = document.createElement('div');
+                // Reuse .multiplicity-badge's pill styling (identical look to .shape-info-title)
+                // rather than .shape-info-title itself, to avoid colliding with this function's
+                // own `container.querySelector('.shape-info-title')` badge lookup on future calls.
+                locusBadge.className = 'multiplicity-badge';
+                locusBadge.textContent = 'Locus';
+                locusTitleRow.appendChild(locusPlaceholder);
+                locusTitleRow.appendChild(locusBadge);
+                const locusValue = document.createElement('div');
+                locusValue.style.cssText = 'color:var(--text-primary);font-size:12px;font-weight:600;line-height:1.3;';
+                locusValue.textContent = c.compoundParts.map(part => this._locusShapeLabel(part.locus)).join(' + ');
+                locusRow.appendChild(locusTitleRow);
+                locusRow.appendChild(locusValue);
+                container.insertBefore(locusRow, container.firstChild);
             } else {
                 badge.textContent      = c.isUnion ? 'Union' : 'Compound Inequality';
                 valueEl.style.display  = '';
