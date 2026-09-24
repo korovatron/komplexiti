@@ -244,6 +244,21 @@ describe('parseEquation - line-loci demo set', () => {
         expect(result.type).toBe('equation');
         expect(result.roots).toHaveLength(2);
     });
+
+    test('(|z|-2)(sin(z)-1) = 0  is a mixed union: circle locus plus sin(z)=1\'s isolated roots', () => {
+        const result = parse('\\left(\\left|z\\right|-2\\right)\\left(\\sin\\left(z\\right)-1\\right)=0');
+        expect(result.type).toBe('compound-locus');
+        expect(result.isUnion).toBe(true);
+        expect(result.loci).toHaveLength(1);
+        expect(result.loci[0].fastPath.kind).toBe('circle');
+        expect(result.loci[0].fastPath.radius).toBeCloseTo(2);
+        expect(result.roots.length).toBeGreaterThan(0);
+        for (const r of result.roots) expect(r.im).toBeCloseTo(0);
+        // sin(z)=1's compact periodic family (z_n = pi/2 + 2n*pi) should be preserved, not lost.
+        expect(result.periodic).toHaveLength(1);
+        expect(result.periodic[0].base.re).toBeCloseTo(PI / 2);
+        expect(result.periodic[0].step.re).toBeCloseTo(2 * PI);
+    });
 });
 
 // ---------------------------------------------------------------------------

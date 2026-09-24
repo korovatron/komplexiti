@@ -6268,13 +6268,21 @@ class Komplexiti {
 
     // Splits a "(factor1)(factor2)...=0" equation into the union of each factor's own zero-set,
     // since a product is zero iff at least one factor is (e.g. (arg((z-1)/(z+1))-pi/4)(|z|-2)=0
-    // is the union of the arc arg((z-1)/(z+1))=pi/4 and the circle |z|=2). Only fires when one
-    // side is literally the constant 0 and the other side's top-level AST node is a chain of
-    // multiplications with 2+ factors that each genuinely depend on varName and each resolve to a
-    // genuine SCALAR locus (a real curve) - anything else (e.g. a plain polynomial product like
-    // (z-1)(z+2)=0, already solved correctly and more efficiently as one expanded polynomial by
-    // the existing Durand-Kerner path below, or a factor with only isolated roots and no curve)
-    // returns null so the caller falls through unchanged to the existing solving pipeline.
+    // is the union of the arc arg((z-1)/(z+1))=pi/4 and the circle |z|=2, and (|z|-2)(sin(z)-1)=0
+    // is the union of that same circle with sin(z)=1's isolated periodic roots). Only fires when
+    // one side is literally the constant 0 and the other side's top-level AST node is a chain of
+    // multiplications with 2+ factors that each genuinely depend on varName. Each factor is
+    // resolved to EITHER a genuine SCALAR locus (a real curve, via _buildLocus) OR a set of
+    // isolated roots (via the same closed-form solvers parseEquation itself would use standalone,
+    // so e.g. sin(z)=1 still gets its compact periodic family rather than a raw numeric list) -
+    // a factor that resolves to NEITHER (truly unrecognisable) aborts the whole attempt, returning
+    // null so the caller falls through unchanged to the existing solving pipeline. A pure
+    // all-polynomial product like (z-1)(z+2)=0 is deliberately left untouched by the cheap gate
+    // below (already solved correctly and more efficiently as one expanded polynomial by the
+    // existing Durand-Kerner path further down) - this function only ever fires when at least one
+    // factor looks non-polynomial, and only ever returns a result when at least one factor is a
+    // genuine locus (an all-roots combination is likewise already handled by that same existing
+    // polynomial path, so returning null here just lets it continue unhindered).
     _tryFactoredUnionEquation(lhs, rhs, varName, scope) {
         let side;
         if (rhs.trim() === '0' && lhs.trim() !== '0') side = lhs;
@@ -6282,7 +6290,7 @@ class Komplexiti {
         else return null;
 
         // Cheap gate: a plain polynomial product is already handled well by the existing
-        // pipeline, so only pay for the AST-split/per-factor _buildLocus attempts below when the
+        // pipeline, so only pay for the AST-split/per-factor resolution attempts below when the
         // expression actually looks like it could contain a locus-shaped (non-polynomial) factor.
         if (!/(?<![a-zA-Z])(?:abs|arg|conj|gamma|zeta|sqrt|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(side)) return null;
 
@@ -6308,19 +6316,49 @@ class Komplexiti {
         if (!factorStrs.every(f => varRe.test(f))) return null; // a constant factor can never be zeroed
 
         const loci = [];
+        let roots = null, periodic = null, poles = null, polesPeriodic = null;
         for (const f of factorStrs) {
             // Re-split "expr - target"/"expr + target" back into its natural (lhs, rhs) form
-            // where possible, so the exact fastPath recognisers (circle/arc/line/...) - which
-            // pattern-match on the ORIGINAL two-sided shape, e.g. lhs=arg(...), rhs=pi/4 - still
-            // fire, rather than degrading to a generic numeric contour trace of "f - 0".
+            // where possible, so the exact fastPath recognisers (circle/arc/line/...) AND the
+            // closed-form root solvers (trig/exp/log/pow substitution) - which pattern-match on
+            // the ORIGINAL two-sided shape, e.g. lhs=sin(...), rhs=1 - still fire, rather than
+            // degrading to a slower/less-precise generic contour trace or numeric root search of
+            // the combined "factor - 0" string.
             const split = this._splitAdditiveEquationSide(f);
-            const locus = split
-                ? this._buildLocus(split.lhs, split.rhs, varName, scope)
-                : this._buildLocus(f, '0', varName, scope);
-            if (!locus?.scalar) return null; // not a genuine curve (e.g. isolated roots only) - abort
-            loci.push(locus);
+            const subLhs = split ? split.lhs : f;
+            const subRhs = split ? split.rhs : '0';
+
+            const locus = this._buildLocus(subLhs, subRhs, varName, scope);
+            if (locus?.scalar) { loci.push(locus); continue; }
+
+            // Not a curve - try to resolve this factor's own zero-equation to isolated roots,
+            // reusing the same closed-form solvers a standalone equation of this shape would use.
+            const subHExpr = `(${subLhs}) - (${subRhs})`;
+            let factorRoots = null, factorPeriodic = null, factorPoles = null, factorPolesPeriodic = null;
+            if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth)\(/.test(subHExpr)) {
+                const tr = this._tryTrigSubstitution(subLhs, subRhs, varName, scope);
+                if (tr?.roots?.length) {
+                    factorRoots = tr.roots; factorPeriodic = tr.periodic;
+                    factorPoles = tr.poles; factorPolesPeriodic = tr.polesPeriodic;
+                }
+            }
+            if (!factorRoots && /exp\(|log\(|log10\(|log2\(|\^/.test(subHExpr)) {
+                const er = this._tryExpLogPowSubstitution(subLhs, subRhs, varName, scope);
+                if (er?.roots?.length) { factorRoots = er.roots; factorPeriodic = er.periodic; }
+            }
+            if (!factorRoots) {
+                const generic = this._solveGeneralEquation(subLhs, subRhs, varName, scope);
+                if (generic?.length) factorRoots = generic;
+            }
+            if (!factorRoots?.length) return null; // this factor is unresolvable either way - abort
+
+            roots = (roots ?? []).concat(factorRoots);
+            if (factorPeriodic) periodic = (periodic ?? []).concat(factorPeriodic);
+            if (factorPoles) poles = (poles ?? []).concat(factorPoles);
+            if (factorPolesPeriodic) polesPeriodic = (polesPeriodic ?? []).concat(factorPolesPeriodic);
         }
-        return { type: 'compound-locus', variable: varName, loci, isUnion: true };
+        if (!loci.length) return null; // all factors resolved to roots - the existing polynomial path already handles this case
+        return { type: 'compound-locus', variable: varName, loci, isUnion: true, roots, periodic, poles, polesPeriodic };
     }
 
     // Main equation parser. Returns either finite roots or a drawable complex locus.
@@ -7816,7 +7854,10 @@ class Komplexiti {
             }
         };
 
-        if (c.type === 'equation' && c.roots?.length) {
+        // Builds the "Root Format" dropdown + roots list - shared by the plain 'equation' type
+        // and a mixed 'compound-locus' union (e.g. (|z|-2)(sin(z)-1)=0) whose non-curve factor(s)
+        // resolved to isolated roots rather than a locus.
+        const renderEquationRootsUI = () => {
             hideFoci(); hideCentre(); hideExtrema();
             container.classList.add('is-equation');
             renderPolesHoles();
@@ -7999,15 +8040,28 @@ class Komplexiti {
             }
             }
             container.classList.add('visible');
+        };
+
+        if (c.type === 'equation' && c.roots?.length) {
+            renderEquationRootsUI();
 
         } else if (c.type === 'compound-locus' && c.compoundParts) {
             container.classList.remove('is-equation');
-            badge.textContent      = c.isUnion ? 'Union' : 'Compound Inequality';
-            valueEl.style.display  = '';
-            rootsEl.style.display  = 'none';
-            rootsEl.innerHTML      = '';
-            valueEl.textContent    = c.isUnion ? 'combined loci' : 'region';
-            hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); hideEssential();
+            if (c.isUnion && c.roots?.length) {
+                // Mixed union: show the same root-format UI as a plain equation, but keep the
+                // 'Union' badge (rather than 'Root Format') so it's still clear this card also
+                // draws one or more curves alongside these isolated roots.
+                renderEquationRootsUI();
+                badge.textContent = 'Union';
+                badge.title = '';
+            } else {
+                badge.textContent      = c.isUnion ? 'Union' : 'Compound Inequality';
+                valueEl.style.display  = '';
+                rootsEl.style.display  = 'none';
+                rootsEl.innerHTML      = '';
+                valueEl.textContent    = c.isUnion ? 'combined loci' : 'region';
+                hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); hideEssential();
+            }
             container.classList.add('visible');
 
         } else if (c.type === 'locus' && c.locus) {
@@ -8736,6 +8790,72 @@ class Komplexiti {
         }
         if (ineqLoci.length >= 2) this._drawInequalityIntersection(ineqLoci, ctx);
 
+        // Draws each of c.roots using the global display mode - shared by the plain 'equation'
+        // type and a mixed 'compound-locus' union (e.g. (|z|-2)(sin(z)-1)=0) whose non-curve
+        // factor(s) resolved to isolated roots rather than a locus.
+        const drawEquationRoots = (c) => {
+            const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
+            const org = this.worldToScreen(0, 0);
+            for (let k = 0; k < c.roots.length; k++) {
+                const root = c.roots[k];
+                if (!isFinite(root.re) || !isFinite(root.im)) continue;
+                const pt = this.worldToScreen(root.re, root.im);
+                // Only the Z_n label switches to adaptive black/white when colouring is on -
+                // the dot/arrow stay in the expression's own colour, per explicit user request.
+                const rootColor = this._metadataColorFor(c, root.re, root.im);
+
+                if (this.displayMode === 'arrow') {
+                    const dx  = pt.x - org.x;
+                    const dy  = pt.y - org.y;
+                    const len = Math.hypot(dx, dy);
+                    if (len > dotR + 2) {
+                        const ang  = Math.atan2(dy, dx);
+                        const tipX = pt.x - dotR * Math.cos(ang);
+                        const tipY = pt.y - dotR * Math.sin(ang);
+                        ctx.save();
+                        ctx.strokeStyle = c.color;
+                        ctx.lineWidth   = strokeWidth;
+                        ctx.globalAlpha = 0.9;
+                        ctx.beginPath();
+                        ctx.moveTo(org.x, org.y);
+                        ctx.lineTo(tipX, tipY);
+                        ctx.stroke();
+                        ctx.fillStyle = c.color;
+                        ctx.beginPath();
+                        ctx.moveTo(tipX, tipY);
+                        ctx.lineTo(tipX - headLen * Math.cos(ang - 0.38), tipY - headLen * Math.sin(ang - 0.38));
+                        ctx.lineTo(tipX - headLen * Math.cos(ang + 0.38), tipY - headLen * Math.sin(ang + 0.38));
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.restore();
+                    }
+                }
+
+                ctx.save();
+                ctx.fillStyle   = c.color;
+                ctx.globalAlpha = 1;
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, dotR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.55)';
+                ctx.lineWidth   = 1.5;
+                ctx.stroke();
+                ctx.restore();
+
+                if (c.equationVar) {
+                    const label = c.equationVar + toSub(k + 1);
+                    ctx.save();
+                    ctx.font        = `italic ${fSize}px Arial`;
+                    ctx.globalAlpha = 1;
+                    const lx = pt.x + dotR + 4;
+                    const ly = pt.y - dotR - 2;
+                    ctx.fillStyle = rootColor;
+                    ctx.fillText(label, lx, ly);
+                    ctx.restore();
+                }
+            }
+        };
+
         for (const c of this.expressions) {
             if (!c.enabled) continue;
             const toSub = n => String(n).split('').map(d => '\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089'[d]).join('');
@@ -8824,65 +8944,7 @@ class Komplexiti {
 
             // --- Equation: draw each root using the global display mode ---
             if (c.type === 'equation' && c.roots?.length) {
-                const org   = this.worldToScreen(0, 0);
-                for (let k = 0; k < c.roots.length; k++) {
-                    const root = c.roots[k];
-                    if (!isFinite(root.re) || !isFinite(root.im)) continue;
-                    const pt = this.worldToScreen(root.re, root.im);
-                    // Only the Z_n label switches to adaptive black/white when colouring is on -
-                    // the dot/arrow stay in the expression's own colour, per explicit user request.
-                    const rootColor = this._metadataColorFor(c, root.re, root.im);
-
-                    if (this.displayMode === 'arrow') {
-                        const dx  = pt.x - org.x;
-                        const dy  = pt.y - org.y;
-                        const len = Math.hypot(dx, dy);
-                        if (len > dotR + 2) {
-                            const ang  = Math.atan2(dy, dx);
-                            const tipX = pt.x - dotR * Math.cos(ang);
-                            const tipY = pt.y - dotR * Math.sin(ang);
-                            ctx.save();
-                            ctx.strokeStyle = c.color;
-                            ctx.lineWidth   = strokeWidth;
-                            ctx.globalAlpha = 0.9;
-                            ctx.beginPath();
-                            ctx.moveTo(org.x, org.y);
-                            ctx.lineTo(tipX, tipY);
-                            ctx.stroke();
-                            ctx.fillStyle = c.color;
-                            ctx.beginPath();
-                            ctx.moveTo(tipX, tipY);
-                            ctx.lineTo(tipX - headLen * Math.cos(ang - 0.38), tipY - headLen * Math.sin(ang - 0.38));
-                            ctx.lineTo(tipX - headLen * Math.cos(ang + 0.38), tipY - headLen * Math.sin(ang + 0.38));
-                            ctx.closePath();
-                            ctx.fill();
-                            ctx.restore();
-                        }
-                    }
-
-                    ctx.save();
-                    ctx.fillStyle   = c.color;
-                    ctx.globalAlpha = 1;
-                    ctx.beginPath();
-                    ctx.arc(pt.x, pt.y, dotR, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.strokeStyle = isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.55)';
-                    ctx.lineWidth   = 1.5;
-                    ctx.stroke();
-                    ctx.restore();
-
-                    if (c.equationVar) {
-                        const label = c.equationVar + toSub(k + 1);
-                        ctx.save();
-                        ctx.font        = `italic ${fSize}px Arial`;
-                        ctx.globalAlpha = 1;
-                        const lx = pt.x + dotR + 4;
-                        const ly = pt.y - dotR - 2;
-                        ctx.fillStyle = rootColor;
-                        ctx.fillText(label, lx, ly);
-                        ctx.restore();
-                    }
-                }
+                drawEquationRoots(c);
                 continue;
             }
 
@@ -9095,8 +9157,11 @@ class Komplexiti {
                 continue;
             }
 
-            // --- Compound inequality: draw each boundary curve in the card colour ---
+            // --- Compound inequality/union: draw each boundary curve in the card colour ---
             if (c.type === 'compound-locus' && c.compoundParts) {
+                // A mixed union (e.g. (|z|-2)(sin(z)-1)=0) also has isolated roots from any
+                // non-curve factor - drawn like a plain equation's roots, alongside the curves.
+                if (c.isUnion && c.roots?.length) drawEquationRoots(c);
                 // On initial build, share the LHS evaluation - skip if all parts have geometric fast paths
                 {
                     const _pp = c.compoundParts;
@@ -10242,6 +10307,33 @@ class Komplexiti {
         // Draw expressions
         const toSub = n => String(n).split('').map(d2 => '&#x208' + d2 + ';').join('');
 
+        // Draws each of c.roots (SVG lines/polygons/circles) - shared by the plain 'equation'
+        // type and a mixed 'compound-locus' union whose non-curve factor(s) resolved to isolated
+        // roots rather than a locus.
+        const drawEquationRootsSVG = (c, color) => {
+            const org = this.worldToScreen(0, 0);
+            for (let k = 0; k < c.roots.length; k++) {
+                const root = c.roots[k];
+                if (!isFinite(root.re) || !isFinite(root.im)) continue;
+                const pt = this.worldToScreen(root.re, root.im);
+                if (this.displayMode === 'arrow') {
+                    const dx = pt.x - org.x, dy = pt.y - org.y;
+                    const len = Math.hypot(dx, dy);
+                    if (len > dotR + 2) {
+                        const ang  = Math.atan2(dy, dx);
+                        const tipX = pt.x - dotR * Math.cos(ang);
+                        const tipY = pt.y - dotR * Math.sin(ang);
+                        lines.push(`<line x1="${sn(org.x)}" y1="${sn(org.y)}" x2="${sn(tipX)}" y2="${sn(tipY)}" stroke="${color}" stroke-width="${sw(baseStroke)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
+                        lines.push(`<polygon points="${sn(tipX)},${sn(tipY)} ${sn(tipX - headLen * Math.cos(ang - 0.38))},${sn(tipY - headLen * Math.sin(ang - 0.38))} ${sn(tipX - headLen * Math.cos(ang + 0.38))},${sn(tipY - headLen * Math.sin(ang + 0.38))}" fill="${color}"/>`);
+                    }
+                }
+                lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(dotR)}" fill="${color}" stroke="${dotOutline}" stroke-width="1.5"/>`);
+                if (c.equationVar) {
+                    lines.push(`<text x="${sn(pt.x + dotR + 4)}" y="${sn(pt.y - dotR - 2)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize}px" font-style="italic" dominant-baseline="auto">${c.equationVar}${toSub(k + 1)}</text>`);
+                }
+            }
+        };
+
         for (const c of this.expressions) {
             if (!c.enabled) continue;
             const color = exprColor(c);
@@ -10294,27 +10386,7 @@ class Komplexiti {
 
             // Equation roots
             if (c.type === 'equation' && c.roots?.length) {
-                const org = this.worldToScreen(0, 0);
-                for (let k = 0; k < c.roots.length; k++) {
-                    const root = c.roots[k];
-                    if (!isFinite(root.re) || !isFinite(root.im)) continue;
-                    const pt = this.worldToScreen(root.re, root.im);
-                    if (this.displayMode === 'arrow') {
-                        const dx = pt.x - org.x, dy = pt.y - org.y;
-                        const len = Math.hypot(dx, dy);
-                        if (len > dotR + 2) {
-                            const ang  = Math.atan2(dy, dx);
-                            const tipX = pt.x - dotR * Math.cos(ang);
-                            const tipY = pt.y - dotR * Math.sin(ang);
-                            lines.push(`<line x1="${sn(org.x)}" y1="${sn(org.y)}" x2="${sn(tipX)}" y2="${sn(tipY)}" stroke="${color}" stroke-width="${sw(baseStroke)}" vector-effect="non-scaling-stroke" opacity="0.9"/>`);
-                            lines.push(`<polygon points="${sn(tipX)},${sn(tipY)} ${sn(tipX - headLen * Math.cos(ang - 0.38))},${sn(tipY - headLen * Math.sin(ang - 0.38))} ${sn(tipX - headLen * Math.cos(ang + 0.38))},${sn(tipY - headLen * Math.sin(ang + 0.38))}" fill="${color}"/>`);
-                        }
-                    }
-                    lines.push(`<circle cx="${sn(pt.x)}" cy="${sn(pt.y)}" r="${sn(dotR)}" fill="${color}" stroke="${dotOutline}" stroke-width="1.5"/>`);
-                    if (c.equationVar) {
-                        lines.push(`<text x="${sn(pt.x + dotR + 4)}" y="${sn(pt.y - dotR - 2)}" fill="${color}" font-family="Arial, sans-serif" font-size="${fSize}px" font-style="italic" dominant-baseline="auto">${c.equationVar}${toSub(k + 1)}</text>`);
-                    }
-                }
+                drawEquationRootsSVG(c, color);
                 continue;
             }
 
@@ -10397,8 +10469,9 @@ class Komplexiti {
                 continue;
             }
 
-            // Compound-locus
+            // Compound-locus (union or compound inequality)
             if (c.type === 'compound-locus' && c.compoundParts) {
+                if (c.isUnion && c.roots?.length) drawEquationRootsSVG(c, color);
                 for (const part of c.compoundParts) {
                     const segs = getSegs(part);
                     if (!segs?.length) continue;
