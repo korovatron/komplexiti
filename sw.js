@@ -1,4 +1,4 @@
-const CACHE_NAME = 'komplexiti-v1.4.33';
+const CACHE_NAME = 'komplexiti-v1.4.34';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
