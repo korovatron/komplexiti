@@ -6786,7 +6786,7 @@ class Komplexiti {
                 { latex: '\\left(\\arg\\left(z\\right)-\\frac{\\pi}{4}\\right)\\left(\\left|z\\right|-2\\right)=0', colorMode: true }
             ],
             'mixed-union-loci': [
-                { latex: '\\left(z^3-1\\right)\\left(\\left|z\\right|-3\\right)=0', colorMode: true }
+                { latex: '\\left(\\left|z\\right|-1\\right)\\left(\\sin\\left(z\\right)-\\frac{\\sqrt3}{2}\\right)=0', colorMode: true }
             ],
             'poles-and-holes': [
                 { latex: '\\frac{\\left(z-2+i\\right)\\left(z^2-z+1\\right)}{\\left(z-2+i\\right)\\left(z+1-2i\\right)}=0', showPoles: true, showHoles: true }
