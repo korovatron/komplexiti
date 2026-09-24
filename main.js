@@ -2188,11 +2188,17 @@ class Komplexiti {
                     <div class="shape-info-title"></div>
                 </div>
                 <div class="shape-info-value"></div>
-                <select class="root-format-select" title="Root format" tabindex="-1">
-                    <option value="cartesian">Cartesian</option>
-                    <option value="exponential">Exponential</option>
-                    <option value="trig">Trig</option>
-                </select>
+                <div class="root-format-dropdown">
+                    <button type="button" class="root-format-trigger" title="Root format" tabindex="-1">
+                        <span class="root-format-trigger-label">Cartesian</span>
+                        <svg class="root-format-trigger-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <div class="root-format-menu" role="listbox">
+                        <div class="root-format-menu-item" data-value="cartesian" role="option">Cartesian</div>
+                        <div class="root-format-menu-item" data-value="exponential" role="option">Exponential</div>
+                        <div class="root-format-menu-item" data-value="trig" role="option">Trig</div>
+                    </div>
+                </div>
                 <div class="expr-card-roots"></div>
             </div>
             <div class="foci-info-container">
@@ -2241,12 +2247,32 @@ class Komplexiti {
         const mathField = card.querySelector('math-field');
         const dot       = card.querySelector('.expr-color-dot');
         const removeBtn = card.querySelector('.expr-remove-btn');
-        const formatSelect = card.querySelector('.root-format-select');
+        const formatTrigger  = card.querySelector('.root-format-trigger');
+        const formatLabel    = card.querySelector('.root-format-trigger-label');
+        const formatMenu     = card.querySelector('.root-format-menu');
+        const formatItems    = card.querySelectorAll('.root-format-menu-item');
+        const fmtNames = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
 
-        formatSelect.addEventListener('change', () => {
-            c.cardRootFmt = formatSelect.value;
-            this.updateCardMetadata(c);
+        const closeFormatMenu = () => { formatMenu.classList.remove('is-open'); formatTrigger.classList.remove('is-open'); };
+        formatTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = formatMenu.classList.contains('is-open');
+            // Only one dropdown open at a time - close any other card's menu first.
+            document.querySelectorAll('.root-format-menu.is-open').forEach(m => m.classList.remove('is-open'));
+            document.querySelectorAll('.root-format-trigger.is-open').forEach(b => b.classList.remove('is-open'));
+            if (!isOpen) { formatMenu.classList.add('is-open'); formatTrigger.classList.add('is-open'); }
         });
+        formatItems.forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                c.cardRootFmt = item.dataset.value;
+                formatLabel.textContent = fmtNames[c.cardRootFmt];
+                formatItems.forEach(i => i.classList.toggle('is-active', i === item));
+                closeFormatMenu();
+                this.updateCardMetadata(c);
+            });
+        });
+        document.addEventListener('click', closeFormatMenu);
 
         mathField.addEventListener('input', () => {
             c.latex = mathField.value;
@@ -7522,8 +7548,10 @@ class Komplexiti {
 
         const badge   = container.querySelector('.shape-info-title');
         const valueEl = container.querySelector('.shape-info-value');
-        const formatSelect = container.querySelector('.root-format-select');
-        formatSelect.style.display = 'none';
+        const formatDropdown = container.querySelector('.root-format-dropdown');
+        const formatLabel    = container.querySelector('.root-format-trigger-label');
+        const formatItems    = container.querySelectorAll('.root-format-menu-item');
+        formatDropdown.style.display = 'none';
         const rootsEl = container.querySelector('.expr-card-roots');
         const fociContainer = card.querySelector('.foci-info-container');
         const fociList      = card.querySelector('.foci-equation-list');
@@ -7710,11 +7738,13 @@ class Komplexiti {
             container.classList.add('is-equation');
             renderPolesHoles();
             const fmt = c.cardRootFmt || 'cartesian';
+            const fmtNames = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
             badge.textContent     = 'Root Format';
             badge.title           = '';
             valueEl.style.display = 'none';
-            formatSelect.style.display = 'inline-block';
-            formatSelect.value    = fmt;
+            formatDropdown.style.display = 'inline-flex';
+            formatLabel.textContent = fmtNames[fmt];
+            formatItems.forEach(i => i.classList.toggle('is-active', i.dataset.value === fmt));
             rootsEl.style.display = 'flex';
             rootsEl.innerHTML     = '';
             const varName = c.equationVar || 'z';
