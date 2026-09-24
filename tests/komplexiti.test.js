@@ -225,6 +225,25 @@ describe('parseEquation - line-loci demo set', () => {
         expect(fp.origin.im).toBeCloseTo(-2);
         expect(fp.angle).toBeCloseTo(PI / 3);
     });
+
+    test('(arg((z-1)/(z+1))-pi/4)(|z|-2) = 0  is the union of the arc and the circle', () => {
+        const result = parse('\\left(\\arg\\left(\\frac{z-1}{z+1}\\right)-\\frac{\\pi}{4}\\right)\\left(\\left|z\\right|-2\\right)=0');
+        expect(result.type).toBe('compound-locus');
+        expect(result.isUnion).toBe(true);
+        expect(result.loci).toHaveLength(2);
+        const kinds = result.loci.map(l => l.fastPath.kind).sort();
+        expect(kinds).toEqual(['circle', 'inscribed-arc']);
+        const circle = result.loci.find(l => l.fastPath.kind === 'circle');
+        expect(circle.fastPath.radius).toBeCloseTo(2);
+        const arc = result.loci.find(l => l.fastPath.kind === 'inscribed-arc');
+        expect(arc.fastPath.theta).toBeCloseTo(PI / 4);
+    });
+
+    test('(z-1)(z+2) = 0  stays a plain 2-root polynomial equation, not a union', () => {
+        const result = parse('\\left(z-1\\right)\\left(z+2\\right)=0');
+        expect(result.type).toBe('equation');
+        expect(result.roots).toHaveLength(2);
+    });
 });
 
 // ---------------------------------------------------------------------------

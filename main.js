@@ -2305,6 +2305,7 @@ class Komplexiti {
             c.equationRhs = null;
             c.locus = null;
             c.compoundParts = null;
+            c.isUnion = false;
 
             if (assignment) {
                 const reserved = (assignment.name === 'i' || assignment.name === 'e');
@@ -2353,6 +2354,7 @@ class Komplexiti {
                         c.compoundParts = eq.loci.map(locus => ({
                             locus, equationVar: eq.variable, id: c.id, color: c.color, _locusCache: null, enabled: true,
                         }));
+                        c.isUnion = eq.isUnion === true;
                     }
                 } else {
                     hasError = true;
@@ -2751,8 +2753,10 @@ class Komplexiti {
                             c.compoundParts = eq.loci.map(locus => ({
                                 locus, equationVar: eq.variable, id: c.id, color: c.color, _locusCache: null, enabled: true,
                             }));
+                            c.isUnion = eq.isUnion === true;
                         } else {
                             c.compoundParts = null;
+                            c.isUnion = false;
                         }
                     } else {
                         c.type = 'value';
@@ -2772,6 +2776,7 @@ class Komplexiti {
                         c.equationVar = null;
                         c.locus = null;
                         c.compoundParts = null;
+                        c.isUnion = false;
                         c._locusCache = null;
                         c.hasParseError = true;
                         c.errorMessage = 'Needs exactly one undefined variable';
@@ -6246,6 +6251,63 @@ class Komplexiti {
         return this._withNumericPoles({ type: 'locus', variable: varName, roots: null, locus }, lhs, rhs, varName, scope, hExpr);
     }
 
+    // Splits a "(factor1)(factor2)...=0" equation into the union of each factor's own zero-set,
+    // since a product is zero iff at least one factor is (e.g. (arg((z-1)/(z+1))-pi/4)(|z|-2)=0
+    // is the union of the arc arg((z-1)/(z+1))=pi/4 and the circle |z|=2). Only fires when one
+    // side is literally the constant 0 and the other side's top-level AST node is a chain of
+    // multiplications with 2+ factors that each genuinely depend on varName and each resolve to a
+    // genuine SCALAR locus (a real curve) - anything else (e.g. a plain polynomial product like
+    // (z-1)(z+2)=0, already solved correctly and more efficiently as one expanded polynomial by
+    // the existing Durand-Kerner path below, or a factor with only isolated roots and no curve)
+    // returns null so the caller falls through unchanged to the existing solving pipeline.
+    _tryFactoredUnionEquation(lhs, rhs, varName, scope) {
+        let side;
+        if (rhs.trim() === '0' && lhs.trim() !== '0') side = lhs;
+        else if (lhs.trim() === '0' && rhs.trim() !== '0') side = rhs;
+        else return null;
+
+        // Cheap gate: a plain polynomial product is already handled well by the existing
+        // pipeline, so only pay for the AST-split/per-factor _buildLocus attempts below when the
+        // expression actually looks like it could contain a locus-shaped (non-polynomial) factor.
+        if (!/(?<![a-zA-Z])(?:abs|arg|conj|gamma|zeta|sqrt|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(side)) return null;
+
+        const unwrap = n => { while (n && n.type === 'ParenthesisNode') n = n.content; return n; };
+        let node;
+        try { node = unwrap(math.parse(side)); } catch { return null; }
+
+        const factors = [];
+        const collect = n => {
+            n = unwrap(n);
+            if (n.type === 'OperatorNode' && n.fn === 'multiply' && n.args?.length === 2) {
+                collect(n.args[0]);
+                collect(n.args[1]);
+            } else {
+                factors.push(n);
+            }
+        };
+        collect(node);
+        if (factors.length < 2) return null;
+
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        const factorStrs = factors.map(f => unwrap(f).toString());
+        if (!factorStrs.every(f => varRe.test(f))) return null; // a constant factor can never be zeroed
+
+        const loci = [];
+        for (const f of factorStrs) {
+            // Re-split "expr - target"/"expr + target" back into its natural (lhs, rhs) form
+            // where possible, so the exact fastPath recognisers (circle/arc/line/...) - which
+            // pattern-match on the ORIGINAL two-sided shape, e.g. lhs=arg(...), rhs=pi/4 - still
+            // fire, rather than degrading to a generic numeric contour trace of "f - 0".
+            const split = this._splitAdditiveEquationSide(f);
+            const locus = split
+                ? this._buildLocus(split.lhs, split.rhs, varName, scope)
+                : this._buildLocus(f, '0', varName, scope);
+            if (!locus?.scalar) return null; // not a genuine curve (e.g. isolated roots only) - abort
+            loci.push(locus);
+        }
+        return { type: 'compound-locus', variable: varName, loci, isUnion: true };
+    }
+
     // Main equation parser. Returns either finite roots or a drawable complex locus.
     parseEquation(rawLatex, ownId) {
         if (typeof math === 'undefined') return null;
@@ -6323,6 +6385,12 @@ class Komplexiti {
                     if (roots) return { type: 'equation', variable: varName, roots, lhs, rhs };
                 }
             }
+
+            // (factor1)(factor2)...=0 is the UNION of each factor's own zero-locus (a product is
+            // zero iff at least one factor is) - e.g. (arg((z-1)/(z+1))-pi/4)(|z|-2)=0 should draw
+            // BOTH the inscribed arc and the circle, not attempt to trace the product as one curve.
+            const factoredUnion = this._tryFactoredUnionEquation(lhs, rhs, varName, scope);
+            if (factoredUnion) return factoredUnion;
 
             // N/tan(w), N/cot(w) etc. are rewritten to the algebraically-identical reciprocal
             // function (N*cot(w), N*tan(w), ...) before any further processing - see
@@ -7919,11 +7987,11 @@ class Komplexiti {
 
         } else if (c.type === 'compound-locus' && c.compoundParts) {
             container.classList.remove('is-equation');
-            badge.textContent      = 'Compound Inequality';
+            badge.textContent      = c.isUnion ? 'Union' : 'Compound Inequality';
             valueEl.style.display  = '';
             rootsEl.style.display  = 'none';
             rootsEl.innerHTML      = '';
-            valueEl.textContent    = 'region';
+            valueEl.textContent    = c.isUnion ? 'combined loci' : 'region';
             hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); hideEssential();
             container.classList.add('visible');
 
@@ -8646,7 +8714,9 @@ class Komplexiti {
             if (_c.type === 'locus' && _c.locus?.inequality && _c.equationVar) {
                 ineqLoci.push(_c);
             } else if (_c.type === 'compound-locus' && _c.compoundParts) {
-                for (const part of _c.compoundParts) ineqLoci.push(part);
+                for (const part of _c.compoundParts) {
+                    if (part.locus?.inequality) ineqLoci.push(part);
+                }
             }
         }
         if (ineqLoci.length >= 2) this._drawInequalityIntersection(ineqLoci, ctx);
