@@ -6366,7 +6366,7 @@ class Komplexiti {
             if (!roots?.length) return null;
             return { type: 'equation', variable: varName, roots, periodic, poles, polesPeriodic, lhs, rhs };
         }
-        return { type: 'compound-locus', variable: varName, loci, isUnion: true, roots, periodic, poles, polesPeriodic };
+        return { type: 'compound-locus', variable: varName, loci, isUnion: true, roots, periodic, poles, polesPeriodic, lhs, rhs };
     }
 
     // Main equation parser. Returns either finite roots or a drawable complex locus.
@@ -7325,14 +7325,19 @@ class Komplexiti {
     }
 
     // Whether c can be phase/modulus-coloured, and the lhs/rhs to build the colouring from:
-    // either a plain equality locus (curve) or a root-finding equation (isolated zeros) -
-    // never an inequality/compound-locus (region shading), where a colour wash would clash.
+    // either a plain equality locus (curve), a root-finding equation (isolated zeros), or a
+    // factored union (colours the whole product, whose zero set is exactly the drawn curves/
+    // roots) - never a genuine compound INEQUALITY (region shading), where a colour wash would
+    // clash with the existing shaded-region fill.
     _colorableLhsRhs(c) {
         if (!c.equationVar) return null;
         if (c.type === 'locus' && c.locus && !c.locus.inequality) {
             return { lhs: c.locus.lhs, rhs: c.locus.rhs };
         }
         if (c.type === 'equation' && c.equationLhs != null && c.equationRhs != null) {
+            return { lhs: c.equationLhs, rhs: c.equationRhs };
+        }
+        if (c.type === 'compound-locus' && c.isUnion && c.equationLhs != null && c.equationRhs != null) {
             return { lhs: c.equationLhs, rhs: c.equationRhs };
         }
         return null;

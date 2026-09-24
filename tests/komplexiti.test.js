@@ -273,6 +273,17 @@ describe('parseEquation - line-loci demo set', () => {
         expect(result.polesPeriodic[0].base.re).toBeCloseTo(-PI / 2);
         expect(result.polesPeriodic[0].step.re).toBeCloseTo(PI);
     });
+
+    test('a union carries lhs/rhs and is eligible for phase/modulus colouring', () => {
+        const k = createK();
+        const result = k.parseEquation('\\left(\\left|z\\right|-1\\right)\\left(\\arg\\left(z\\right)-\\frac{\\pi}{3}\\right)=0', null);
+        expect(result.type).toBe('compound-locus');
+        expect(result.isUnion).toBe(true);
+        expect(result.lhs).toBeTruthy();
+        expect(result.rhs).toBe('0');
+        const c = { type: result.type, isUnion: result.isUnion, equationVar: result.variable, equationLhs: result.lhs, equationRhs: result.rhs };
+        expect(k._colorableLhsRhs(c)).toEqual({ lhs: result.lhs, rhs: result.rhs });
+    });
 });
 
 // ---------------------------------------------------------------------------
