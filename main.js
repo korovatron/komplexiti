@@ -2518,6 +2518,21 @@ class Komplexiti {
                 ...mathField.inlineShortcuts,
                 abs:  { mode: 'math', value: '\\left|#?\\right|' },
                 mod:  { mode: 'math', value: '\\left|#?\\right|' },
+                // MathLive's own default shortcuts dictionary separately maps the longer/more
+                // specific trigger "(mod" (i.e. "mod" typed right after an open paren) to its own
+                // "\pmod{}" congruence-notation behaviour, which - since it's specifically coded to
+                // strip a redundant enclosing "(...)" for that notation - dissolves the WHOLE
+                // surrounding \left(...\right) fence (both delimiters, not just the opening one)
+                // whenever the "(" the user typed is MathLive's own auto-inserted matching pair
+                // (the normal case, since smart fences auto-close every typed "("). Overriding its
+                // VALUE (e.g. re-inserting a literal "(") only replaces a real matched fence with a
+                // bare, non-matching character - later typing the genuine closing ")" then trips
+                // MathLive's separate "typed an unmatched close paren" smart-fence heuristic, which
+                // wraps everything in a FRESH \left(\right) pair, producing a doubled leading "(".
+                // Undefining the key here instead removes it from the merged dictionary entirely,
+                // so the shorter "mod" shortcut above is tried next and fires normally INSIDE the
+                // existing, untouched fence - exactly as if "mod" had been typed with no parens.
+                '(mod': undefined,
                 conj: { mode: 'math', value: '\\overline{#?}' },
                 // Override MathLive's default "log" shortcut (which inserts a base subscript
                 // placeholder) so typed "log" matches the virtual keyboard button: base-10, no base.
