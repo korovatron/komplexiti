@@ -259,6 +259,20 @@ describe('parseEquation - line-loci demo set', () => {
         expect(result.periodic[0].base.re).toBeCloseTo(PI / 2);
         expect(result.periodic[0].step.re).toBeCloseTo(2 * PI);
     });
+
+    test('(sin(z)-1)(tan(z)-1) = 0  is an all-roots union: a plain equation with BOTH factors\' compact periodic roots and tan\'s compact poles merged', () => {
+        const result = parse('\\left(\\sin\\left(z\\right)-1\\right)\\left(\\tan\\left(z\\right)-1\\right)=0');
+        expect(result.type).toBe('equation');
+        expect(result.isUnion).toBeUndefined();
+        expect(result.periodic).toHaveLength(2);
+        const sinFam = result.periodic.find(f => Math.abs(f.step.re - 2 * PI) < 1e-6);
+        const tanFam = result.periodic.find(f => Math.abs(f.step.re - PI) < 1e-6);
+        expect(sinFam.base.re).toBeCloseTo(PI / 2);
+        expect(tanFam.base.re).toBeCloseTo(PI / 4);
+        expect(result.polesPeriodic).toHaveLength(1);
+        expect(result.polesPeriodic[0].base.re).toBeCloseTo(-PI / 2);
+        expect(result.polesPeriodic[0].step.re).toBeCloseTo(PI);
+    });
 });
 
 // ---------------------------------------------------------------------------

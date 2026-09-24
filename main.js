@@ -6269,20 +6269,20 @@ class Komplexiti {
     // Splits a "(factor1)(factor2)...=0" equation into the union of each factor's own zero-set,
     // since a product is zero iff at least one factor is (e.g. (arg((z-1)/(z+1))-pi/4)(|z|-2)=0
     // is the union of the arc arg((z-1)/(z+1))=pi/4 and the circle |z|=2, and (|z|-2)(sin(z)-1)=0
-    // is the union of that same circle with sin(z)=1's isolated periodic roots). Only fires when
-    // one side is literally the constant 0 and the other side's top-level AST node is a chain of
-    // multiplications with 2+ factors that each genuinely depend on varName. Each factor is
-    // resolved to EITHER a genuine SCALAR locus (a real curve, via _buildLocus) OR a set of
-    // isolated roots (via the same closed-form solvers parseEquation itself would use standalone,
-    // so e.g. sin(z)=1 still gets its compact periodic family rather than a raw numeric list) -
-    // a factor that resolves to NEITHER (truly unrecognisable) aborts the whole attempt, returning
-    // null so the caller falls through unchanged to the existing solving pipeline. A pure
-    // all-polynomial product like (z-1)(z+2)=0 is deliberately left untouched by the cheap gate
-    // below (already solved correctly and more efficiently as one expanded polynomial by the
+    // is the union of that same circle with sin(z)=1's isolated periodic roots; (sin(z)-1)(tan(z)-1)=0,
+    // with no locus factor at all, still gets both factors' compact periodic roots/poles merged into
+    // one ordinary 'equation' result rather than falling back to the generic numeric grid search's
+    // raw, uncompacted root list). Only fires when one side is literally the constant 0 and the other
+    // side's top-level AST node is a chain of multiplications with 2+ factors that each genuinely
+    // depend on varName. Each factor is resolved to EITHER a genuine SCALAR locus (a real curve, via
+    // _buildLocus) OR a set of isolated roots (via the same closed-form solvers parseEquation itself
+    // would use standalone, so e.g. sin(z)=1 still gets its compact periodic family rather than a raw
+    // numeric list) - a factor that resolves to NEITHER (truly unrecognisable) aborts the whole
+    // attempt, returning null so the caller falls through unchanged to the existing solving pipeline.
+    // A pure all-polynomial product like (z-1)(z+2)=0 is deliberately left untouched by the cheap
+    // gate below (already solved correctly and more efficiently as one expanded polynomial by the
     // existing Durand-Kerner path further down) - this function only ever fires when at least one
-    // factor looks non-polynomial, and only ever returns a result when at least one factor is a
-    // genuine locus (an all-roots combination is likewise already handled by that same existing
-    // polynomial path, so returning null here just lets it continue unhindered).
+    // factor looks non-polynomial.
     _tryFactoredUnionEquation(lhs, rhs, varName, scope) {
         let side;
         if (rhs.trim() === '0' && lhs.trim() !== '0') side = lhs;
@@ -6357,7 +6357,15 @@ class Komplexiti {
             if (factorPoles) poles = (poles ?? []).concat(factorPoles);
             if (factorPolesPeriodic) polesPeriodic = (polesPeriodic ?? []).concat(factorPolesPeriodic);
         }
-        if (!loci.length) return null; // all factors resolved to roots - the existing polynomial path already handles this case
+        if (!loci.length) {
+            // No factor produced a genuine curve - this is really just an ordinary equation with
+            // combined roots/poles from every factor (e.g. two trig factors each contributing
+            // their own periodic family), not a drawable union of loci. Returning a plain
+            // 'equation' result here lets the existing equation-card rendering (compact periodic
+            // families, poles, root-format switching) apply unchanged, with zero new UI code.
+            if (!roots?.length) return null;
+            return { type: 'equation', variable: varName, roots, periodic, poles, polesPeriodic, lhs, rhs };
+        }
         return { type: 'compound-locus', variable: varName, loci, isUnion: true, roots, periodic, poles, polesPeriodic };
     }
 
