@@ -10214,13 +10214,23 @@ class Komplexiti {
             const cExpr = this.expressions.find(e => e.id === this.colorModeExpressionId);
             if (cExpr?.enabled) {
                 try {
-                    const cached = this._colorLayerCache?.exprId === cExpr.id ? this._colorLayerCache : null;
-                    const built = cached ? null : this._buildColorLayerCanvas(cExpr);
-                    const canvasLayer = cached ? cached.canvas : built?.canvas;
+                    // Prefer the one-off hi-res snapshot (see .expr-color-hires-btn) when it
+                    // matches this expression and the CURRENT viewport exactly - same freshness
+                    // rule _drawColorLayer uses for the live canvas - so an export taken right
+                    // after clicking that button doesn't silently fall back to the blurrier
+                    // low-res live layer.
+                    const hiRes = (this._hiResColorLayer && this._hiResColorLayer.exprId === cExpr.id
+                        && this._isSameViewportRect(this._hiResColorLayer.vp, this.viewport))
+                        ? this._hiResColorLayer : null;
+                    const cached = hiRes ? null : (this._colorLayerCache?.exprId === cExpr.id ? this._colorLayerCache : null);
+                    const built = (hiRes || cached) ? null : this._buildColorLayerCanvas(cExpr);
+                    const canvasLayer = hiRes ? hiRes.canvas : (cached ? cached.canvas : built?.canvas);
                     if (canvasLayer) {
-                        const minX = cached ? cached.minX : built.minX, maxX = cached ? cached.maxX : built.maxX;
-                        const minY = cached ? cached.minY : built.minY, maxY = cached ? cached.maxY : built.maxY;
-                        if (!cached) {
+                        const minX = hiRes ? hiRes.minX : (cached ? cached.minX : built.minX);
+                        const maxX = hiRes ? hiRes.maxX : (cached ? cached.maxX : built.maxX);
+                        const minY = hiRes ? hiRes.minY : (cached ? cached.minY : built.minY);
+                        const maxY = hiRes ? hiRes.maxY : (cached ? cached.maxY : built.maxY);
+                        if (!hiRes && !cached) {
                             this._colorLayerCache = {
                                 exprId: cExpr.id, canvas: canvasLayer, minX, maxX, minY, maxY,
                                 axisSamples: this._buildAxisColorSamples(canvasLayer, minX, maxX, minY, maxY)
