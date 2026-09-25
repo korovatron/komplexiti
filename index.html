@@ -1223,6 +1223,53 @@
             transform: scale(1.1);
         }
 
+        .expr-color-hires-btn {
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            background: #2A3F5A !important;
+            border: 1px solid #555 !important;
+            box-shadow: none !important;
+            color: var(--text-primary) !important;
+            cursor: pointer;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .expr-color-hires-btn svg {
+            width: 13px;
+            height: 13px;
+        }
+
+        @media (hover: hover) {
+            .expr-color-hires-btn:hover {
+                background: rgba(74, 144, 226, 0.3) !important;
+                border-color: #4A90E2 !important;
+            }
+        }
+
+        .expr-color-hires-btn:active {
+            transform: scale(1.1);
+        }
+
+        .expr-color-hires-btn.is-loading {
+            opacity: 0.6;
+            cursor: wait;
+            pointer-events: none;
+        }
+
+        .expr-color-hires-btn.is-loading svg {
+            animation: hires-btn-spin 0.8s linear infinite;
+        }
+
+        @keyframes hires-btn-spin {
+            to { transform: rotate(360deg); }
+        }
+
         /* ------------------------------------------------------------------ */
         /* Card metadata (exact Graphiti styles)                                */
         /* ------------------------------------------------------------------ */
@@ -2186,6 +2233,12 @@
                                 <strong>M&ouml;bius Transformation</strong>
                             </div>
                             <div class="example-description">(z&minus;i)/(2z+1)=0, root at z=i and pole at z=&minus;1/2, with phase/modulus colouring</div>
+                        </div>
+                        <div class="demo-set-item" data-demo-set="nested-cosine-fractal">
+                            <div class="example-formula">
+                                <strong>Nested Cosine Fractal</strong>
+                            </div>
+                            <div class="example-description">A 9-fold nested xcos(xcos(&hellip;))=0 whose zero locus is riddled with mini-Mandelbrot copies, with phase/modulus colouring - try the high-resolution snapshot button on the fractal boundaries for extra detail</div>
                         </div>
                     </div>
                 </div>

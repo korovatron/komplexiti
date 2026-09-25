@@ -153,6 +153,7 @@ class Komplexiti {
         // ---- Phase/modulus colour layer (only one expression at a time) ----
         this.colorModeExpressionId = null;
         this._colorLayerCache = null;
+        this._hiResColorLayer = null; // one-off high-res snapshot; cleared on any pan/zoom/edit
 
         // ---- Input state ----
         this.input = {
@@ -2179,6 +2180,9 @@ class Komplexiti {
                     </button>
                     <div class="expr-color-dot" style="background:${c.color};opacity:${c.enabled ? 1 : 0.3}" title="Toggle visibility"></div>
                     <button class="expr-color-toggle-btn" style="display:none" title="Colour plane by phase &amp; modulus" aria-label="Toggle phase/modulus colouring"></button>
+                    <button class="expr-color-hires-btn" style="display:none" title="Render a one-off high-resolution snapshot of the current view (reverts to normal on pan/zoom)" aria-label="Render high-resolution colour snapshot">
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.9 9.9L14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M6.8 4.8v4M4.8 6.8h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                    </button>
                 </div>
             </div>
             <div class="expr-name-error"></div>
@@ -2280,6 +2284,7 @@ class Komplexiti {
             if (this.colorModeExpressionId === c.id) {
                 this.colorModeExpressionId = null;
                 this._colorLayerCache = null;
+                this._hiResColorLayer = null;
             }
             const raw = c.latex.trim();
             const assignment = raw ? this.parseAssignment(raw) : null;
@@ -2430,6 +2435,7 @@ class Komplexiti {
             if (!c.enabled && this.colorModeExpressionId === c.id) {
                 this.colorModeExpressionId = null;
                 this._colorLayerCache = null;
+                this._hiResColorLayer = null;
             }
             dot.style.opacity      = c.enabled ? '1' : '0.3';
             mathField.style.opacity = c.enabled ? '1' : '0.4';
@@ -2447,12 +2453,36 @@ class Komplexiti {
                 this.colorModeExpressionId = c.id;
             }
             this._colorLayerCache = null;
+            this._hiResColorLayer = null;
             if (window.goatcounter?.count) {
                 window.goatcounter.count({ path: 'Komplexiti - Domain Colouring toggled', event: true });
             }
             this.updateAllCardMetadata();
             this.saveExpressions();
             if (this.currentState === this.states.APP) this.drawCanvas();
+        });
+
+        const hiResBtn = card.querySelector('.expr-color-hires-btn');
+        hiResBtn.addEventListener('click', () => {
+            if (this.colorModeExpressionId !== c.id || hiResBtn.classList.contains('is-loading')) return;
+            hiResBtn.classList.add('is-loading');
+            // Yield two frames so the loading spinner actually paints before the heavy,
+            // synchronous rasterisation below blocks the main thread.
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                const vp = this.viewport;
+                const built = this._buildHiResColorLayerCanvas(c);
+                this._hiResColorLayer = built
+                    ? {
+                        exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
+                        vp: { minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY }
+                    }
+                    : null;
+                hiResBtn.classList.remove('is-loading');
+                if (window.goatcounter?.count) {
+                    window.goatcounter.count({ path: 'Komplexiti - Hi-res colour snapshot', event: true });
+                }
+                if (this.currentState === this.states.APP) this.drawCanvas();
+            }));
         });
 
         // ------ Touch-device virtual keyboard handling ------
@@ -2559,6 +2589,7 @@ class Komplexiti {
         if (this.colorModeExpressionId === id) {
             this.colorModeExpressionId = null;
             this._colorLayerCache = null;
+            this._hiResColorLayer = null;
         }
         const idx = this.expressions.findIndex(c => c.id === id);
         if (idx !== -1) this.expressions.splice(idx, 1);
@@ -2629,6 +2660,7 @@ class Komplexiti {
             requestAnimationFrame(() => {
                 this.colorModeExpressionId = pendingColorModeId;
                 this._colorLayerCache = null;
+                this._hiResColorLayer = null;
                 this.updateAllCardMetadata();
                 if (this.currentState === this.states.APP) this.drawCanvas();
             });
@@ -6816,6 +6848,9 @@ class Komplexiti {
             ],
             'mobius-transformation': [
                 { latex: '\\frac{z-i}{2z+1}=0', colorMode: true }
+            ],
+            'nested-cosine-fractal': [
+                { latex: 'x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\right)\\right)\\right)\\right)\\right)\\right)\\right)\\right)\\right)=0', colorMode: true }
             ]
         };
 
@@ -6832,6 +6867,7 @@ class Komplexiti {
         }
         this.colorModeExpressionId = null;
         this._colorLayerCache = null;
+        this._hiResColorLayer = null;
         let pendingColorModeId = null;
 
         for (const item of list) {
@@ -6877,6 +6913,7 @@ class Komplexiti {
             requestAnimationFrame(() => {
                 this.colorModeExpressionId = pendingColorModeId;
                 this._colorLayerCache = null;
+                this._hiResColorLayer = null;
                 this.updateAllCardMetadata();
                 if (this.currentState === this.states.APP) this.drawCanvas();
             });
@@ -7391,7 +7428,6 @@ class Komplexiti {
         const PAD = this._COLOR_LAYER_PAD;
         const minX = vb.minX - vSpanX * PAD, maxX = vb.maxX + vSpanX * PAD;
         const minY = vb.minY - vSpanY * PAD, maxY = vb.maxY + vSpanY * PAD;
-        const spanX = maxX - minX, spanY = maxY - minY;
 
         const padScale = 1 + 2 * PAD;
         // Scale the resolution clamp bounds by the same padScale as the world area, so the
@@ -7400,6 +7436,58 @@ class Komplexiti {
         // result for the part of the bitmap that's actually on screen most of the time.
         const cols = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.width  / 6 * padScale)));
         const rows = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.height / 6 * padScale)));
+
+        const canvas = this._rasterizeComplexColorGrid(compiled, varName, scope, minX, maxX, minY, maxY, cols, rows, vb);
+        if (!canvas) return null;
+        return { canvas, minX, maxX, minY, maxY };
+    }
+
+    // One-off, UN-padded, high-resolution rasterisation of the same colouring for exactly the
+    // viewport visible right now - triggered explicitly by the "high-resolution snapshot" button
+    // (see createExpressionUI's .expr-color-hires-btn handler), never by the normal live redraw
+    // path, since a grid this dense would be far too slow to recompute every frame during pan/
+    // zoom. The caller (_drawColorLayer) discards the result the instant the viewport changes at
+    // all, reverting to the ordinary padded/low-res layer - see _isSameViewportRect.
+    _buildHiResColorLayerCanvas(c) {
+        if (typeof math === 'undefined') return null;
+        const target = this._colorableLhsRhs(c);
+        if (!target) return null;
+
+        let compiled;
+        try {
+            compiled = this._extractColorTargetNode(target.lhs, target.rhs).compile();
+        } catch { return null; }
+
+        const varName = c.equationVar;
+        const scope   = this.buildExpressionScope(c.id);
+        const vb = this.getVisibleWorldBounds();
+        if (!(vb.maxX - vb.minX > 0) || !(vb.maxY - vb.minY > 0)) return null;
+
+        const dpr = window.devicePixelRatio || 1;
+        const SUPERSAMPLE = 2; // extra detail beyond native device pixels, affordable for a one-off
+        const MAX_DIM = 1800;  // hard cap so a single click can't lock up the tab for too long
+        let cols = Math.round(this.canvas.width  * dpr * SUPERSAMPLE);
+        let rows = Math.round(this.canvas.height * dpr * SUPERSAMPLE);
+        const overshoot = Math.max(cols, rows) / MAX_DIM;
+        if (overshoot > 1) {
+            cols = Math.max(1, Math.round(cols / overshoot));
+            rows = Math.max(1, Math.round(rows / overshoot));
+        }
+
+        const canvas = this._rasterizeComplexColorGrid(compiled, varName, scope, vb.minX, vb.maxX, vb.minY, vb.maxY, cols, rows, vb);
+        if (!canvas) return null;
+        return { canvas, minX: vb.minX, maxX: vb.maxX, minY: vb.minY, maxY: vb.maxY };
+    }
+
+    // Shared rasteriser for both the live padded/low-res colour layer and the one-off unpadded/
+    // hi-res snapshot: evaluates `compiled` over a cols x rows grid spanning [minX,maxX] x
+    // [minY,maxY] and returns a same-sized offscreen canvas of RGBA domain-colouring pixels (or
+    // null if the rectangle/resolution is degenerate). calibBounds restricts which cells count
+    // towards the lightness-scale percentile (see _complexToRGB) - callers pass the actually-
+    // visible viewport so a padded margin's far-field values don't skew the on-screen result.
+    _rasterizeComplexColorGrid(compiled, varName, scope, minX, maxX, minY, maxY, cols, rows, calibBounds) {
+        const spanX = maxX - minX, spanY = maxY - minY;
+        if (!(spanX > 0) || !(spanY > 0) || !(cols > 0) || !(rows > 0)) return null;
 
         const off = document.createElement('canvas');
         off.width  = cols;
@@ -7419,17 +7507,17 @@ class Komplexiti {
         const imArr  = new Float64Array(cellCount);
         const lmArr  = new Float64Array(cellCount);
         const valid  = new Uint8Array(cellCount);
-        // Tracks which cells fall within the originally-visible (unpadded) viewport, so the
-        // lightness scale below can be calibrated from just that region - otherwise the padded
+        // Tracks which cells fall within calibBounds (the actually-visible viewport), so the
+        // lightness scale below can be calibrated from just that region - otherwise a padded
         // margin's far-field values (see _COLOR_LAYER_PAD) would skew the whole layer darker.
         const insideVisible = new Uint8Array(cellCount);
         for (let iy = 0; iy < rows; iy++) {
             const y = maxY - (iy + 0.5) / rows * spanY;
-            const yInside = y >= vb.minY && y <= vb.maxY;
+            const yInside = y >= calibBounds.minY && y <= calibBounds.maxY;
             for (let ix = 0; ix < cols; ix++) {
                 const x = minX + (ix + 0.5) / cols * spanX;
                 const cell = iy * cols + ix;
-                if (yInside && x >= vb.minX && x <= vb.maxX) insideVisible[cell] = 1;
+                if (yInside && x >= calibBounds.minX && x <= calibBounds.maxX) insideVisible[cell] = 1;
                 try {
                     const val = this._mathValueToComplex(compiled.evaluate({ ...scope, [varName]: math.complex(x, y) }));
                     const m = val ? Math.hypot(val.re, val.im) : NaN;
@@ -7447,7 +7535,7 @@ class Komplexiti {
         // even the raw 90th percentile) as the lightness reference scale - this stays robust
         // both to a single near-pole outlier and to a far field that grows quickly with |z|.
         // Calibrated from the visible region only (see insideVisible above) so the result matches
-        // what it would have been without the padded margin.
+        // what it would have been without any padded margin.
         const sortedLm = [];
         for (let cell = 0; cell < cellCount; cell++) if (valid[cell] && insideVisible[cell]) sortedLm.push(lmArr[cell]);
         if (!sortedLm.length) for (let cell = 0; cell < cellCount; cell++) if (valid[cell]) sortedLm.push(lmArr[cell]);
@@ -7464,7 +7552,7 @@ class Komplexiti {
             }
         }
         offCtx.putImageData(imgData, 0, 0);
-        return { canvas: off, minX, maxX, minY, maxY };
+        return off;
     }
 
     // Draws the active phase/modulus colour layer (if any) beneath the grid/axes/expressions.
@@ -7481,9 +7569,21 @@ class Komplexiti {
         if (!c || !this._colorableLhsRhs(c)) {
             this.colorModeExpressionId = null;
             this._colorLayerCache = null;
+            this._hiResColorLayer = null;
             return;
         }
         const vp = this.viewport;
+
+        // A one-off high-resolution snapshot (see the "high-resolution" button in
+        // createExpressionUI) stays on screen only for as long as the viewport is EXACTLY the
+        // one it was rendered for - any pan/zoom drops it instantly here, falling straight back
+        // to the ordinary live/lower-resolution layer below with no other bookkeeping needed.
+        if (this._hiResColorLayer && this._hiResColorLayer.exprId === c.id && this._isSameViewportRect(this._hiResColorLayer.vp, vp)) {
+            this._drawColorLayerBitmap(ctx, this._hiResColorLayer);
+            return;
+        }
+        if (this._hiResColorLayer) this._hiResColorLayer = null;
+
         if (!this._colorLayerCache || this._colorLayerCache.exprId !== c.id) {
             const built = this._buildColorLayerCanvas(c);
             this._colorLayerCache = built
@@ -7499,8 +7599,13 @@ class Komplexiti {
         }
         const cache = this._colorLayerCache;
         if (!cache?.canvas) return;
+        this._drawColorLayerBitmap(ctx, cache);
+    }
 
-        // Map the world rectangle the bitmap was built for onto the *current* viewport.
+    // Shared draw step for both the live (padded, low-res) and one-off (unpadded, hi-res)
+    // colour layer bitmaps - maps the world rectangle the bitmap covers onto the CURRENT
+    // viewport via worldToScreen, so it scales/pans correctly regardless of which one it is.
+    _drawColorLayerBitmap(ctx, cache) {
         const topLeft     = this.worldToScreen(cache.minX, cache.maxY);
         const bottomRight  = this.worldToScreen(cache.maxX, cache.minY);
         const destW = bottomRight.x - topLeft.x;
@@ -7514,6 +7619,13 @@ class Komplexiti {
         ctx.restore();
     }
 
+    // Exact-match viewport comparison used to decide whether a one-off hi-res colour snapshot
+    // (built for one specific world rectangle) is still valid - deliberately no tolerance: the
+    // snapshot should vanish the instant the view moves at all, reverting to the ordinary layer.
+    _isSameViewportRect(a, b) {
+        return !!a && a.minX === b.minX && a.maxX === b.maxX && a.minY === b.minY && a.maxY === b.maxY;
+    }
+
     // Debounced rebuild of the colour layer once pan/zoom settles, mirroring _scheduleLocusRetrace.
     _scheduleColorLayerRetrace() {
         if (this._colorLayerRetraceTimer) clearTimeout(this._colorLayerRetraceTimer);
@@ -7524,6 +7636,7 @@ class Komplexiti {
             if (!c || !this._colorableLhsRhs(c)) {
                 this.colorModeExpressionId = null;
                 this._colorLayerCache = null;
+                this._hiResColorLayer = null;
                 return;
             }
             const vp = this.viewport;
@@ -7752,10 +7865,16 @@ class Komplexiti {
         const hide = () => { container.classList.remove('visible'); hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); hideEssential(); };
 
         const colorToggleBtn = card.querySelector('.expr-color-toggle-btn');
+        const colorEligible = !!(c.enabled && this._colorableLhsRhs(c));
         if (colorToggleBtn) {
-            const eligible = !!(c.enabled && this._colorableLhsRhs(c));
-            colorToggleBtn.style.display = eligible ? '' : 'none';
+            colorToggleBtn.style.display = colorEligible ? '' : 'none';
             colorToggleBtn.classList.toggle('is-active', this.colorModeExpressionId === c.id);
+        }
+        const hiResBtn = card.querySelector('.expr-color-hires-btn');
+        if (hiResBtn) {
+            const colorActive = colorEligible && this.colorModeExpressionId === c.id;
+            hiResBtn.style.display = colorActive ? '' : 'none';
+            if (!colorActive) hiResBtn.classList.remove('is-loading');
         }
 
         if (!c.latex || !c.latex.trim()) { hide(); return; }
@@ -9458,6 +9577,7 @@ class Komplexiti {
         if (this.expressionsContainer) this.expressionsContainer.innerHTML = '';
         this.colorModeExpressionId = null;
         this._colorLayerCache = null;
+        this._hiResColorLayer = null;
         let pendingColorModeId = null;
 
         const exprs = Array.isArray(state.expressions) ? state.expressions : [];
@@ -9494,6 +9614,7 @@ class Komplexiti {
             requestAnimationFrame(() => {
                 this.colorModeExpressionId = pendingColorModeId;
                 this._colorLayerCache = null;
+                this._hiResColorLayer = null;
                 this.updateAllCardMetadata();
                 if (this.currentState === this.states.APP) this.drawCanvas();
             });
