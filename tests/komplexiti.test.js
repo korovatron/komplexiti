@@ -351,6 +351,28 @@ describe('parseEquation - line-loci demo set', () => {
         expect(result.type).toBe('locus');
         expect(result.locus.confirmedEmpty).toBe(true);
     });
+
+    test('(arg(z))^2-3arg(z)+2=0  (expanded, not literally factored) is still recognised as a half-line+half-line union', () => {
+        const result = parse('\\left(\\arg\\left(z\\right)\\right)^2-3\\arg\\left(z\\right)+2=0');
+        expect(result.type).toBe('compound-locus');
+        expect(result.isUnion).toBe(true);
+        expect(result.loci).toHaveLength(2);
+        const angles = result.loci.map(l => l.fastPath.angle).sort((a, b) => a - b);
+        expect(angles[0]).toBeCloseTo(1);
+        expect(angles[1]).toBeCloseTo(2);
+        for (const l of result.loci) {
+            expect(l.fastPath.kind).toBe('ray');
+            expect(l.fastPath.origin.re).toBeCloseTo(0);
+            expect(l.fastPath.origin.im).toBeCloseTo(0);
+        }
+    });
+
+    test('(arg(z))^2-3arg(z)-10=0  discards the out-of-range root (5, outside (-pi,pi]) and keeps the valid one (-2)', () => {
+        const result = parse('\\left(\\arg\\left(z\\right)\\right)^2-3\\arg\\left(z\\right)-10=0');
+        expect(result.type).toBe('locus');
+        expect(result.locus.fastPath.kind).toBe('ray');
+        expect(result.locus.fastPath.angle).toBeCloseTo(-2);
+    });
 });
 
 // ---------------------------------------------------------------------------

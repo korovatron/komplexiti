@@ -6649,6 +6649,87 @@ class Komplexiti {
         return { type: 'compound-locus', variable: varName, loci, isUnion: true, roots: isolatedRoots.length ? isolatedRoots : null, lhs, rhs };
     }
 
+    // Same idea as _tryAbsPolynomialEquation, but for a POLYNOMIAL in a single arg(z-origin) term,
+    // e.g. (arg(z))^2-3*arg(z)+2=0 (algebraically (arg(z)-1)(arg(z)-2)=0, a union of 2 rays). A
+    // literally-factored (arg(z)-1)(arg(z)-2)=0 is already recognised via _tryFactoredUnionEquation
+    // - the generic real-valued contour tracer used for the EXPANDED form gets visibly confused by
+    // arg's own branch-cut discontinuity (arg jumps by 2*pi crossing the negative real axis, which
+    // the tracer's sign-change test can misread as extra spurious zero-crossings), so this closed
+    // form is needed to render it correctly, not just to add a nicer shape label.
+    // Only supports arg(z-origin) (unit coefficient on z, matching _parseLinearVarOffset's own
+    // restriction, same as the existing ray fastPath recognizer) - deliberately does not attempt
+    // arg(C*z+D) for non-trivial C, since arg(C*w) = arg(C)+arg(w) only mod 2*pi wraparound, which
+    // would need careful branch handling to get right.
+    _tryArgPolynomialEquation(lhs, rhs, varName, scope) {
+        const hExprStr = `(${lhs}) - (${rhs})`;
+        if (!/(?<![a-zA-Z])arg\(/.test(hExprStr)) return null;
+        let node;
+        try { node = math.parse(hExprStr); } catch { return null; }
+
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        let candidateArgStr = null;
+        let ok = true;
+        node.traverse(n => {
+            if (!ok || n.type !== 'FunctionNode' || n.fn.name !== 'arg') return;
+            const argStr = n.args[0].toString();
+            if (!varRe.test(argStr)) return;
+            if (candidateArgStr === null) candidateArgStr = argStr;
+            else if (candidateArgStr !== argStr) ok = false;
+        });
+        if (!ok || candidateArgStr === null) return null;
+
+        const linear = this._parseLinearVarOffset(candidateArgStr, varName, scope);
+        if (!linear) return null;
+        const origin = { re: -linear.offset.re, im: -linear.offset.im };
+
+        let uSym = 'argSub';
+        if (scope.hasOwnProperty(uSym)) uSym = 'argSubVar';
+        if (scope.hasOwnProperty(uSym)) return null;
+        let changed = false;
+        const substituted = node.transform(n => {
+            if (n.type === 'FunctionNode' && n.fn.name === 'arg' && n.args[0].toString() === candidateArgStr) {
+                changed = true;
+                return new math.SymbolNode(uSym);
+            }
+            return n;
+        });
+        if (!changed) return null;
+        const uExprStr = substituted.toString();
+        if (varRe.test(uExprStr)) return null; // z leaks outside the arg term - not this shape
+
+        let uCoeffs = this._extractPolynomialCoeffs(uExprStr, uSym, scope, 6);
+        if (uCoeffs && uCoeffs.length >= 2 && !this._matchesPolynomialApproximation(uExprStr, uCoeffs, uSym, scope)) uCoeffs = null;
+        if (!uCoeffs || uCoeffs.length < 2) {
+            const higher = this._extractPolynomialCoeffs(uExprStr, uSym, scope, 10);
+            if (higher && higher.length >= 2 && this._matchesPolynomialApproximation(uExprStr, higher, uSym, scope)) uCoeffs = higher;
+        }
+        if (!uCoeffs || uCoeffs.length < 2) return null;
+        // Degree 1 in u is already handled exactly by the existing ray fastPath recognizer.
+        if (uCoeffs.length - 1 < 2) return null;
+
+        const deg = uCoeffs.length - 1;
+        let uRoots;
+        if (deg === 2) uRoots = this._solveQuadratic(uCoeffs);
+        else uRoots = this._solveDurandKerner(uCoeffs);
+        if (!uRoots?.length) return null;
+
+        // u = arg(z-origin) must be a REAL number in (-pi, pi] (the principal branch's range) -
+        // keep only the roots that are (numerically) real and in range, each giving one ray.
+        const loci = [];
+        for (const uRoot of uRoots) {
+            if (Math.abs(uRoot.im) > 1e-6 * Math.max(1, Math.abs(uRoot.re))) continue;
+            if (uRoot.re < -Math.PI - 1e-6 || uRoot.re > Math.PI + 1e-6) continue;
+            loci.push({ lhs, rhs, angular: true, scalar: true, fastPath: { kind: 'ray', origin, angle: uRoot.re } });
+        }
+        if (!loci.length) {
+            return { type: 'locus', variable: varName, roots: null, locus: { lhs, rhs, angular: true, scalar: true, confirmedEmpty: true } };
+        }
+        if (loci.length === 1) {
+            return { type: 'locus', variable: varName, roots: null, locus: loci[0] };
+        }
+        return { type: 'compound-locus', variable: varName, loci, isUnion: true, roots: null, lhs, rhs };
+    }
+
     // Main equation parser. Returns either finite roots or a drawable complex locus.
     parseEquation(rawLatex, ownId) {
         if (typeof math === 'undefined') return null;
@@ -6738,6 +6819,12 @@ class Komplexiti {
             // product, so _tryFactoredUnionEquation's AST scan can't catch it.
             const absPolyUnion = this._tryAbsPolynomialEquation(lhs, rhs, varName, scope);
             if (absPolyUnion) return absPolyUnion;
+
+            // Same idea for a polynomial IN arg(z-origin) (e.g. (arg(z))^2-3arg(z)+2=0), which
+            // additionally NEEDS this closed form rather than just benefiting from nicer metadata -
+            // the generic contour tracer gets visibly confused by arg's own branch-cut jump.
+            const argPolyUnion = this._tryArgPolynomialEquation(lhs, rhs, varName, scope);
+            if (argPolyUnion) return argPolyUnion;
 
             // N/tan(w), N/cot(w) etc. are rewritten to the algebraically-identical reciprocal
             // function (N*cot(w), N*tan(w), ...) before any further processing - see
