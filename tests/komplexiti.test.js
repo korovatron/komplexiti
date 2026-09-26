@@ -330,6 +330,27 @@ describe('parseEquation - line-loci demo set', () => {
         // A locus with no recognised fastPath (numerically-traced) falls back to a generic name.
         expect(k._locusShapeLabel({ fastPath: null })).toBe('general locus');
     });
+
+    test('|z|^2-3|z|+2=0  (expanded, not literally factored) is still recognised as a circle+circle union', () => {
+        const result = parse('\\left|z\\right|^2-3\\left|z\\right|+2=0');
+        expect(result.type).toBe('compound-locus');
+        expect(result.isUnion).toBe(true);
+        expect(result.loci).toHaveLength(2);
+        const radii = result.loci.map(l => l.fastPath.radius).sort((a, b) => a - b);
+        expect(radii[0]).toBeCloseTo(1);
+        expect(radii[1]).toBeCloseTo(2);
+        for (const l of result.loci) {
+            expect(l.fastPath.kind).toBe('circle');
+            expect(l.fastPath.center.re).toBeCloseTo(0);
+            expect(l.fastPath.center.im).toBeCloseTo(0);
+        }
+    });
+
+    test('|z|^2+1=0  (no non-negative real solution for |z|) is confidently empty', () => {
+        const result = parse('\\left|z\\right|^2+1=0');
+        expect(result.type).toBe('locus');
+        expect(result.locus.confirmedEmpty).toBe(true);
+    });
 });
 
 // ---------------------------------------------------------------------------

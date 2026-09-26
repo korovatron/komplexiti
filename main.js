@@ -6552,6 +6552,103 @@ class Komplexiti {
         return { type: 'compound-locus', variable: varName, loci, isUnion: true, roots, periodic, poles, polesPeriodic, lhs, rhs };
     }
 
+    // Handles an equation that is a POLYNOMIAL in a single abs(affine(z)) term, e.g.
+    // |z|^2-3|z|+2=0 (algebraically (|z|-1)(|z|-2)=0, a union of two circles) - unlike
+    // _tryFactoredUnionEquation, this equation is never literally written as a product at the top
+    // level, so that function's AST-multiply-chain scan never fires; here the equation is EXPANDED,
+    // and the "factoring" has to be recovered by solving the polynomial in u=abs(...) instead.
+    // Only handles degree >= 2 in u - a plain single abs(...) = const (degree 1) is already handled
+    // exactly by the existing _tryBuildFastLocus circle recognizer, so this deliberately defers to
+    // that (untouched) path rather than duplicating it.
+    _tryAbsPolynomialEquation(lhs, rhs, varName, scope) {
+        const hExprStr = `(${lhs}) - (${rhs})`;
+        if (!/(?<![a-zA-Z])abs\(/.test(hExprStr)) return null;
+        let node;
+        try { node = math.parse(hExprStr); } catch { return null; }
+
+        // Find every abs(...) call whose argument depends on varName - they must all share the
+        // EXACT SAME argument text (a single candidate "core" abs term the whole equation pivots
+        // on); anything else (e.g. two different abs(z-a)/abs(z-b) terms, a perpendicular
+        // bisector shape) bails out immediately, unaffected.
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        let candidateArgStr = null;
+        let ok = true;
+        node.traverse(n => {
+            if (!ok || n.type !== 'FunctionNode' || n.fn.name !== 'abs') return;
+            const argStr = n.args[0].toString();
+            if (!varRe.test(argStr)) return; // a constant abs term - irrelevant here
+            if (candidateArgStr === null) candidateArgStr = argStr;
+            else if (candidateArgStr !== argStr) ok = false;
+        });
+        if (!ok || candidateArgStr === null) return null;
+
+        // The candidate's argument must be affine in z (C*z+D) so abs(...) is a genuine circle
+        // radius variable, not some other curve shape.
+        let argCoeffs = this._extractPolynomialCoeffs(candidateArgStr, varName, scope, 1);
+        if (!argCoeffs || argCoeffs.length !== 2 || !this._matchesPolynomialApproximation(candidateArgStr, argCoeffs, varName, scope)) return null;
+        const [D, C] = argCoeffs;
+        const cMag = Math.hypot(C.re, C.im);
+        if (cMag < 1e-9) return null;
+        const center = this._cDiv({ re: -D.re, im: -D.im }, C);
+
+        // Substitute every occurrence of abs(candidateArgStr) with a fresh symbol u, then verify
+        // NOTHING else in the equation still depends on z (varName must appear ONLY inside abs(...)).
+        let uSym = 'absSub';
+        if (scope.hasOwnProperty(uSym)) uSym = 'absSubVar';
+        if (scope.hasOwnProperty(uSym)) return null;
+        let changed = false;
+        const substituted = node.transform(n => {
+            if (n.type === 'FunctionNode' && n.fn.name === 'abs' && n.args[0].toString() === candidateArgStr) {
+                changed = true;
+                return new math.SymbolNode(uSym);
+            }
+            return n;
+        });
+        if (!changed) return null;
+        const uExprStr = substituted.toString();
+        if (varRe.test(uExprStr)) return null; // z leaks outside the abs term - not this shape
+
+        let uCoeffs = this._extractPolynomialCoeffs(uExprStr, uSym, scope, 6);
+        if (uCoeffs && uCoeffs.length >= 2 && !this._matchesPolynomialApproximation(uExprStr, uCoeffs, uSym, scope)) uCoeffs = null;
+        if (!uCoeffs || uCoeffs.length < 2) {
+            const higher = this._extractPolynomialCoeffs(uExprStr, uSym, scope, 10);
+            if (higher && higher.length >= 2 && this._matchesPolynomialApproximation(uExprStr, higher, uSym, scope)) uCoeffs = higher;
+        }
+        if (!uCoeffs || uCoeffs.length < 2) return null;
+        // Degree 1 in u is already handled exactly (and with richer metadata) by the existing
+        // single-circle fastPath recognizer earlier in _buildLocus - defer to that path unchanged.
+        if (uCoeffs.length - 1 < 2) return null;
+
+        const deg = uCoeffs.length - 1;
+        let uRoots;
+        if (deg === 2) uRoots = this._solveQuadratic(uCoeffs);
+        else uRoots = this._solveDurandKerner(uCoeffs);
+        if (!uRoots?.length) return null;
+
+        // u = |C*z+D| = |C|*|z-center| must be a non-negative REAL number - keep only the roots
+        // that are (numerically) real and non-negative, converting each to a circle radius.
+        const loci = [];
+        const isolatedRoots = [];
+        for (const uRoot of uRoots) {
+            if (Math.abs(uRoot.im) > 1e-6 * Math.max(1, Math.abs(uRoot.re))) continue;
+            if (uRoot.re < -1e-6) continue;
+            const radius = Math.max(uRoot.re, 0) / cMag;
+            if (radius < 1e-9) {
+                isolatedRoots.push({ re: center.re, im: center.im });
+            } else {
+                loci.push({ lhs, rhs, angular: false, scalar: true, fastPath: { kind: 'circle', center, radius } });
+            }
+        }
+        if (!loci.length && !isolatedRoots.length) {
+            // Every candidate u-root was complex or negative - provably no solution exists at all.
+            return { type: 'locus', variable: varName, roots: null, locus: { lhs, rhs, angular: false, scalar: true, confirmedEmpty: true } };
+        }
+        if (loci.length === 1 && !isolatedRoots.length) {
+            return { type: 'locus', variable: varName, roots: null, locus: loci[0] };
+        }
+        return { type: 'compound-locus', variable: varName, loci, isUnion: true, roots: isolatedRoots.length ? isolatedRoots : null, lhs, rhs };
+    }
+
     // Main equation parser. Returns either finite roots or a drawable complex locus.
     parseEquation(rawLatex, ownId) {
         if (typeof math === 'undefined') return null;
@@ -6635,6 +6732,12 @@ class Komplexiti {
             // BOTH the inscribed arc and the circle, not attempt to trace the product as one curve.
             const factoredUnion = this._tryFactoredUnionEquation(lhs, rhs, varName, scope);
             if (factoredUnion) return factoredUnion;
+
+            // A polynomial IN abs(affine(z)) (e.g. |z|^2-3|z|+2=0, algebraically (|z|-1)(|z|-2)=0)
+            // is likewise a union of circles - it just never appears as a literal top-level
+            // product, so _tryFactoredUnionEquation's AST scan can't catch it.
+            const absPolyUnion = this._tryAbsPolynomialEquation(lhs, rhs, varName, scope);
+            if (absPolyUnion) return absPolyUnion;
 
             // N/tan(w), N/cot(w) etc. are rewritten to the algebraically-identical reciprocal
             // function (N*cot(w), N*tan(w), ...) before any further processing - see
