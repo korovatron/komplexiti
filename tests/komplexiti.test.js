@@ -398,6 +398,16 @@ describe('parseEquation - complex equations demo set', () => {
         expect(result.type).toBe('equation');
         expect(result.roots).toHaveLength(2);
     });
+
+    test('(z-1)^2*z^5*(z+1/2)^3 = 0  (3-factor product) resolves quickly with correct multiplicities, not a hang', () => {
+        const result = parse('\\left(z-1\\right)^2z^5\\left(z+\\frac12\\right)^3=0');
+        expect(result.type).toBe('equation');
+        expect(result.roots).toHaveLength(3);
+        const byRe = re => result.roots.find(r => Math.abs(r.re - re) < 1e-4 && Math.abs(r.im) < 1e-4);
+        expect(byRe(1).multiplicity).toBe(2);
+        expect(byRe(0).multiplicity).toBe(5);
+        expect(byRe(-0.5).multiplicity).toBe(3);
+    });
 });
 
 // ---------------------------------------------------------------------------

@@ -3025,6 +3025,19 @@ class Komplexiti {
         return acc;
     }
 
+    // Plain numeric convolution of two [a0..an]-form coefficient arrays - exact and fast (no
+    // symbolic expression-tree growth at all), used to combine factors' own coefficients instead
+    // of symbolically differentiating a whole product (see _extractFactoredPolynomialCoeffs).
+    _cPolyMultiply(a, b) {
+        const result = new Array(a.length + b.length - 1).fill(null).map(() => ({ re: 0, im: 0 }));
+        for (let i = 0; i < a.length; i++) {
+            for (let j = 0; j < b.length; j++) {
+                result[i + j] = this._cAdd(result[i + j], this._cMul(a[i], b[j]));
+            }
+        }
+        return result;
+    }
+
     _mathValueToComplex(value) {
         if (typeof value === 'number') return { re: value, im: 0 };
         if (value && typeof value.re === 'number' && typeof value.im === 'number') return { re: value.re, im: value.im };
@@ -5056,6 +5069,123 @@ class Komplexiti {
         } catch { return null; }
     }
 
+    // Extracts polynomial coefficients of a TOP-LEVEL product of 2+ factors (e.g.
+    // (z-1)^2*z^5*(z+0.5)^3) WITHOUT ever symbolically differentiating the whole product - doing
+    // so via _extractPolynomialCoeffs causes the product-rule expression tree to grow roughly
+    // 3^k (k = number of derivatives) for a 3-factor product, which can freeze the tab even at
+    // maxDeg=6 for otherwise-ordinary polynomials with no division at all (verified: e.g.
+    // (z-1)^2*z^5*(z+0.5)^3 never returns within 15s+ via the plain differentiation approach).
+    // Each factor is resolved independently (cheap, low individual degree) and the resulting
+    // coefficient arrays are combined via plain numeric convolution (_cPolyMultiply - fast and
+    // exact, no expression-tree growth at all).
+    // Takes lhsExpr/rhsExpr SEPARATELY (rather than a combined "(lhs)-(rhs)" string) because the
+    // product structure only survives at the TOP level of whichever side is actually the product
+    // - "(lhs)-(rhs)" itself is a subtraction at its outermost node, so scanning that combined
+    // string would never recognise the product at all. Only handles the common shape where ONE
+    // side is the 2+-factor product and the OTHER is z-independent (covers "product = 0" and
+    // "product = constant" - the vast majority of real cases); returns undefined for anything
+    // where both sides depend on the variable, deferring to the caller's normal handling.
+    // Returns:
+    //   undefined - not applicable (not a one-sided product) - caller falls back to its own handling.
+    //   null      - it IS such a product, but at least one factor couldn't be resolved to a
+    //               polynomial; the caller should NOT retry via whole-expression differentiation
+    //               (that's exactly the path that can hang) and should fall through to other
+    //               (bounded) solvers instead.
+    //   Array     - the combined, verified coefficient array of (lhsExpr - rhsExpr).
+    _extractFactoredPolynomialCoeffs(lhsExpr, rhsExpr, varName, scope) {
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        const lhsHasVar = varRe.test(lhsExpr);
+        const rhsHasVar = varRe.test(rhsExpr);
+        let productExpr, constExpr, productIsLhs;
+        if (lhsHasVar && !rhsHasVar) { productExpr = lhsExpr; constExpr = rhsExpr; productIsLhs = true; }
+        else if (!lhsHasVar && rhsHasVar) { productExpr = rhsExpr; constExpr = lhsExpr; productIsLhs = false; }
+        else return undefined; // both sides depend on z (or neither does) - not handled here
+
+        const unwrap = n => { while (n && n.type === 'ParenthesisNode') n = n.content; return n; };
+        let node;
+        try { node = unwrap(math.parse(productExpr)); } catch { return undefined; }
+
+        const factors = [];
+        const collect = n => {
+            n = unwrap(n);
+            if (n.type === 'OperatorNode' && n.fn === 'multiply' && n.args?.length === 2) {
+                collect(n.args[0]);
+                collect(n.args[1]);
+            } else {
+                factors.push(n);
+            }
+        };
+        collect(node);
+        if (factors.length < 2) return undefined; // not a top-level product - not applicable here
+
+        let result = [{ re: 1, im: 0 }];
+        for (const f of factors) {
+            const fNode = unwrap(f);
+            const fStr = fNode.toString();
+            if (!varRe.test(fStr)) {
+                // z-independent factor - evaluate once as a constant scale.
+                let cVal;
+                try { cVal = this._mathValueToComplex(math.evaluate(fStr, scope)); } catch { return null; }
+                if (!cVal) return null;
+                result = result.map(c => this._cMul(c, cVal));
+                continue;
+            }
+
+            let factorCoeffs = null;
+            // A power of a smaller sub-expression (e.g. (z-1)^2) - extract the cheap, low-degree
+            // base's own coefficients and raise via repeated convolution, rather than
+            // differentiating the whole exponentiated factor directly.
+            if (fNode.type === 'OperatorNode' && fNode.fn === 'pow' && fNode.args?.length === 2) {
+                const baseNode = unwrap(fNode.args[0]);
+                let expVal;
+                try { expVal = fNode.args[1].evaluate(scope); } catch { expVal = null; }
+                const k = typeof expVal === 'number' ? expVal
+                    : (expVal && typeof expVal.re === 'number' && Math.abs(expVal.im || 0) < 1e-9 ? expVal.re : null);
+                if (k != null && Number.isInteger(k) && k >= 0 && k <= 20 && varRe.test(baseNode.toString())) {
+                    const baseStr = baseNode.toString();
+                    let baseCoeffs = this._extractPolynomialCoeffs(baseStr, varName, scope, 6);
+                    if (baseCoeffs && baseCoeffs.length >= 2 && !this._matchesPolynomialApproximation(baseStr, baseCoeffs, varName, scope)) baseCoeffs = null;
+                    if (baseCoeffs) {
+                        factorCoeffs = [{ re: 1, im: 0 }];
+                        for (let i = 0; i < k; i++) factorCoeffs = this._cPolyMultiply(factorCoeffs, baseCoeffs);
+                    }
+                }
+            }
+            // Fall back to extracting this SINGLE factor's own coefficients directly - bounded to
+            // one, typically low-degree factor, so cheap even via differentiation.
+            if (!factorCoeffs) {
+                factorCoeffs = this._extractPolynomialCoeffs(fStr, varName, scope, 6);
+                if (factorCoeffs && factorCoeffs.length >= 2 && !this._matchesPolynomialApproximation(fStr, factorCoeffs, varName, scope)) factorCoeffs = null;
+            }
+            if (!factorCoeffs || factorCoeffs.length < 1) return null; // unresolvable factor
+
+            result = this._cPolyMultiply(result, factorCoeffs);
+        }
+
+        // Fold the z-independent side's value into the constant term: (lhs-rhs) is either
+        // (product - const) when the product is lhs, or (const - product) = -(product - const)
+        // when the product is rhs.
+        let constVal;
+        try { constVal = this._mathValueToComplex(math.evaluate(constExpr, scope)); } catch { return null; }
+        if (!constVal) return null;
+        let finalCoeffs;
+        if (productIsLhs) {
+            finalCoeffs = result.slice();
+            finalCoeffs[0] = this._cSub(finalCoeffs[0], constVal);
+        } else {
+            finalCoeffs = result.map(c => ({ re: -c.re, im: -c.im }));
+            finalCoeffs[0] = this._cAdd(finalCoeffs[0], constVal);
+        }
+
+        while (finalCoeffs.length > 1 && Math.hypot(finalCoeffs[finalCoeffs.length - 1].re, finalCoeffs[finalCoeffs.length - 1].im) < 1e-9) {
+            finalCoeffs.pop();
+        }
+        // Final safety net: verify the assembled polynomial actually matches the original equation.
+        const hExpr = `(${lhsExpr}) - (${rhsExpr})`;
+        if (!this._matchesPolynomialApproximation(hExpr, finalCoeffs, varName, scope)) return null;
+        return finalCoeffs;
+    }
+
     _matchesPolynomialApproximation(hExpr, coeffs, varName, scope) {
         if (!coeffs?.length) return false;
         try {
@@ -5095,6 +5225,13 @@ class Komplexiti {
     // "polynomial" and solve for its (nonexistent) extra roots.
     _extractPolynomialCoeffsSafe(expr, varName, scope) {
         if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(expr)) return null;
+        // A top-level product of 2+ factors (e.g. (z-1)^2*z^5*(z+0.5)^3) must go through the
+        // factored, convolution-based path - differentiating the whole product directly can
+        // freeze the tab even at maxDeg=6 (see _extractFactoredPolynomialCoeffs). When this IS
+        // such a product, never fall back to the slow whole-expression differentiation below,
+        // even if the factored attempt fails to resolve every factor.
+        const factored = this._extractFactoredPolynomialCoeffs(expr, '0', varName, scope);
+        if (factored !== undefined) return factored; // either a valid array, or null (unresolvable - don't retry the hang-prone path)
         let c = this._extractPolynomialCoeffs(expr, varName, scope);
         if (c && c.length >= 2 && !this._matchesPolynomialApproximation(expr, c, varName, scope)) c = null;
         if (!c || c.length < 2) {
@@ -6606,7 +6743,18 @@ class Komplexiti {
             // cascadeEvaluate re-parses every OTHER equation card on every keystroke typed anywhere.
             const hasDivision = /\//.test(hExpr);
             const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(hExpr);
-            let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffs(hExpr, varName, scope);
+            // A top-level product of 2+ factors (e.g. (z-1)^2*z^5*(z+0.5)^3) MUST go through the
+            // factored, convolution-based path - differentiating the whole product directly can
+            // freeze the tab even at maxDeg=6, since the product-rule expression tree grows
+            // roughly (factor count)^k with each derivative (verified: (z-1)^2*z^5*(z+0.5)^3 never
+            // returns within 15s+ via plain differentiation, despite containing no division at
+            // all). When it IS such a product, never fall back to the slow whole-expression
+            // differentiation below even if a factor can't be resolved - see
+            // _extractFactoredPolynomialCoeffs's return-value contract (undefined = not
+            // applicable, null = applicable but unresolvable, don't retry the hang-prone path).
+            const factoredCoeffs = isNeverPolynomial ? undefined : this._extractFactoredPolynomialCoeffs(lhs, rhs, varName, scope);
+            const isMultiFactorProduct = factoredCoeffs !== undefined;
+            let coeffs = isNeverPolynomial ? null : (isMultiFactorProduct ? factoredCoeffs : this._extractPolynomialCoeffs(hExpr, varName, scope));
             let fromRationalize = false;
             let poles = null; // denominator roots where the expression genuinely blows up
             let holes = null; // denominator roots that are also numerator roots - removable, finite limit
@@ -6614,7 +6762,7 @@ class Komplexiti {
 
             // Discard Taylor series before trying rationalization: a degree-6 series for 1/(z+1)
             // looks non-null but fails the approximation check, blocking the rational path.
-            if (coeffs && coeffs.length >= 2 && !this._matchesPolynomialApproximation(hExpr, coeffs, varName, scope)) {
+            if (coeffs && coeffs.length >= 2 && !isMultiFactorProduct && !this._matchesPolynomialApproximation(hExpr, coeffs, varName, scope)) {
                 coeffs = null;
             }
 
@@ -6624,8 +6772,9 @@ class Komplexiti {
             // differentiation approach) can effectively hang - verified NOT to return within 20s -
             // when asked to expand/simplify a product of powers of degree >= 5, even though such
             // expressions contain no division at all. Only worth retrying when there's a real
-            // chance this is a plain polynomial (no division, not sin/cos/tan/exp/log).
-            if ((!coeffs || coeffs.length < 2) && !isNeverPolynomial) {
+            // chance this is a plain polynomial (no division, not sin/cos/tan/exp/log), and never
+            // for an already-identified multi-factor product (that's exactly what can hang here).
+            if ((!coeffs || coeffs.length < 2) && !isNeverPolynomial && !isMultiFactorProduct) {
                 const higherDeg = this._extractPolynomialCoeffs(hExpr, varName, scope, 10);
                 if (higherDeg && higherDeg.length >= 2 && this._matchesPolynomialApproximation(hExpr, higherDeg, varName, scope)) {
                     coeffs = higherDeg;
