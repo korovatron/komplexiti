@@ -3737,12 +3737,106 @@ class Komplexiti {
         return null;
     }
 
+    // sum_i |z-a_i|^2 = C is always a circle: centred at the centroid of the a_i, with
+    // radius^2 = (C - sum_i |a_i-centroid|^2) / n. This is the generalisation of the classic
+    // "|z-a|^2+|z-b|^2=|a-b|^2 is the circle on diameter ab" (Thales) result to n points and
+    // an arbitrary constant C - Thales is just the special case n=2, C=|a-b|^2.
+    // Detects the shape regardless of how it's rearranged: terms can be freely moved between
+    // sides or reordered/resigned within a side (e.g. |z-a|^2=|a-b|^2-|z-b|^2), and an abs
+    // argument can be written either way round (|a-z| is the same point as |z-a|, since abs is
+    // even) - handled by flattening the whole equation (lhs minus rhs) into signed terms and
+    // requiring every abs^2 term to carry the SAME sign once brought to one side (a genuine
+    // mismatch, e.g. |z-a|^2-|z-b|^2=C, is a line not a circle, and is correctly rejected).
+    _tryBuildSumOfSquaresCircleLocus(lhs, rhs, varName, scope) {
+        const unwrap = n => { while (n && n.type === 'ParenthesisNode') n = n.content; return n; };
+        const isVarSymbol = n => { n = unwrap(n); return !!n && n.type === 'SymbolNode' && n.name === varName; };
+        const evalComplex = (exprStr) => {
+            try {
+                const c = this._mathValueToComplex(math.evaluate(exprStr, scope));
+                return (c && isFinite(c.re) && isFinite(c.im)) ? c : null;
+            } catch { return null; }
+        };
+        // The abs argument is either "z - a" (unit-coefficient offset, standard case) or,
+        // equivalently since |x|=|-x|, "a - z" (reversed subtraction order) or bare "-z" (a=0).
+        const extractAbsArgPoint = (innerExpr) => {
+            const linear = this._parseLinearVarOffset(innerExpr, varName, scope);
+            if (linear) return { re: -linear.offset.re, im: -linear.offset.im };
+            let node;
+            try { node = unwrap(math.parse(innerExpr)); } catch { return null; }
+            if (node.type === 'OperatorNode' && node.fn === 'subtract' && node.args.length === 2 && isVarSymbol(node.args[1])) {
+                return evalComplex(node.args[0].toString());
+            }
+            if (node.type === 'OperatorNode' && node.fn === 'unaryMinus' && node.args.length === 1 && isVarSymbol(node.args[0])) {
+                return { re: 0, im: 0 };
+            }
+            return null;
+        };
+        const matchAbsSquaredTerm = (node) => {
+            node = unwrap(node);
+            if (!(node.type === 'OperatorNode' && node.fn === 'pow' && node.args.length === 2)) return null;
+            const expVal = this._evaluateRealExpr(unwrap(node.args[1]).toString(), scope);
+            if (expVal === null || Math.abs(expVal - 2) > 1e-9) return null;
+            const baseNode = unwrap(node.args[0]);
+            if (!(baseNode.type === 'FunctionNode' && baseNode.fn?.name === 'abs' && baseNode.args.length === 1)) return null;
+            return extractAbsArgPoint(baseNode.args[0].toString());
+        };
+        // Splits an additive/subtractive chain into signed terms, e.g. "A-B+C" (sign +1) ->
+        // [{sign:+1,A},{sign:-1,B},{sign:+1,C}] - recurses through 'add'/'subtract'/unaryMinus
+        // so a rearrangement anywhere in the tree (not just a flat top-level chain) is caught.
+        const flattenSigned = (node, sign) => {
+            node = unwrap(node);
+            if (node.type === 'OperatorNode' && node.args.length === 2 && (node.fn === 'add' || node.fn === 'subtract')) {
+                return [...flattenSigned(node.args[0], sign), ...flattenSigned(node.args[1], node.fn === 'subtract' ? -sign : sign)];
+            }
+            if (node.type === 'OperatorNode' && node.fn === 'unaryMinus' && node.args.length === 1) {
+                return flattenSigned(node.args[0], -sign);
+            }
+            return [{ sign, node }];
+        };
+
+        let lhsNode, rhsNode;
+        try { lhsNode = math.parse(lhs); rhsNode = math.parse(rhs); } catch { return null; }
+        // Bring everything to one side: lhs - rhs = 0.
+        const signedTerms = [...flattenSigned(lhsNode, 1), ...flattenSigned(rhsNode, -1)];
+
+        const points = [];
+        let absSign = null;
+        let constantSum = 0;
+        for (const { sign, node } of signedTerms) {
+            const pt = matchAbsSquaredTerm(node);
+            if (pt) {
+                if (absSign === null) absSign = sign;
+                else if (sign !== absSign) return null; // mixed-sign abs^2 terms -> a line, not a circle
+                points.push(pt);
+                continue;
+            }
+            const constVal = this._evaluateRealExpr(node.toString(), scope);
+            if (constVal === null) return null; // some other term shape - not this pattern at all
+            constantSum += sign * constVal;
+        }
+        if (points.length < 2 || absSign === null) return null;
+
+        // absSign * sum|z-a_i|^2 + constantSum = 0  =>  sum|z-a_i|^2 = -constantSum/absSign
+        const C = -constantSum / absSign;
+        const n = points.length;
+        const centroid = points.reduce((acc, p) => ({ re: acc.re + p.re / n, im: acc.im + p.im / n }), { re: 0, im: 0 });
+        const sumSqDistToCentroid = points.reduce((acc, p) => acc + (p.re - centroid.re) ** 2 + (p.im - centroid.im) ** 2, 0);
+        const radiusSq = (C - sumSqDistToCentroid) / n;
+        if (radiusSq < -1e-9) return null;
+        return {
+            lhs, rhs, angular: false, scalar: true,
+            fastPath: { kind: 'circle', center: centroid, radius: Math.sqrt(Math.max(0, radiusSq)) }
+        };
+    }
+
     _tryBuildFastLocus(lhs, rhs, varName, scope) {
         const canonical = this._canonicaliseAffineArgEquation(lhs, rhs, varName, scope);
         if (canonical) {
             lhs = canonical.lhs;
             rhs = canonical.rhs;
         }
+        const sumOfSquares = this._tryBuildSumOfSquaresCircleLocus(lhs, rhs, varName, scope);
+        if (sumOfSquares) return sumOfSquares;
         const circleSides = [
             { absExpr: lhs, otherExpr: rhs },
             { absExpr: rhs, otherExpr: lhs }

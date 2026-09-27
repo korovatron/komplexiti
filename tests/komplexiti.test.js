@@ -376,6 +376,104 @@ describe('parseEquation - line-loci demo set', () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseEquation - sum-of-squares circle (Thales' theorem generalisation)
+// ---------------------------------------------------------------------------
+
+describe('parseEquation - |z-a|^2+|z-b|^2=|a-b|^2  (Thales circle on diameter ab)', () => {
+    const exprs = [{ id: 1, name: 'a', re: 1, im: 2 }, { id: 2, name: 'b', re: 3, im: -1 }];
+
+    test('is recognised as a circle, not a general locus', () => {
+        const result = parse('\\left|z-a\\right|^2+\\left|z-b\\right|^2=\\left|a-b\\right|^2', exprs);
+        expect(result.type).toBe('locus');
+        expect(result.locus.fastPath.kind).toBe('circle');
+    });
+
+    test('centre is the midpoint of a and b', () => {
+        const result = parse('\\left|z-a\\right|^2+\\left|z-b\\right|^2=\\left|a-b\\right|^2', exprs);
+        const fp = result.locus.fastPath;
+        expect(fp.center.re).toBeCloseTo(2);
+        expect(fp.center.im).toBeCloseTo(0.5);
+    });
+
+    test('radius is |a-b|/2 (diameter ab)', () => {
+        const result = parse('\\left|z-a\\right|^2+\\left|z-b\\right|^2=\\left|a-b\\right|^2', exprs);
+        expect(result.locus.fastPath.radius).toBeCloseTo(Math.hypot(1 - 3, 2 - (-1)) / 2);
+    });
+
+    test('sides can be swapped: |a-b|^2=|z-a|^2+|z-b|^2', () => {
+        const result = parse('\\left|a-b\\right|^2=\\left|z-a\\right|^2+\\left|z-b\\right|^2', exprs);
+        expect(result.locus.fastPath.kind).toBe('circle');
+        expect(result.locus.fastPath.center.re).toBeCloseTo(2);
+    });
+
+    test('generalises to an arbitrary constant C: |z-a|^2+|z-b|^2=10 is still a circle centred at the midpoint', () => {
+        const result = parse('\\left|z-a\\right|^2+\\left|z-b\\right|^2=10', exprs);
+        const fp = result.locus.fastPath;
+        expect(fp.kind).toBe('circle');
+        expect(fp.center.re).toBeCloseTo(2);
+        expect(fp.center.im).toBeCloseTo(0.5);
+        expect(fp.radius).toBeCloseTo(Math.sqrt(1.75));
+    });
+
+    test('a C too small for a real circle (radius^2 < 0) falls through to a general/empty locus, not a bogus circle', () => {
+        const result = parse('\\left|z-a\\right|^2+\\left|z-b\\right|^2=0', exprs);
+        expect(result.locus.fastPath).toBeUndefined();
+    });
+
+    test('generalises to 3 points: |z-a|^2+|z-b|^2+|z-c|^2=C is a circle at the centroid', () => {
+        const exprs3 = [{ id: 1, name: 'a', re: 0, im: 0 }, { id: 2, name: 'b', re: 4, im: 0 }, { id: 3, name: 'c', re: 0, im: 4 }];
+        const result = parse('\\left|z-a\\right|^2+\\left|z-b\\right|^2+\\left|z-c\\right|^2=48', exprs3);
+        const fp = result.locus.fastPath;
+        expect(fp.kind).toBe('circle');
+        expect(fp.center.re).toBeCloseTo(4 / 3);
+        expect(fp.center.im).toBeCloseTo(4 / 3);
+    });
+
+    test('plain circle |z-a|=2 is unaffected', () => {
+        const result = parse('\\left|z-a\\right|=2', exprs);
+        expect(result.locus.fastPath.kind).toBe('circle');
+        expect(result.locus.fastPath.center.re).toBeCloseTo(1);
+    });
+
+    test('perpendicular bisector |z-a|=|z-b| is unaffected', () => {
+        const result = parse('\\left|z-a\\right|=\\left|z-b\\right|', exprs);
+        expect(result.locus.fastPath.kind).toBe('line');
+        expect(result.locus.fastPath.perpBisector).toBe(true);
+    });
+
+    test('reversed abs argument: |a-z|^2+|z-b|^2=|a-b|^2 is the same circle', () => {
+        const result = parse('\\left|a-z\\right|^2+\\left|z-b\\right|^2=\\left|a-b\\right|^2', exprs);
+        expect(result.locus.fastPath.kind).toBe('circle');
+        expect(result.locus.fastPath.center.re).toBeCloseTo(2);
+        expect(result.locus.fastPath.center.im).toBeCloseTo(0.5);
+    });
+
+    test('both abs arguments reversed: |a-z|^2+|b-z|^2=|a-b|^2 is still the same circle', () => {
+        const result = parse('\\left|a-z\\right|^2+\\left|b-z\\right|^2=\\left|a-b\\right|^2', exprs);
+        expect(result.locus.fastPath.kind).toBe('circle');
+        expect(result.locus.fastPath.center.re).toBeCloseTo(2);
+    });
+
+    test('a term moved to the other side: |z-a|^2=|a-b|^2-|z-b|^2 is still the same circle', () => {
+        const result = parse('\\left|z-a\\right|^2=\\left|a-b\\right|^2-\\left|z-b\\right|^2', exprs);
+        expect(result.locus.fastPath.kind).toBe('circle');
+        expect(result.locus.fastPath.center.re).toBeCloseTo(2);
+        expect(result.locus.fastPath.radius).toBeCloseTo(Math.hypot(1 - 3, 2 - (-1)) / 2);
+    });
+
+    test('everything on one side: |z-a|^2+|z-b|^2-|a-b|^2=0 is still the same circle', () => {
+        const result = parse('\\left|z-a\\right|^2+\\left|z-b\\right|^2-\\left|a-b\\right|^2=0', exprs);
+        expect(result.locus.fastPath.kind).toBe('circle');
+        expect(result.locus.fastPath.center.re).toBeCloseTo(2);
+    });
+
+    test('mismatched signs, |z-a|^2-|z-b|^2=0, is a genuine line - NOT wrongly detected as this circle', () => {
+        const result = parse('\\left|z-a\\right|^2-\\left|z-b\\right|^2=0', exprs);
+        expect(result.locus?.fastPath?.kind).not.toBe('circle');
+    });
+});
+
+// ---------------------------------------------------------------------------
 // parseEquation - inequalities demo set
 // ---------------------------------------------------------------------------
 
