@@ -162,6 +162,8 @@ class Komplexiti {
             lastY: 0,
             dragging: false,
             viewportPanActive: false,
+            // Right-button drag-drop-a-point gesture (desktop mouse only) - see handleRightDrag*.
+            rightDrag: { active: false, re: 0, im: 0 },
             pinch: {
                 active: false,
                 initialDistance: 0,
@@ -1087,6 +1089,7 @@ class Komplexiti {
         this.drawAxisLabels();
         this.drawExpressions();
         this._drawIntersectionBadges(ctx);
+        this._drawRightDragPreview(ctx);
     }
 
     // -------------------------------------------------------------------------
@@ -1192,9 +1195,17 @@ class Komplexiti {
             if (score < bestScore) { best = s; bestScore = score; }
         }
         if (bestScore === Infinity) {
+            // Zoomed in past the smallest base (1e-6 units already spans > maxPx): use it anyway,
+            // it's the finest resolution available.
+            best = bases[0];
             for (const s of bases) {
                 if (s * pixelsPerUnit >= minPx) { best = s; break; }
             }
+            // Zoomed OUT past the largest base (5e6 units still spans < minPx on screen): fall
+            // back to that largest spacing rather than the loop's untouched initial "bases[0]" -
+            // using the smallest spacing here would make drawGrid()'s per-pixel loops iterate
+            // roughly (viewport range / 1e-6) times, freezing/crashing the tab at extreme zoom-out.
+            if (bases[bases.length - 1] * pixelsPerUnit < minPx) best = bases[bases.length - 1];
         }
         return best;
     }
@@ -1419,14 +1430,25 @@ class Komplexiti {
     initCanvasInputListeners() {
         this.canvas.addEventListener('mousedown', (e) => {
             if (this.currentState !== this.states.APP) return;
+            if (e.button === 2) {
+                e.preventDefault();
+                this.handleRightDragStart(e.clientX, e.clientY);
+                return;
+            }
             if (e.button !== 0) return;
             this.handlePointerStart(e.clientX, e.clientY);
         });
+        this.canvas.addEventListener('contextmenu', (e) => {
+            if (this.currentState !== this.states.APP) return;
+            e.preventDefault();
+        });
         document.addEventListener('mousemove', (e) => {
             if (this.currentState !== this.states.APP) return;
+            if (this.input.rightDrag.active) { this.handleRightDragMove(e.clientX, e.clientY); return; }
             this.handlePointerMove(e.clientX, e.clientY);
         });
-        document.addEventListener('mouseup', () => {
+        document.addEventListener('mouseup', (e) => {
+            if (this.input.rightDrag.active) { this.handleRightDragEnd(); return; }
             if (this.input.mouse.down) this.handlePointerEnd();
         });
         this.canvas.addEventListener('wheel', (e) => {
@@ -1600,6 +1622,107 @@ class Komplexiti {
         this.input.mouse.down        = false;
         this.input.dragging          = false;
         this.input.viewportPanActive = false;
+    }
+
+    // =========================================================================
+    // Right-click-drag: drop a snapped complex-number constant onto the canvas
+    // =========================================================================
+
+    // Rounds a world point to the nearest minor-gridline intersection - same spacing
+    // formula (labelSpacing / 5) that drawGrid() itself uses for the minor lines.
+    _snapWorldPointToGrid(worldX, worldY) {
+        const minorSpacing = this.getLabelSpacing() / 5;
+        return {
+            re: Math.round(worldX / minorSpacing) * minorSpacing,
+            im: Math.round(worldY / minorSpacing) * minorSpacing
+        };
+    }
+
+    handleRightDragStart(clientX, clientY) {
+        if (this.input.rightDrag.active) return;
+        this.stopMousePanInertia();
+        this.stopWheelZoom();
+        this.stopViewportAnimation();
+        const rect    = this.canvas.getBoundingClientRect();
+        const world   = this.screenToWorld(clientX - rect.left, clientY - rect.top);
+        const snapped = this._snapWorldPointToGrid(world.x, world.y);
+        this.input.rightDrag.active = true;
+        this.input.rightDrag.re     = snapped.re;
+        this.input.rightDrag.im     = snapped.im;
+        this.drawCanvas();
+    }
+
+    handleRightDragMove(clientX, clientY) {
+        if (!this.input.rightDrag.active) return;
+        const rect    = this.canvas.getBoundingClientRect();
+        const world   = this.screenToWorld(clientX - rect.left, clientY - rect.top);
+        const snapped = this._snapWorldPointToGrid(world.x, world.y);
+        this.input.rightDrag.re = snapped.re;
+        this.input.rightDrag.im = snapped.im;
+        this.drawCanvas();
+    }
+
+    handleRightDragEnd() {
+        if (!this.input.rightDrag.active) return;
+        const { re, im } = this.input.rightDrag;
+        this.input.rightDrag.active = false;
+        this.addPointConstant(re, im);
+        this.drawCanvas();
+    }
+
+    // Draws a ghost marker at the snapped drop point while a right-drag is in progress.
+    _drawRightDragPreview(ctx) {
+        const drag = this.input.rightDrag;
+        if (!drag.active) return;
+        const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+        const color   = isLight ? '#000000' : '#FFFFFF';
+        const sp      = this.worldToScreen(drag.re, drag.im);
+        ctx.save();
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle   = color;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)';
+        ctx.lineWidth   = 1.5;
+        ctx.stroke();
+        const label = this.formatComplexPlain(drag.re, drag.im, 'cartesian');
+        ctx.font      = '13px Arial';
+        ctx.fillStyle = color;
+        ctx.fillText(label, sp.x + 10, sp.y - 8);
+        ctx.restore();
+    }
+
+    // Returns the next free "q<n>" name (1 if none exist yet) - point constants added via
+    // right-click always use this reserved letter, kept distinct from equation/locus variables.
+    _nextPointConstantNumber() {
+        let max = 0;
+        for (const c of this.expressions) {
+            const m = /^q(\d+)$/.exec(c.name || '');
+            if (m) max = Math.max(max, parseInt(m[1], 10));
+        }
+        return max + 1;
+    }
+
+    // Adds "q<n> = <cartesian form>" as a new expression card, reusing the existing blank
+    // trailing tile if one is present (matches the convention used elsewhere in this file).
+    addPointConstant(re, im) {
+        const varName = `q${this._nextPointConstantNumber()}`;
+        const latex   = `${varName}=${this.formatCartesianLatex(re, im)}`;
+        let target = this.expressions.find(c => !c.latex || c.latex.trim() === '');
+        if (!target) {
+            this.addExpression({ skipFocus: true });
+            target = this.expressions[this.expressions.length - 1];
+        }
+        target.latex = latex;
+        const card = document.querySelector(`.expr-card[data-const-id="${target.id}"]`);
+        const mathField = card?.querySelector('math-field');
+        if (mathField) {
+            mathField.value = latex;
+            mathField.dispatchEvent(new Event('input'));
+        }
+        if (!this.expressions.some(c => !c.latex || c.latex.trim() === '')) this.addExpression({ skipFocus: true });
+        this.saveExpressions();
     }
 
     // =========================================================================
@@ -2313,13 +2436,15 @@ class Komplexiti {
             c.isUnion = false;
 
             if (assignment) {
-                const reserved = (assignment.name === 'i' || assignment.name === 'e');
+                const reserved = (assignment.name === 'i' || assignment.name === 'e' || assignment.name === 'q');
                 if (reserved) {
                     c.name = null;
                     c.re   = null;
                     c.im   = null;
                     hasError = true;
-                    c.errorMessage = `'${assignment.name}' is a reserved name`;
+                    c.errorMessage = assignment.name === 'q'
+                        ? "'q' is reserved for point constants (right-click the canvas to add one)"
+                        : `'${assignment.name}' is a reserved name`;
                 } else {
                     c.name = assignment.name; // keep name even if duplicate; _refreshDuplicateNameErrors handles it
                     const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, this.buildExpressionScope(c.id));
@@ -2365,7 +2490,9 @@ class Komplexiti {
                     hasError = true;
                     c.locus = null;
                     c._locusCache = null;
-                    c.errorMessage = 'Needs exactly one undefined variable';
+                    c.errorMessage = this._rawUsesReservedPointVariable(raw)
+                        ? "'q' is reserved for point constants (right-click the canvas to add one)"
+                        : 'Needs exactly one undefined variable';
                 }
             } else {
                 c.name = null;
@@ -2681,7 +2808,7 @@ class Komplexiti {
 
     // Returns an error string if the name is invalid, or null if it is acceptable.
     validateExpressionName(name, ownId) {
-        if (name === 'i' || name === 'e') return `'${name}' is reserved`;
+        if (name === 'i' || name === 'e' || name === 'q') return `'${name}' is reserved`;
         for (const c of this.expressions) {
             if (c.id !== ownId && c.name === name) return `'${name}' is already used`;
         }
@@ -2826,7 +2953,9 @@ class Komplexiti {
                         c.isUnion = false;
                         c._locusCache = null;
                         c.hasParseError = true;
-                        c.errorMessage = 'Needs exactly one undefined variable';
+                        c.errorMessage = this._rawUsesReservedPointVariable(raw)
+                            ? "'q' is reserved for point constants (right-click the canvas to add one)"
+                            : 'Needs exactly one undefined variable';
                     }
                 } else if (!assignment) {
                     const parsed = this.parseComplexFromLatex(raw, scope);
@@ -2981,14 +3110,25 @@ class Komplexiti {
     // =========================================================================
 
     // Returns the single free variable name in expr, or null if there are 0 or >1.
+    // 'q' is deliberately reserved (never a valid equation/locus variable) - it's the letter
+    // used exclusively for right-click-added point constants (q1, q2, ...), see addPointConstant.
     _findEquationVariable(expr, scope) {
-        const reserved = new Set(['i', 'e', 'pi', 'sqrt', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'asin', 'acos', 'atan', 'asec', 'acsc', 'acot', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'asinh', 'acosh', 'atanh', 'asech', 'acsch', 'acoth', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'gamma', 'zeta', 'Infinity', 'NaN']);
+        const reserved = new Set(['i', 'e', 'pi', 'q', 'sqrt', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'asin', 'acos', 'atan', 'asec', 'acsc', 'acot', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'asinh', 'acosh', 'atanh', 'asech', 'acsch', 'acoth', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'gamma', 'zeta', 'Infinity', 'NaN']);
         const known    = new Set(Object.keys(scope));
         const free     = new Set();
         for (const [, id] of expr.matchAll(/(?<![a-zA-Z_])([a-zA-Z][a-zA-Z0-9]*)/g)) {
             if (!reserved.has(id) && !known.has(id)) free.add(id);
         }
         return free.size === 1 ? [...free][0] : null;
+    }
+
+    // Cheap check used only to give a clearer error message than the generic "needs exactly one
+    // undefined variable" whenever that failure was actually caused by someone trying to solve
+    // for the reserved point-constant letter 'q' (e.g. "q^2=4" or "|q|=2").
+    _rawUsesReservedPointVariable(raw) {
+        const expr = this.latexToExpr(raw);
+        if (!expr) return false;
+        return /(?<![a-zA-Z0-9_])q(?![a-zA-Z0-9_])/.test(expr);
     }
 
     // Fast path for z^n = c: returns n evenly-spaced roots on the nth-root circle.

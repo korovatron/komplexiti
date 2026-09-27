@@ -805,6 +805,14 @@
             font-size: 12px;
         }
 
+        /* Home + virtual-keyboard buttons share one grid cell as a flex pair - without this,
+           their default min-width:auto (content-based) keeps them from shrinking to fit,
+           overflowing past the grid track's right edge (e.g. past the SVG/PNG export button
+           directly below them). */
+        #return-to-title, #virtual-keyboard-toggle {
+            min-width: 0;
+        }
+
         .btn-separator {
             width: 1px;
             height: 12px;
@@ -2434,6 +2442,9 @@
                             <div class="shortcut-keys">
                                 Drag with mouse/finger or <kbd>&larr;</kbd> <kbd>&rarr;</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd>
                             </div>
+                        </div>
+                        <div class="shortcut-item">
+                            <span class="shortcut-description"><strong>Add a point constant:</strong> Right-click and drag on the diagram, release to drop a snapped point (desktop mouse only)</span>
                         </div>
                         <div class="shortcut-item">
                             <span class="shortcut-description">Zoom</span>
