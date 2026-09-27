@@ -164,6 +164,9 @@ class Komplexiti {
             viewportPanActive: false,
             // Right-button drag-drop-a-point gesture (desktop mouse only) - see handleRightDrag*.
             rightDrag: { active: false, re: 0, im: 0 },
+            // Dragging an existing literal-constant marker (mouse left-button or single touch) -
+            // takes priority over panning when the gesture starts on top of a draggable marker.
+            markerDrag: { active: false, exprId: null },
             pinch: {
                 active: false,
                 initialDistance: 0,
@@ -1449,7 +1452,7 @@ class Komplexiti {
         });
         document.addEventListener('mouseup', (e) => {
             if (this.input.rightDrag.active) { this.handleRightDragEnd(); return; }
-            if (this.input.mouse.down) this.handlePointerEnd();
+            if (this.input.mouse.down || this.input.markerDrag.active) this.handlePointerEnd();
         });
         this.canvas.addEventListener('wheel', (e) => {
             if (this.currentState !== this.states.APP) return;
@@ -1500,12 +1503,16 @@ class Komplexiti {
             if (this.currentState !== this.states.APP) return;
             const rect = this.canvas.getBoundingClientRect();
             const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-            // Cursor: pointer when hovering an intersection dot or badge close button
-            const onDot   = this._locusIntersectionHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
+            // Cursor: pointer when hovering an intersection dot or badge close button, grab when
+            // hovering a draggable constant marker (unless a marker drag is already in progress).
+            const onDot    = this._locusIntersectionHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
+            const onMarker = this._constantMarkerHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.r);
             const onClose = this._intersectionBadges?.some(b => b.closeBtn &&
                 mx >= b.closeBtn.x && mx <= b.closeBtn.x + b.closeBtn.w &&
                 my >= b.closeBtn.y && my <= b.closeBtn.y + b.closeBtn.h);
-            this.canvas.style.cursor = (onDot || onClose) ? 'pointer' : '';
+            this.canvas.style.cursor = this.input.markerDrag.active ? 'grabbing'
+                : onMarker ? 'grab'
+                : (onDot || onClose) ? 'pointer' : '';
             const tooltip = document.getElementById('extrema-tooltip');
             if (!tooltip || !this._extremaHitTargets?.length) { if (tooltip) tooltip.style.display = 'none'; return; }
             const hit = this._extremaHitTargets.find(t => Math.hypot(mx - t.x, my - t.y) < t.r);
@@ -1541,6 +1548,16 @@ class Komplexiti {
         const rect = this.canvas.getBoundingClientRect();
         const cx = clientX - rect.left;
         const cy = clientY - rect.top;
+
+        // Starting on top of a draggable literal-constant marker grabs the point instead of
+        // panning the view - checked here so it covers mouse left-drag AND single-finger touch.
+        const markerHit = this._constantMarkerHits?.find(t => Math.hypot(cx - t.x, cy - t.y) < t.r);
+        if (markerHit) {
+            this.input.markerDrag.active = true;
+            this.input.markerDrag.exprId = markerHit.exprId;
+            return;
+        }
+
         this.input.mouse.down          = true;
         this.input.mouse.x             = cx;
         this.input.mouse.y             = cy;
@@ -1554,6 +1571,10 @@ class Komplexiti {
     }
 
     handlePointerMove(clientX, clientY) {
+        if (this.input.markerDrag.active) {
+            this._updateMarkerDrag(clientX, clientY);
+            return;
+        }
         if (!this.input.mouse.down) return;
         const rect   = this.canvas.getBoundingClientRect();
         const cx     = clientX - rect.left;
@@ -1588,6 +1609,11 @@ class Komplexiti {
     }
 
     handlePointerEnd() {
+        if (this.input.markerDrag.active) {
+            this.input.markerDrag.active = false;
+            this.input.markerDrag.exprId = null;
+            return;
+        }
         if (!this.input.mouse.down) return;
         const speed  = Math.hypot(this.input.mouse.velocityX, this.input.mouse.velocityY);
         const idleMs = performance.now() - this.input.mouse.lastMoveTime;
@@ -1723,6 +1749,47 @@ class Komplexiti {
         }
         if (!this.expressions.some(c => !c.latex || c.latex.trim() === '')) this.addExpression({ skipFocus: true });
         this.saveExpressions();
+    }
+
+    // Only a "literal" constant (a plain numeric value, not built from other named constants) can
+    // be dragged - e.g. "p=3-4i" or an unnamed "3-4i" qualifies, but "w=a+b" does not, since
+    // dragging it has no well-defined effect on the formula that actually defines its value.
+    _isLiteralConstant(c) {
+        if (c.type !== 'value' || c.re === null || c.im === null) return false;
+        if (!isFinite(c.re) || !isFinite(c.im)) return false;
+        const raw = (c.latex || '').trim();
+        if (!raw) return false;
+        const assignment = this.parseAssignment(raw);
+        const valuePart  = assignment ? assignment.valueLaTeX : raw;
+        const expr = this.latexToExpr(valuePart);
+        if (!expr) return false;
+        const scopeNames = new Set(Object.keys(this.buildExpressionScope(c.id)));
+        for (const [, id] of expr.matchAll(/(?<![a-zA-Z_])([a-zA-Z][a-zA-Z0-9]*)/g)) {
+            if (scopeNames.has(id)) return false;
+        }
+        return true;
+    }
+
+    // Rewrites a constant's latex to the snapped value and replays it through the SAME
+    // mathField 'input' pipeline manual typing uses - keeps every downstream step (parsing,
+    // cascadeEvaluate, card metadata, localStorage save) in sync with zero duplicated logic.
+    _setConstantValue(c, re, im) {
+        const latex = c.name ? `${c.name}=${this.formatCartesianLatex(re, im)}` : this.formatCartesianLatex(re, im);
+        const card = document.querySelector(`.expr-card[data-const-id="${c.id}"]`);
+        const mathField = card?.querySelector('math-field');
+        if (!mathField) return;
+        mathField.value = latex;
+        mathField.dispatchEvent(new Event('input'));
+    }
+
+    _updateMarkerDrag(clientX, clientY) {
+        const drag = this.input.markerDrag;
+        const c = this.expressions.find(e => e.id === drag.exprId);
+        if (!c) { drag.active = false; return; }
+        const rect    = this.canvas.getBoundingClientRect();
+        const world   = this.screenToWorld(clientX - rect.left, clientY - rect.top);
+        const snapped = this._snapWorldPointToGrid(world.x, world.y);
+        this._setConstantValue(c, snapped.re, snapped.im);
     }
 
     // =========================================================================
@@ -2437,6 +2504,7 @@ class Komplexiti {
 
             if (assignment) {
                 const reserved = (assignment.name === 'i' || assignment.name === 'e' || assignment.name === 'q');
+                const conflictCard = !reserved && this.expressions.find(other => other.id !== c.id && other.equationVar === assignment.name);
                 if (reserved) {
                     c.name = null;
                     c.re   = null;
@@ -2445,6 +2513,12 @@ class Komplexiti {
                     c.errorMessage = assignment.name === 'q'
                         ? "'q' is reserved for point constants (right-click the canvas to add one)"
                         : `'${assignment.name}' is a reserved name`;
+                } else if (conflictCard) {
+                    c.name = null;
+                    c.re   = null;
+                    c.im   = null;
+                    hasError = true;
+                    c.errorMessage = `'${assignment.name}' is already used as the variable in another equation/locus`;
                 } else {
                     c.name = assignment.name; // keep name even if duplicate; _refreshDuplicateNameErrors handles it
                     const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, this.buildExpressionScope(c.id));
@@ -2490,9 +2564,12 @@ class Komplexiti {
                     hasError = true;
                     c.locus = null;
                     c._locusCache = null;
+                    const conflictName = this._diagnoseEquationVariableConflict(raw, this.buildExpressionScope(c.id));
                     c.errorMessage = this._rawUsesReservedPointVariable(raw)
                         ? "'q' is reserved for point constants (right-click the canvas to add one)"
-                        : 'Needs exactly one undefined variable';
+                        : conflictName
+                            ? `'${conflictName}' is already used as a constant name elsewhere - rename one of them`
+                            : 'Needs exactly one undefined variable';
                 }
             } else {
                 c.name = null;
@@ -2953,9 +3030,12 @@ class Komplexiti {
                         c.isUnion = false;
                         c._locusCache = null;
                         c.hasParseError = true;
+                        const conflictName = this._diagnoseEquationVariableConflict(raw, scope);
                         c.errorMessage = this._rawUsesReservedPointVariable(raw)
                             ? "'q' is reserved for point constants (right-click the canvas to add one)"
-                            : 'Needs exactly one undefined variable';
+                            : conflictName
+                                ? `'${conflictName}' is already used as a constant name elsewhere - rename one of them`
+                                : 'Needs exactly one undefined variable';
                     }
                 } else if (!assignment) {
                     const parsed = this.parseComplexFromLatex(raw, scope);
@@ -3064,21 +3144,25 @@ class Komplexiti {
         e = e.replace(/\\[a-zA-Z]+\s*/g, '');
         e = e.trim();
         if (!e) return '';
-        // Split consecutive letters that aren't a known name into implicit products (user vars are single-letter only)
-        // Also handles variable immediately followed by function name, e.g. zconj → z*conj
+        // Split consecutive variable-name units that aren't a known function name into implicit
+        // products - a "unit" is a single letter optionally followed by digits (e.g. q1, w12),
+        // matching this app's own variable-naming convention (see parseAssignment), so this also
+        // now correctly splits e.g. "q1q2" -> "q1*q2", not just single-letter runs like "zw" -> "z*w".
+        // Also handles a variable immediately followed by a function name, e.g. zconj → z*conj.
         const knownFnNames = ['log10', 'sqrt', 'conj', 'arg', 'abs', 'gamma', 'zeta', 'asin', 'acos', 'atan', 'asinh', 'acosh', 'atanh', 'asec', 'acsc', 'acot', 'asech', 'acsch', 'acoth', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'exp', 'log', 're', 'im', 'pi', 'Infinity', 'NaN'];
-        e = e.replace(/[a-zA-Z]{2,}/g, m => {
+        const splitUnits = str => (str.match(/[a-zA-Z][0-9]*/g) || []).join('*');
+        e = e.replace(/(?:[a-zA-Z][0-9]*){2,}/g, m => {
             if (/^(sqrt|log10|log|exp|abs|gamma|zeta|conj|arg|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|re|im|pi|Infinity|NaN)$/.test(m)) return m;
             // gamma is the only name users might plausibly capitalise (mathematical convention is
             // Γ, upper-case) without realising the parser only recognises lower-case - accept either.
             if (m === 'Gamma') return 'gamma';
-            if (m.length > 5 && m.endsWith('Gamma')) return m.slice(0, m.length - 5).split('').join('*') + '*gamma';
+            if (m.length > 5 && m.endsWith('Gamma')) return splitUnits(m.slice(0, m.length - 5)) + '*gamma';
             for (const fn of knownFnNames) {
                 if (m.length > fn.length && m.endsWith(fn)) {
-                    return m.slice(0, m.length - fn.length).split('').join('*') + '*' + fn;
+                    return splitUnits(m.slice(0, m.length - fn.length)) + '*' + fn;
                 }
             }
-            return m.split('').join('*');
+            return splitUnits(m);
         });
         e = e.replace(/\bi\s*(sqrt|sin|cos|tan|csc|sec|cot|asin|acos|atan|asec|acsc|acot|sinh|cosh|tanh|csch|sech|coth|asinh|acosh|atanh|asech|acsch|acoth|log|log10|exp|conj|gamma|zeta)\s*\(/g, 'i*$1(');
         e = e.replace(/\)\s*i\b/g, ')*i');
@@ -3109,11 +3193,17 @@ class Komplexiti {
     // Equation solving
     // =========================================================================
 
+    // Function/constant names that can never themselves be an equation's free variable - shared
+    // by _findEquationVariable and _diagnoseEquationVariableConflict so they can't drift apart.
+    // 'q' is deliberately included (never a valid equation/locus variable) - it's the letter used
+    // exclusively for right-click-added point constants (q1, q2, ...), see addPointConstant.
+    _equationReservedNames() {
+        return new Set(['i', 'e', 'pi', 'q', 'sqrt', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'asin', 'acos', 'atan', 'asec', 'acsc', 'acot', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'asinh', 'acosh', 'atanh', 'asech', 'acsch', 'acoth', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'gamma', 'zeta', 'Infinity', 'NaN']);
+    }
+
     // Returns the single free variable name in expr, or null if there are 0 or >1.
-    // 'q' is deliberately reserved (never a valid equation/locus variable) - it's the letter
-    // used exclusively for right-click-added point constants (q1, q2, ...), see addPointConstant.
     _findEquationVariable(expr, scope) {
-        const reserved = new Set(['i', 'e', 'pi', 'q', 'sqrt', 'sin', 'cos', 'tan', 'csc', 'sec', 'cot', 'asin', 'acos', 'atan', 'asec', 'acsc', 'acot', 'sinh', 'cosh', 'tanh', 'csch', 'sech', 'coth', 'asinh', 'acosh', 'atanh', 'asech', 'acsch', 'acoth', 'log', 'log10', 'exp', 'abs', 'arg', 'conj', 're', 'im', 'gamma', 'zeta', 'Infinity', 'NaN']);
+        const reserved = this._equationReservedNames();
         const known    = new Set(Object.keys(scope));
         const free     = new Set();
         for (const [, id] of expr.matchAll(/(?<![a-zA-Z_])([a-zA-Z][a-zA-Z0-9]*)/g)) {
@@ -3129,6 +3219,26 @@ class Komplexiti {
         const expr = this.latexToExpr(raw);
         if (!expr) return false;
         return /(?<![a-zA-Z0-9_])q(?![a-zA-Z0-9_])/.test(expr);
+    }
+
+    // Diagnoses WHY an equation/locus failed to resolve a free variable when it's specifically
+    // because the only non-reserved identifier present is already a defined constant elsewhere
+    // (e.g. typing "p^2=1" after "p=2" already exists) - returns that name, or null if the
+    // failure has some other cause (0 identifiers, 2+ genuinely free identifiers, etc.).
+    _diagnoseEquationVariableConflict(raw, scope) {
+        const expr = this.latexToExpr(raw);
+        if (!expr) return null;
+        const reserved = this._equationReservedNames();
+        const known     = new Set(Object.keys(scope));
+        const nonReserved = new Set();
+        for (const [, id] of expr.matchAll(/(?<![a-zA-Z_])([a-zA-Z][a-zA-Z0-9]*)/g)) {
+            if (!reserved.has(id)) nonReserved.add(id);
+        }
+        if (nonReserved.size === 1) {
+            const [only] = nonReserved;
+            if (known.has(only)) return only;
+        }
+        return null;
     }
 
     // Fast path for z^n = c: returns n evenly-spaced roots on the nth-root circle.
@@ -9446,6 +9556,7 @@ class Komplexiti {
         if (!this.expressions.length) return;
         this._extremaHitTargets    = [];
         this._locusIntersectionHits = [];
+        this._constantMarkerHits   = [];
         const ctx     = this.ctx;
         const isLight = document.documentElement.getAttribute('data-theme') === 'light';
         const fSize       = this.sizeMode === 'xlarge' ? 26 : this.sizeMode === 'large' ? 22 : 18;
@@ -9926,6 +10037,10 @@ class Komplexiti {
 
             const pt  = this.worldToScreen(c.re, c.im);
             const org = this.worldToScreen(0, 0);
+
+            if (this._isLiteralConstant(c)) {
+                this._constantMarkerHits.push({ x: pt.x, y: pt.y, r: Math.max(14, dotR + 8), exprId: c.id });
+            }
 
             if (this.displayMode === 'arrow') {
                 const dx  = pt.x - org.x;
