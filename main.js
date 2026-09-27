@@ -146,7 +146,7 @@ class Komplexiti {
             '#C026D3', '#1ABC9C', '#00E5FF', '#A855F7',
             '#FF6B6B', '#4A90E2', '#FFD400', '#84CC16', '#F39C12'
         ];
-        this.displayMode = 'arrow'; // 'arrow' | 'point'
+        this.displayMode = 'point'; // 'arrow' | 'point'
         this.activeInfoExpressionId = null;
         this.infoFormat = 'cartesian';
 
