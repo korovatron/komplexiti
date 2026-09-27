@@ -7396,6 +7396,11 @@ class Komplexiti {
                 '\\arg\\left(\\frac{z-1}{z+1}\\right)=\\frac{\\pi}{4}',
                 '\\left|z^2+\\frac{1}{z^2}\\right|=2'
             ],
+            'draggable-points': [
+                'a=1-i',
+                'b=2+i',
+                '\\left|z-a\\right|=\\left|z-b\\right|'
+            ],
             'line-loci': [
                 'a=-2-2i',
                 'im\\left(z\\right)=3',
@@ -8377,6 +8382,15 @@ class Komplexiti {
     }
 
     // Colour for a metadata marker (root/pole/hole/essential-singularity/focus/centre/extremum) at
+    // Avoids drawing a redundant F1/F2 focus dot+label on top of a named constant's own marker
+    // (e.g. |z-a|=|z-b| with a/b defined elsewhere) - the constant's marker+name already conveys
+    // that point, so a coincident focus badge is pure clutter, not new information.
+    _focusMatchesNamedConstant(focus) {
+        const tol = 1e-6;
+        return this.expressions.some(c => c.enabled && c.type === 'value' && c.name &&
+            c.re !== null && c.im !== null && Math.hypot(c.re - focus.re, c.im - focus.im) < tol);
+    }
+
     // world position (x,y): the expression's own colour normally, but black/white (matching the
     // axis label convention) when THIS SPECIFIC expression has domain/phase colouring switched on -
     // otherwise those markers can be hard to see against the swirling colour layer. Other
@@ -8497,6 +8511,21 @@ class Komplexiti {
             mf.addEventListener('focus', () => mf.blur());
             mf.addEventListener('focusin', () => mf.blur());
             mf.value = latex;
+            // MathLive's own shadow stylesheet sets `.ML__content`'s overflow with !important,
+            // which (per the CSS Shadow Parts spec) always beats a host-page ::part() !important
+            // rule - so a taller-than-one-line value (e.g. a two-digit fraction like 19/10) gets
+            // its top/bottom clipped no matter what CSS is written on the light-DOM side. A
+            // directly-set inline style DOES win over that internal !important, but only via the
+            // "overflow" SHORTHAND - setting the "overflow-y" longhand alone is silently ignored
+            // (verified empirically: the inline declaration is recorded but has no visual/computed
+            // effect), and following it with any other overflow-* longhand assignment resets it
+            // right back to the shadow's own value. So this must be a single shorthand call.
+            const declamp = () => {
+                const content = mf.shadowRoot?.querySelector('.ML__content');
+                if (content) content.style.setProperty('overflow', 'visible', 'important');
+            };
+            declamp();
+            requestAnimationFrame(declamp);
             return mf;
         };
 
@@ -9825,6 +9854,7 @@ class Komplexiti {
                 if (c.showFoci !== false && fp?.focusA && fp?.focusB && (fp?.perpBisector || fp?.kind === 'apollonius')) {
                     const fDotR = Math.max(3, dotR - 1.5);
                     for (const [idx, focus] of [[1, fp.focusA], [2, fp.focusB]]) {
+                        if (this._focusMatchesNamedConstant(focus)) continue;
                         const fp2 = this.worldToScreen(focus.re, focus.im);
                         const focusColor = this._metadataColorFor(c, focus.re, focus.im);
                         ctx.save();
@@ -11219,6 +11249,7 @@ class Komplexiti {
                 if (c.showFoci !== false && fp2?.focusA && fp2?.focusB && (fp2?.perpBisector || fp2?.kind === 'apollonius')) {
                     const fDotR = Math.max(3, dotR - 1.5);
                     for (const [idx, focus] of [[1, fp2.focusA], [2, fp2.focusB]]) {
+                        if (this._focusMatchesNamedConstant(focus)) continue;
                         const fs = this.worldToScreen(focus.re, focus.im);
                         const sub = idx === 1 ? '\u2081' : '\u2082';
                         lines.push(`<circle cx="${sn(fs.x)}" cy="${sn(fs.y)}" r="${sn(fDotR)}" fill="${color}" opacity="0.75" stroke="${dotOutline}" stroke-width="1.5"/>`);
