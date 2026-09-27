@@ -8655,23 +8655,24 @@ class Komplexiti {
                 if (extremaContainer) extremaContainer.classList.add('visible');
                 if (extremaToggle) extremaToggle.classList.toggle('is-hidden', c.showExtrema === false);
                 if (extremaList) extremaList.innerHTML = '';
+                const extremaVar = c.equationVar || 'z';
                 const fmtVal = v => this.niceRealLatex(v) ?? this.formatNumberShort(v);
                 if (extrema.modMin !== null && extremaList) {
                     const rel = this._isExactReal(extrema.modMin) ? '=' : '\\approx ';
-                    extremaList.appendChild(makeMF(`|z|_{\\min}${rel}${fmtVal(extrema.modMin)}`, 15));
+                    extremaList.appendChild(makeMF(`|${extremaVar}|_{\\min}${rel}${fmtVal(extrema.modMin)}`, 15));
                 }
                 if (extrema.modMax !== null && extremaList) {
                     const rel = this._isExactReal(extrema.modMax) ? '=' : '\\approx ';
-                    extremaList.appendChild(makeMF(`|z|_{\\max}${rel}${fmtVal(extrema.modMax)}`, 15));
+                    extremaList.appendChild(makeMF(`|${extremaVar}|_{\\max}${rel}${fmtVal(extrema.modMax)}`, 15));
                 }
                 if (extrema.fullArgRange && extremaList) {
-                    extremaList.appendChild(makeMF('\\arg(z)\\in\\left(-\\pi,\\,\\pi\\right]', 15));
+                    extremaList.appendChild(makeMF(`\\arg(${extremaVar})\\in\\left(-\\pi,\\,\\pi\\right]`, 15));
                 } else if (extrema.argMin !== null && extrema.argMax !== null && extremaList) {
                     const amin = this.niceAngleLatex(extrema.argMin) ?? this.formatNumberShort(extrema.argMin);
                     const amax = this.niceAngleLatex(extrema.argMax) ?? this.formatNumberShort(extrema.argMax);
                     const apMin = this._isExactAngle(extrema.argMin) ? '' : '\\approx ';
                     const apMax = this._isExactAngle(extrema.argMax) ? '' : '\\approx ';
-                    extremaList.appendChild(makeMF(`\\arg(z)\\in\\left[${apMin}${amin},\\,${apMax}${amax}\\right]`, 15));
+                    extremaList.appendChild(makeMF(`\\arg(${extremaVar})\\in\\left[${apMin}${amin},\\,${apMax}${amax}\\right]`, 15));
                 }
             } else {
                 hideExtrema();
@@ -9678,8 +9679,9 @@ class Komplexiti {
                             ctx.restore();
                             if (tooltipText) this._extremaHitTargets.push({ x: sp.x, y: sp.y, r: markerR + 8, text: tooltipText });
                         };
-                        drawExtrema(ex.modMinPt, '|z| min', false, 'Closest point to the origin on this locus - the minimum value of |z|.');
-                        if (!near(ex.modMaxPt, ex.modMinPt)) drawExtrema(ex.modMaxPt, '|z| max', false, 'Farthest point from the origin on this locus - the maximum value of |z|.');
+                        const exVar = c.equationVar || 'z';
+                        drawExtrema(ex.modMinPt, `|${exVar}| min`, false, `Closest point to the origin on this locus - the minimum value of |${exVar}|.`);
+                        if (!near(ex.modMaxPt, ex.modMinPt)) drawExtrema(ex.modMaxPt, `|${exVar}| max`, false, `Farthest point from the origin on this locus - the maximum value of |${exVar}|.`);
                         if (!ex.fullArgRange) {
                             if (!near(ex.argMinPt, ex.modMinPt) && !near(ex.argMinPt, ex.modMaxPt))
                                 drawExtrema(ex.argMinPt, 'arg min', true, 'Tangent point from the origin - the ray from O at this angle just grazes the locus from below. All other points on this locus have a larger argument.');
@@ -11005,8 +11007,8 @@ class Komplexiti {
                             }
                             lines.push(`<text x="${sn(sp.x + markerR + 3)}" y="${sn(sp.y - markerR - 1)}" fill="${color}" font-family="Arial, sans-serif" font-size="${Math.max(8, fSize - 4)}px" dominant-baseline="auto">${label}</text>`);
                         };
-                        addEx(ex.modMinPt, '|z| min', false);
-                        if (!near(ex.modMaxPt, ex.modMinPt)) addEx(ex.modMaxPt, '|z| max', false);
+                        addEx(ex.modMinPt, `|${c.equationVar || 'z'}| min`, false);
+                        if (!near(ex.modMaxPt, ex.modMinPt)) addEx(ex.modMaxPt, `|${c.equationVar || 'z'}| max`, false);
                         if (!ex.fullArgRange) {
                             if (!near(ex.argMinPt, ex.modMinPt) && !near(ex.argMinPt, ex.modMaxPt)) addEx(ex.argMinPt, 'arg min', true);
                             if (!near(ex.argMaxPt, ex.modMinPt) && !near(ex.argMaxPt, ex.modMaxPt) && !near(ex.argMaxPt, ex.argMinPt)) addEx(ex.argMaxPt, 'arg max', true);
