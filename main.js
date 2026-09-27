@@ -4769,12 +4769,253 @@ class Komplexiti {
         return !!cc && !cc.contentDirty && this._isLocusCacheFresh(cc, vp);
     }
 
+    // Extracts EXPR (a mathjs AST node) as a bivariate polynomial in `varName` (z) and
+    // conj(varName) (z-bar): a flat list of {coeff:{re,im}, p, q} terms meaning
+    // coeff * z^p * conj(z)^q. Only +, -, *, unary minus, and non-negative integer ^ on z/conj(z)
+    // are recognised - anything else (sqrt, other functions, conj of a non-bare-z argument, a
+    // non-integer/negative exponent) returns null so the caller can fall back to marching squares.
+    _extractZConjTerms(exprNode, varName, scope) {
+        const unwrap = n => { while (n && n.type === 'ParenthesisNode') n = n.content; return n; };
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        let failed = false;
+        const terms = [];
+
+        const parseTerm = (node) => {
+            node = unwrap(node);
+            const factors = [];
+            const flattenMul = (n, negate) => {
+                n = unwrap(n);
+                if (n.type === 'OperatorNode' && n.fn === 'multiply' && n.args.length === 2) {
+                    flattenMul(n.args[0], negate);
+                    flattenMul(n.args[1], false);
+                    return;
+                }
+                if (n.type === 'OperatorNode' && n.fn === 'unaryMinus' && n.args.length === 1) {
+                    flattenMul(n.args[0], !negate);
+                    return;
+                }
+                factors.push({ negate, node: n });
+            };
+            flattenMul(node, false);
+
+            let coeff = { re: 1, im: 0 };
+            let p = 0, q = 0;
+            for (const f of factors) {
+                const fn = unwrap(f.node);
+                let localP = 0, localQ = 0, isVar = false;
+                if (fn.type === 'SymbolNode' && fn.name === varName) {
+                    localP = 1; isVar = true;
+                } else if (fn.type === 'FunctionNode' && fn.fn.name === 'conj' && fn.args.length === 1) {
+                    const inner = unwrap(fn.args[0]);
+                    if (inner.type === 'SymbolNode' && inner.name === varName) { localQ = 1; isVar = true; }
+                    else return null;
+                } else if (fn.type === 'OperatorNode' && fn.fn === 'pow' && fn.args.length === 2) {
+                    const base = unwrap(fn.args[0]);
+                    let expVal;
+                    try { expVal = math.evaluate(fn.args[1].toString(), scope); } catch { return null; }
+                    if (typeof expVal !== 'number' || !Number.isInteger(expVal) || expVal < 0) return null;
+                    if (base.type === 'SymbolNode' && base.name === varName) { localP = expVal; isVar = true; }
+                    else if (base.type === 'FunctionNode' && base.fn.name === 'conj' && base.args.length === 1) {
+                        const inner = unwrap(base.args[0]);
+                        if (inner.type === 'SymbolNode' && inner.name === varName) { localQ = expVal; isVar = true; }
+                        else return null;
+                    } else return null;
+                }
+                if (isVar) {
+                    p += localP; q += localQ;
+                    if (f.negate) coeff = { re: -coeff.re, im: -coeff.im };
+                } else {
+                    const str = fn.toString();
+                    if (varRe.test(str)) return null; // z appears in an unsupported shape
+                    let cVal;
+                    try { cVal = math.evaluate(str, scope); } catch { return null; }
+                    const c = this._mathValueToComplex(cVal);
+                    if (!c) return null;
+                    coeff = this._cMul(coeff, f.negate ? { re: -c.re, im: -c.im } : c);
+                }
+            }
+            return { coeff, p, q };
+        };
+
+        const flattenAdd = (node, sign) => {
+            node = unwrap(node);
+            if (node.type === 'OperatorNode' && node.fn === 'add' && node.args.length === 2) {
+                flattenAdd(node.args[0], sign);
+                flattenAdd(node.args[1], sign);
+                return;
+            }
+            if (node.type === 'OperatorNode' && node.fn === 'subtract' && node.args.length === 2) {
+                flattenAdd(node.args[0], sign);
+                flattenAdd(node.args[1], -sign);
+                return;
+            }
+            if (node.type === 'OperatorNode' && node.fn === 'unaryMinus' && node.args.length === 1) {
+                flattenAdd(node.args[0], -sign);
+                return;
+            }
+            const parsed = parseTerm(node);
+            if (parsed === null) { failed = true; return; }
+            terms.push({ coeff: this._cMul({ re: sign, im: 0 }, parsed.coeff), p: parsed.p, q: parsed.q });
+        };
+
+        flattenAdd(exprNode, 1);
+        return failed ? null : terms;
+    }
+
+    // Exact, fast alternative to the marching-squares raster for |EXPR|=K (EXPR a polynomial in
+    // z and conj(z), K a nonnegative real constant). Substituting z=r*e^{i*theta} turns |EXPR|=K
+    // into a genuine real polynomial equation in r for each fixed theta (each z^p*conj(z)^q term
+    // contributes r^(p+q)*e^{i(p-q)*theta}), solvable exactly via the existing polynomial
+    // root-finder - far faster and pixel-exact compared to sampling a 2D grid. Returns null
+    // (caller falls back to the raster tracer unchanged) for anything that isn't this exact
+    // shape, or where the closed-form result doesn't check out against the original equation.
+    _tryPolarPolynomialAbsLocus(locus, varName, ownId) {
+        const scope = this.buildExpressionScope(ownId);
+        const unwrap = n => { while (n && n.type === 'ParenthesisNode') n = n.content; return n; };
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        const matchSide = (absSide, constSide) => {
+            let node;
+            try { node = math.parse(absSide); } catch { return null; }
+            node = unwrap(node);
+            if (node.type !== 'FunctionNode' || node.fn.name !== 'abs' || node.args.length !== 1) return null;
+            if (varRe.test(constSide)) return null;
+            let kVal;
+            try { kVal = math.evaluate(constSide, scope); } catch { return null; }
+            const K = this._mathValueToComplex(kVal);
+            if (!K || Math.abs(K.im) > 1e-9 || K.re <= 1e-12) return null;
+            return { exprNode: node.args[0], K: K.re };
+        };
+        const match = matchSide(locus.lhs, locus.rhs) || matchSide(locus.rhs, locus.lhs);
+        if (!match) return null;
+
+        const terms = this._extractZConjTerms(match.exprNode, varName, scope);
+        if (!terms || !terms.length) return null;
+        const maxK = Math.max(...terms.map(t => t.p + t.q));
+        if (maxK < 1) return null; // no z-dependence at all - not a curve
+
+        // Group terms by k=p+q; each keeps its own delta=p-q for the theta-dependent phase.
+        const groups = new Map();
+        for (const t of terms) {
+            const k = t.p + t.q;
+            if (!groups.has(k)) groups.set(k, []);
+            groups.get(k).push({ coeff: t.coeff, delta: t.p - t.q });
+        }
+
+        const kSq = match.K * match.K;
+        const steps = 720;
+        let rScaleSeen = 0;
+
+        const rootsAtTheta = (theta) => {
+            const ReC = new Array(maxK + 1).fill(0);
+            const ImC = new Array(maxK + 1).fill(0);
+            for (const [k, entries] of groups) {
+                let re = 0, im = 0;
+                for (const e of entries) {
+                    const c = Math.cos(e.delta * theta), s = Math.sin(e.delta * theta);
+                    re += e.coeff.re * c - e.coeff.im * s;
+                    im += e.coeff.re * s + e.coeff.im * c;
+                }
+                ReC[k] = re; ImC[k] = im;
+            }
+            const ReArr = ReC.map(v => ({ re: v, im: 0 }));
+            const ImArr = ImC.map(v => ({ re: v, im: 0 }));
+            const D1 = this._cPolyMultiply(ReArr, ReArr);
+            const D2 = this._cPolyMultiply(ImArr, ImArr);
+            const D  = D1.map((c, i) => this._cAdd(c, D2[i]));
+            D[0] = { re: D[0].re - kSq, im: D[0].im };
+            // Trim near-zero leading coefficients (the top-degree term's phase can cancel out
+            // exactly at specific angles, genuinely lowering the polynomial's degree there).
+            const maxAbsD = Math.max(...D.map(c => Math.hypot(c.re, c.im)), 1e-12);
+            let Dtrim = D;
+            while (Dtrim.length > 1 && Math.hypot(Dtrim[Dtrim.length - 1].re, Dtrim[Dtrim.length - 1].im) < 1e-9 * maxAbsD) {
+                Dtrim = Dtrim.slice(0, -1);
+            }
+            if (Dtrim.length < 2) return [];
+            let roots;
+            try { roots = this._solvePolynomial(Dtrim); } catch { return null; }
+            const rs = [];
+            for (const r of roots) {
+                if (!Number.isFinite(r.re) || !Number.isFinite(r.im)) continue;
+                const mag = Math.max(1, Math.abs(r.re));
+                if (Math.abs(r.im) > 1e-6 * mag) continue; // not (numerically) real
+                if (r.re < -1e-6) continue;
+                const rv = Math.max(0, r.re);
+                rs.push(rv);
+                if (rv > rScaleSeen) rScaleSeen = rv;
+            }
+            rs.sort((a, b) => a - b);
+            return rs;
+        };
+
+        const thetas = Array.from({ length: steps }, (_, i) => 2 * Math.PI * i / steps);
+        const rootsPerTheta = thetas.map(rootsAtTheta);
+        if (rootsPerTheta.some(rs => rs === null)) return null;
+        if (!rootsPerTheta.some(rs => rs.length)) return []; // confidently no curve
+
+        const pointsPerTheta = rootsPerTheta.map((rs, i) => {
+            const theta = thetas[i];
+            return rs.map(r => ({ x: r * Math.cos(theta), y: r * Math.sin(theta) }));
+        });
+
+        // Stitch each angle's roots to the nearest root at the next angle (wrapping at 2*pi) -
+        // _stitchSegmentsToChains (used at draw time) reassembles these 2-point segments into
+        // polylines by matching shared endpoint coordinates, so no explicit chain-building or
+        // wraparound handling is needed here beyond emitting the right pairs.
+        const rScale = Math.max(1e-6, rScaleSeen);
+        const maxJump = Math.max(0.05, rScale * 0.15);
+        const segments = [];
+        for (let i = 0; i < steps; i++) {
+            const j = (i + 1) % steps;
+            const rsA = rootsPerTheta[i], ptsA = pointsPerTheta[i];
+            const rsB = rootsPerTheta[j], ptsB = pointsPerTheta[j];
+            const usedB = new Array(rsB.length).fill(false);
+            for (let a = 0; a < rsA.length; a++) {
+                let bestB = -1, bestD = Infinity;
+                for (let b = 0; b < rsB.length; b++) {
+                    if (usedB[b]) continue;
+                    const d = Math.abs(rsA[a] - rsB[b]);
+                    if (d < bestD) { bestD = d; bestB = b; }
+                }
+                if (bestB !== -1 && bestD < maxJump) {
+                    usedB[bestB] = true;
+                    segments.push([ptsA[a], ptsB[bestB]]);
+                }
+            }
+        }
+        if (!segments.length) return null;
+
+        // Safety net: verify a sample of the generated points against the ORIGINAL equation - if
+        // the closed-form derivation has any subtle bug, fall back rather than draw a wrong curve.
+        let lhsNode, rhsNode;
+        try { lhsNode = math.parse(locus.lhs); rhsNode = math.parse(locus.rhs); } catch { return null; }
+        let checked = 0, ok = 0;
+        const stride = Math.max(1, Math.floor(segments.length / 20));
+        for (let i = 0; i < segments.length; i += stride) {
+            const pt = segments[i][0];
+            try {
+                const evalScope = { ...scope, [varName]: math.complex(pt.x, pt.y) };
+                const diff = this._equationDifferenceMagnitude(lhsNode.evaluate(evalScope), rhsNode.evaluate(evalScope));
+                checked++;
+                if (diff < 1e-3 * Math.max(1, match.K)) ok++;
+            } catch { checked++; }
+        }
+        if (checked === 0 || ok / checked < 0.9) return null;
+
+        return segments;
+    }
+
     _traceLocusSegments(locus, varName, ownId) {
         if (!locus || typeof math === 'undefined') return [];
         // A non-scalar equation confirmed to have no roots has no curve either (see
         // _resolveNonScalarEquation) - tracing it anyway would draw a spurious contour through
         // points where |h| merely dips small without ever truly reaching zero.
         if (locus.confirmedEmpty) return [];
+        // Try the exact polar-sweep tracer first for |polynomial in z, conj(z)|=const shapes -
+        // falls through unchanged to the raster tracer below for anything it can't handle.
+        if (locus.scalar && !locus.angular && !locus.inequality) {
+            const polar = this._tryPolarPolynomialAbsLocus(locus, varName, ownId);
+            if (polar) return polar;
+        }
         const { minX, maxX, minY, maxY } = this._paddedLocusBounds();
         const spanX = maxX - minX;
         const spanY = maxY - minY;
