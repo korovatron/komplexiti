@@ -1612,6 +1612,14 @@ class Komplexiti {
         if (this.input.markerDrag.active) {
             this.input.markerDrag.active = false;
             this.input.markerDrag.exprId = null;
+            // Domain colouring isn't kept live during the drag itself (too expensive per-frame,
+            // same reasoning as pan/zoom's own debounced retrace) - force one full rebuild now
+            // the point has settled, so the colour layer reflects its final value.
+            if (this.colorModeExpressionId !== null) {
+                this._colorLayerCache = null;
+                this._hiResColorLayer = null;
+                if (this.currentState === this.states.APP) this.drawCanvas();
+            }
             return;
         }
         if (!this.input.mouse.down) return;
