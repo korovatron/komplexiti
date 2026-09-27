@@ -10157,22 +10157,34 @@ class Komplexiti {
                         }
                     }
                 } else {
-                    const vp = this.viewport;
-                    const cached = c._locusCache;
-                    if (this._isLocusCacheUsable(cached, vp)) {
-                        segments = cached.segments;
-                    } else if (cached) {
-                        segments = cached.segments; // stale (pan/zoom or content change); retrace deferred
-                        this._scheduleLocusRetrace();
+                    // Loci solvable by the exact polar-sweep tracer are cheap enough (~10ms) to
+                    // recompute live on EVERY draw, like a fastPath geometric shape - no
+                    // staleness/debounce needed, so e.g. dragging a dependent point stays fully
+                    // live instead of showing the pre-drag curve until the debounce settles.
+                    const polarSegments = (c.locus.scalar && !c.locus.angular && !c.locus.inequality)
+                        ? this._tryPolarPolynomialAbsLocus(c.locus, c.equationVar, c.id)
+                        : null;
+                    if (polarSegments) {
+                        segments = polarSegments;
+                        c._locusCache = { segments, shadeGrid: null, ...this._paddedLocusBounds() };
                     } else {
-                        segments = this._traceLocusSegments(c.locus, c.equationVar, c.id);
-                        const shadeGrid = c.locus.inequality
-                            ? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id)
-                            : null;
-                        c._locusCache = { segments, shadeGrid, ...this._paddedLocusBounds() };
-                        // Cache just built for the first time: refresh card metadata so extrema appear
-                        clearTimeout(this._metadataRefreshTimer);
-                        this._metadataRefreshTimer = setTimeout(() => this.updateAllCardMetadata(), 0);
+                        const vp = this.viewport;
+                        const cached = c._locusCache;
+                        if (this._isLocusCacheUsable(cached, vp)) {
+                            segments = cached.segments;
+                        } else if (cached) {
+                            segments = cached.segments; // stale (pan/zoom or content change); retrace deferred
+                            this._scheduleLocusRetrace();
+                        } else {
+                            segments = this._traceLocusSegments(c.locus, c.equationVar, c.id);
+                            const shadeGrid = c.locus.inequality
+                                ? this._buildLocusShadeGrid(c.locus, c.equationVar, c.id)
+                                : null;
+                            c._locusCache = { segments, shadeGrid, ...this._paddedLocusBounds() };
+                            // Cache just built for the first time: refresh card metadata so extrema appear
+                            clearTimeout(this._metadataRefreshTimer);
+                            this._metadataRefreshTimer = setTimeout(() => this.updateAllCardMetadata(), 0);
+                        }
                     }
                 }
                 // Draw shading before the boundary so the curve renders on top
