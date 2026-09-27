@@ -4964,11 +4964,20 @@ class Komplexiti {
         const rScale = Math.max(1e-6, rScaleSeen);
         const maxJump = Math.max(0.05, rScale * 0.15);
         const segments = [];
-        for (let i = 0; i < steps; i++) {
-            const j = (i + 1) % steps;
-            const rsA = rootsPerTheta[i], ptsA = pointsPerTheta[i];
-            const rsB = rootsPerTheta[j], ptsB = pointsPerTheta[j];
+        // Where the curve runs nearly PARALLEL to the polar ray (dr/d-theta very large - e.g. a
+        // near-vertical tangent in polar terms, or two branches merging/splitting), the FIXED
+        // angle grid can land two adjacent samples with a mismatched root count or a jump bigger
+        // than maxJump, even though the true curve is perfectly continuous there - naive 1:1
+        // nearest-neighbour matching would then wrongly leave a gap. Recursively bisect any
+        // interval with an unmatched root on EITHER side (re-solving the exact polynomial at the
+        // midpoint angle, which is cheap) until it resolves cleanly or a depth cap is hit -
+        // adaptive refinement only where actually needed, rather than raising the base angular
+        // resolution (steps) globally just to shrink (not eliminate) the same gaps.
+        const MAX_REFINE_DEPTH = 14;
+        const connectInterval = (thetaA, thetaB, rsA, ptsA, rsB, ptsB, depth) => {
             const usedB = new Array(rsB.length).fill(false);
+            const matches = [];
+            let unmatchedA = false;
             for (let a = 0; a < rsA.length; a++) {
                 let bestB = -1, bestD = Infinity;
                 for (let b = 0; b < rsB.length; b++) {
@@ -4978,9 +4987,30 @@ class Komplexiti {
                 }
                 if (bestB !== -1 && bestD < maxJump) {
                     usedB[bestB] = true;
-                    segments.push([ptsA[a], ptsB[bestB]]);
+                    matches.push([a, bestB]);
+                } else {
+                    unmatchedA = true;
                 }
             }
+            const unmatchedB = usedB.some(u => !u);
+            if (depth > 0 && (unmatchedA || unmatchedB)) {
+                const midTheta = (thetaA + thetaB) / 2;
+                const midRoots = rootsAtTheta(midTheta);
+                if (midRoots && midRoots.length) {
+                    const midPts = midRoots.map(r => ({ x: r * Math.cos(midTheta), y: r * Math.sin(midTheta) }));
+                    connectInterval(thetaA, midTheta, rsA, ptsA, midRoots, midPts, depth - 1);
+                    connectInterval(midTheta, thetaB, midRoots, midPts, rsB, ptsB, depth - 1);
+                    return;
+                }
+            }
+            for (const [a, b] of matches) segments.push([ptsA[a], ptsB[b]]);
+        };
+        for (let i = 0; i < steps; i++) {
+            const j = (i + 1) % steps;
+            // Wraparound (last angle -> first) needs a CONTINUOUS theta value for correct
+            // midpoint bisection, not the raw thetas[0]=0 (which would bisect the wrong way).
+            const thetaB = (j === 0) ? thetas[i] + (2 * Math.PI / steps) : thetas[j];
+            connectInterval(thetas[i], thetaB, rootsPerTheta[i], pointsPerTheta[i], rootsPerTheta[j], pointsPerTheta[j], MAX_REFINE_DEPTH);
         }
         if (!segments.length) return null;
 
