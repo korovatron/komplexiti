@@ -2976,7 +2976,18 @@ class Komplexiti {
                     // OTHER equation card on every keystroke typed into ANY card, across multiple
                     // passes, so cache the result per-card and skip re-parsing when neither the
                     // raw latex nor the (small) scope of named constants it depends on has changed.
-                    const scopeKey = Object.keys(scope).sort().map(k => `${k}:${scope[k].re},${scope[k].im}`).join('|');
+                    // IMPORTANT: `scope` contains EVERY named constant in the whole app, not just
+                    // ones this card's raw latex actually references - so the scopeKey must only
+                    // be built from the subset of names that actually appear in `raw` (whole-token
+                    // match). Otherwise adding/editing an UNRELATED constant elsewhere (e.g.
+                    // right-click-dropping a new q-point) changes `scope`'s key set for every other
+                    // card, busts this cache for cards that never used that constant, and - via
+                    // `c.locus !== eq.locus` further below - forces a full marching-squares
+                    // re-trace of that card's locus on the next draw even though nothing about its
+                    // curve actually changed (visible as a multi-second stall right after adding a
+                    // point, with no viewport change to justify it).
+                    const relevantNames = Object.keys(scope).filter(k => new RegExp(`(?<![a-zA-Z0-9_])${k}(?![a-zA-Z0-9_])`).test(raw));
+                    const scopeKey = relevantNames.sort().map(k => `${k}:${scope[k].re},${scope[k].im}`).join('|');
                     let eq;
                     if (c._eqCacheRaw === raw && c._eqCacheScopeKey === scopeKey) {
                         eq = c._eqCacheResult;
@@ -3004,7 +3015,14 @@ class Komplexiti {
                         c.equationVar = eq.variable;
                         c.equationLhs = eq.lhs ?? null;
                         c.equationRhs = eq.rhs ?? null;
-                        if (c.locus !== eq.locus) c._locusCache = null;
+                        // Content genuinely changed (e.g. a dependent constant was dragged) - keep the
+                        // OLD segments/shadeGrid around (tagged contentDirty) so the curve can still be
+                        // drawn immediately this frame; the actual retrace is debounced (see
+                        // _scheduleLocusRetrace/_isLocusCacheUsable), matching the pan/zoom staleness
+                        // pattern, instead of blocking every single mousemove on a full re-trace.
+                        if (c.locus !== eq.locus) {
+                            if (c._locusCache) c._locusCache = { ...c._locusCache, contentDirty: true };
+                        }
                         c.locus = eq.locus ?? null;
                         c.hasParseError = false;
                         c.errorMessage = '';
@@ -4564,7 +4582,7 @@ class Komplexiti {
                     }
                 }
                 if (c.type !== 'locus' || !c.locus || !c.equationVar) continue;
-                if (this._isLocusCacheFresh(c._locusCache, vp)) continue;
+                if (this._isLocusCacheUsable(c._locusCache, vp)) continue;
                 if (c.locus.fastPath) {
                     // Fast-path loci need a shade grid rebuild only (segments come from geometry)
                     if (!c.locus.inequality) continue;
@@ -4741,6 +4759,14 @@ class Komplexiti {
         const cSpanX = cc.maxX - cc.minX, cSpanY = cc.maxY - cc.minY;
         const maxZoomIn = 3; // viewport may shrink to at most 1/3 of the cached rectangle's span
         return cSpanX <= vSpanX * maxZoomIn && cSpanY <= vSpanY * maxZoomIn;
+    }
+
+    // Like _isLocusCacheFresh, but also rejects a cache whose underlying equation content has
+    // changed since it was traced (see the `contentDirty` flag set in cascadeEvaluate) - e.g. a
+    // dependent constant was dragged to a new value. The stale segments are still fine to DRAW
+    // (via _isLocusCacheFresh-only fallbacks elsewhere) while an actual retrace is debounced.
+    _isLocusCacheUsable(cc, vp) {
+        return !!cc && !cc.contentDirty && this._isLocusCacheFresh(cc, vp);
     }
 
     _traceLocusSegments(locus, varName, ownId) {
@@ -5353,8 +5379,9 @@ class Komplexiti {
                     // per-expression loop builds it with segments without interference.
                     if (c._locusCache) c._locusCache = { ...c._locusCache, shadeGrid: sg };
                 } else {
-                    // Stale cache: use the existing grid this frame, rebuild after panning settles
-                    if (!this._isLocusCacheFresh(c._locusCache, this.viewport)) {
+                    // Stale cache (pan/zoom or content change): use the existing grid this frame,
+                    // rebuild once settled/debounced.
+                    if (!this._isLocusCacheUsable(c._locusCache, this.viewport)) {
                         this._scheduleLocusRetrace();
                     }
                 }
@@ -9878,7 +9905,7 @@ class Komplexiti {
                         if (fpKind !== 'circle' && fpKind !== 'apollonius' && fpKind !== 'ray' && fpKind !== 'line' && fpKind !== 'inscribed-arc') {
                             const vp = this.viewport;
                             const cached = c._locusCache;
-                            if (!this._isLocusCacheFresh(cached, vp)) {
+                            if (!this._isLocusCacheUsable(cached, vp)) {
                                 if (!cached) {
                                     const shadeGrid = this._buildLocusShadeGrid(c.locus, c.equationVar, c.id);
                                     c._locusCache = { segments: null, shadeGrid, ...this._paddedLocusBounds() };
@@ -9891,10 +9918,10 @@ class Komplexiti {
                 } else {
                     const vp = this.viewport;
                     const cached = c._locusCache;
-                    if (this._isLocusCacheFresh(cached, vp)) {
+                    if (this._isLocusCacheUsable(cached, vp)) {
                         segments = cached.segments;
                     } else if (cached) {
-                        segments = cached.segments; // stale during pan/zoom; retrace deferred
+                        segments = cached.segments; // stale (pan/zoom or content change); retrace deferred
                         this._scheduleLocusRetrace();
                     } else {
                         segments = this._traceLocusSegments(c.locus, c.equationVar, c.id);
