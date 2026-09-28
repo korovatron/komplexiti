@@ -2590,6 +2590,21 @@ class Komplexiti {
 
             c.hasParseError = hasError;
             this.cascadeEvaluate(c.id);
+            // This card's own plain-value parse can depend on another card's name becoming valid
+            // as a side effect of cascadeEvaluate (e.g. it just resolved a naming conflict that
+            // was blocking that other card's assignment) - cascadeEvaluate never re-processes the
+            // triggering card itself, so if this card is a plain value expression that just
+            // failed, retry it once against the now-updated scope before giving up.
+            const isEquationShaped = raw.includes('=') || /[<>]/.test(raw) || /\\leq|\\geq|\\le(?![a-zA-Z])|\\ge(?![a-zA-Z])|\\lt(?![a-zA-Z])|\\gt(?![a-zA-Z])/.test(raw);
+            if (hasError && !assignment && !isEquationShaped) {
+                const retryParsed = this.parseComplexFromLatex(raw, this.buildExpressionScope(c.id));
+                if (retryParsed !== null) {
+                    c.re = retryParsed.re;
+                    c.im = retryParsed.im;
+                    c.hasParseError = false;
+                    c.errorMessage = '';
+                }
+            }
             this._refreshDuplicateNameErrors();
             this.updateAllCardMetadata();
             this.saveExpressions();
@@ -2970,6 +2985,32 @@ class Komplexiti {
                     c.im = parsed !== null ? parsed.im : null;
                     c.hasParseError = parsed === null;
                     c.errorMessage  = parsed === null ? 'Cannot evaluate expression' : '';
+                } else if (assignment && c.name === null) {
+                    // This card's own name assignment was previously rejected (reserved name, or
+                    // a name conflict with another card's equation/locus variable) - the conflict
+                    // may have since been resolved elsewhere (e.g. the other card no longer uses
+                    // this name as its equation variable), so retry acceptance here. Without this,
+                    // a rejected assignment card is never re-processed by cascadeEvaluate at all
+                    // (it matches none of the other branches), leaving it permanently stuck in its
+                    // rejected state even once the actual conflict disappears.
+                    const reserved = (assignment.name === 'i' || assignment.name === 'e' || assignment.name === 'q');
+                    const conflictCard = !reserved && this.expressions.find(other => other.id !== c.id && other.equationVar === assignment.name);
+                    if (reserved) {
+                        c.hasParseError = true;
+                        c.errorMessage = assignment.name === 'q'
+                            ? "'q' is reserved for point constants (right-click the canvas to add one)"
+                            : `'${assignment.name}' is a reserved name`;
+                    } else if (conflictCard) {
+                        c.hasParseError = true;
+                        c.errorMessage = `'${assignment.name}' is already used as the variable in another equation/locus`;
+                    } else {
+                        c.name = assignment.name;
+                        const parsed = this.parseComplexFromLatex(assignment.valueLaTeX, scope);
+                        c.re = parsed !== null ? parsed.re : null;
+                        c.im = parsed !== null ? parsed.im : null;
+                        c.hasParseError = parsed === null;
+                        c.errorMessage  = parsed === null ? 'Cannot evaluate expression' : '';
+                    }
                 } else if (!assignment && (raw.includes('=') || /[<>]/.test(raw) || /\\leq|\\geq|\\le(?![a-zA-Z])|\\ge(?![a-zA-Z])|\\lt(?![a-zA-Z])|\\gt(?![a-zA-Z])/.test(raw))) {
                     // parseEquation can be expensive (several closed-form solver attempts, each
                     // doing AST scans/symbolic derivatives) - cascadeEvaluate re-runs it for every
