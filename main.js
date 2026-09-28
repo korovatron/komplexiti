@@ -2391,7 +2391,7 @@ class Komplexiti {
                 </div>
                 <div class="shape-info-value"></div>
                 <div class="root-format-dropdown">
-                    <button type="button" class="root-format-trigger" title="Root format" tabindex="-1">
+                    <button type="button" class="root-format-trigger" title="Display format" tabindex="-1">
                         <span class="root-format-trigger-label">Cartesian</span>
                         <svg class="root-format-trigger-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
@@ -8880,6 +8880,7 @@ class Komplexiti {
         const formatLabel    = container.querySelector('.root-format-trigger-label');
         const formatItems    = container.querySelectorAll('.root-format-menu-item');
         formatDropdown.style.display = 'none';
+        container.classList.remove('has-format-dropdown');
         const rootsEl = container.querySelector('.expr-card-roots');
         const fociContainer = card.querySelector('.foci-info-container');
         const fociList      = card.querySelector('.foci-equation-list');
@@ -9082,7 +9083,7 @@ class Komplexiti {
             }
         };
 
-        // Builds the "Root Format" dropdown + roots list - shared by the plain 'equation' type
+        // Builds the "Roots" badge + format dropdown + roots list - shared by the plain 'equation' type
         // and a mixed 'compound-locus' union (e.g. (|z|-2)(sin(z)-1)=0) whose non-curve factor(s)
         // resolved to isolated roots rather than a locus.
         const renderEquationRootsUI = () => {
@@ -9091,10 +9092,11 @@ class Komplexiti {
             renderPolesHoles();
             const fmt = c.cardRootFmt || 'cartesian';
             const fmtNames = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
-            badge.textContent     = 'Root Format';
+            badge.textContent     = 'Roots';
             badge.title           = '';
             valueEl.style.display = 'none';
             formatDropdown.style.display = 'inline-flex';
+            container.classList.add('has-format-dropdown');
             formatLabel.textContent = fmtNames[fmt];
             formatItems.forEach(i => i.classList.toggle('is-active', i.dataset.value === fmt));
             rootsEl.style.display = 'flex';
@@ -9284,7 +9286,7 @@ class Komplexiti {
                 const locusRow = document.createElement('div');
                 locusRow.className = 'union-locus-row';
                 // flex:0 0 100% forces this whole row onto its own line within the container's
-                // row-wrap layout, so the Root Format badge+dropdown row that follows starts fresh
+                // row-wrap layout, so the Roots badge+dropdown row that follows starts fresh
                 // on the next line rather than wrapping alongside it.
                 locusRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex:0 0 100%;';
                 const locusTitleRow = document.createElement('div');
@@ -9402,12 +9404,22 @@ class Komplexiti {
         } else if (c.type === 'value' && c.re !== null && c.im !== null) {
             hideFoci(); hideCentre(); hideExtrema(); hidePoles(); hideHoles(); hideEssential();
             container.classList.remove('is-equation');
-            badge.textContent      = 'Constant';
-            valueEl.style.display  = '';
             const tol = 1e-9;
-            valueEl.textContent = Math.abs(c.im) < tol ? 'real' : Math.abs(c.re) < tol ? 'imaginary' : 'complex';
+            badge.textContent      = Math.abs(c.im) < tol ? 'Real Const' : Math.abs(c.re) < tol ? 'Imag Const' : 'Complex Const';
+            valueEl.style.display  = 'none';
+
+            // Format dropdown (Cartesian/Exponential/Trig) - same control/field as an equation
+            // card's "Roots", reused here so a constant's value can be viewed in whichever
+            // form is being taught, alongside its modulus/argument.
+            const fmt = c.cardRootFmt || 'cartesian';
+            const fmtNames = { cartesian: 'Cartesian', exponential: 'Exponential', trig: 'Trig' };
+            formatDropdown.style.display = 'inline-flex';
+            container.classList.add('has-format-dropdown');
+            formatLabel.textContent = fmtNames[fmt];
+            formatItems.forEach(i => i.classList.toggle('is-active', i.dataset.value === fmt));
+
             // Modulus and argument as badge+value rows
-            const sym   = c.name || 'z';
+            const sym   = c.name;
             const r     = Math.hypot(c.re, c.im);
             const theta = Math.atan2(c.im, c.re);
             const rLatex  = this.niceRealLatex(r)     ?? this.formatNumberShort(r);
@@ -9433,6 +9445,26 @@ class Komplexiti {
                 return row;
             };
             rootsEl.innerHTML = '';
+
+            // The value itself, rendered in the selected form (e.g. "a=3-4i", "a=5e^{-0.927i}",
+            // or the two-line cos/sin split for trig) - ties the Modulus/Argument numbers below
+            // into the single equation they came from.
+            const prefix = sym ? `${sym}=` : '';
+            const valueWrapper = document.createElement('div');
+            valueWrapper.style.cssText = 'display:flex;flex-direction:column;gap:2px;padding-left:10px';
+            if (fmt === 'trig') {
+                if (r < 1e-10) {
+                    valueWrapper.appendChild(makeMF(`${prefix}0`, 17));
+                } else {
+                    const rPart = Math.abs(r - 1) < 1e-9 ? '' : this._wrapCompoundCoefficient(rLatex);
+                    valueWrapper.appendChild(makeMF(`${prefix}${rPart}\\cos(${thLatex})`, 17));
+                    valueWrapper.appendChild(makeMF(`\\phantom{${prefix}}+${this._appendImaginaryUnit(rPart)}\\sin(${thLatex})`, 17));
+                }
+            } else {
+                valueWrapper.appendChild(makeMF(`${prefix}${this.formatComplexLatex(c.re, c.im, fmt)}`, fmt === 'exponential' ? 20 : 17));
+            }
+            rootsEl.appendChild(valueWrapper);
+
             rootsEl.appendChild(makeMetaRow('Modulus', rLatex));
             rootsEl.appendChild(makeMetaRow('Argument', thLatex));
             rootsEl.style.display = 'flex';

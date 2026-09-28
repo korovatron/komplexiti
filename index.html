@@ -1557,8 +1557,12 @@
         }
 
         /* override metadata-title-row's own align-self: flex-start (meant for the column-stacked
-           layout above) so the badge centers vertically against the taller format dropdown */
-        .shape-info-container.is-equation .metadata-title-row {
+           layout above) so the badge centers vertically against the taller format dropdown -
+           applies to any card showing the format dropdown (equation or constant), not just
+           equation cards, since a constant card's badge sits next to that same dropdown too.
+           Direct-child selector only - .metadata-title-row is reused (nested, deeper) by the
+           Modulus/Argument rows inside .expr-card-roots, which must stay left-aligned. */
+        .shape-info-container.has-format-dropdown > .metadata-title-row {
             align-self: center;
         }
 
