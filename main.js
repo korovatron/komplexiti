@@ -1913,6 +1913,13 @@ class Komplexiti {
             return;
         }
 
+        // Hidden black-and-white worksheet-mode toggle (Ctrl+Alt+W), for print/screenshot worksheets
+        if (e.ctrlKey && e.altKey && (e.key === 'w' || e.key === 'W')) {
+            e.preventDefault();
+            this.toggleWorksheetMode();
+            return;
+        }
+
         // Open help modal on ? or / when no input is active
         if ((e.key === '?' || e.key === '/') && !this.shortcutsOverlay?.classList.contains('show')) {
             const active = document.activeElement;
@@ -2298,6 +2305,26 @@ class Komplexiti {
             if (darkIcon)  darkIcon.style.opacity  = '0.3';
         }
         this.updateCanvasBackground();
+    }
+
+    // Hidden print/screenshot mode: recolours the sidebar to pure black-on-white and hides
+    // interactive chrome, leaving just the expression cards for a worksheet (Ctrl+Alt+W).
+    toggleWorksheetMode() {
+        const panel = document.getElementById('sidebar-panel');
+        if (!panel) return;
+        this.worksheetMode = !this.worksheetMode;
+        panel.classList.toggle('worksheet-bw-mode', this.worksheetMode);
+        // applyMathFieldTheme reads --input-bg/--text-primary from #sidebar-panel's own computed
+        // style, which worksheet-bw-mode already overrides to white/black - reuse it unchanged.
+        document.querySelectorAll('.expr-card math-field:not(.asymptote-equation-field)').forEach(f => this.applyMathFieldTheme(f));
+        // The read-only metadata value fields (roots/poles/modulus/argument/etc.) get their colour
+        // hardcoded inline by makeMF (#E8F4FD, since the sidebar is normally always-dark) - a
+        // stylesheet override can't beat that inline !important, so flip it directly here.
+        const metaColor = this.worksheetMode ? '#000000' : '#E8F4FD';
+        document.querySelectorAll('.expr-card .asymptote-equation-field').forEach(f => {
+            f.style.setProperty('color', metaColor, 'important');
+            f.style.setProperty('--text-color', metaColor);
+        });
     }
 
     updateCanvasBackground() {
@@ -8939,8 +8966,11 @@ class Komplexiti {
             mf.setAttribute('virtual-keyboard-mode', 'off');
             mf.setAttribute('tabindex', '-1');
             mf.setAttribute('color-scheme', 'dark');
-            mf.style.setProperty('color', '#E8F4FD', 'important');
-            mf.style.setProperty('--text-color', '#E8F4FD');
+            // Sidebar is normally always-dark, hence '#E8F4FD' - but worksheet-bw-mode forces the
+            // sidebar white, so newly-created fields (e.g. from a live re-render) must match it too.
+            const metaColor = document.getElementById('sidebar-panel')?.classList.contains('worksheet-bw-mode') ? '#000000' : '#E8F4FD';
+            mf.style.setProperty('color', metaColor, 'important');
+            mf.style.setProperty('--text-color', metaColor);
             mf.style.setProperty('--mf-font-size', `${fontSize}px`);
             mf.addEventListener('focus', () => mf.blur());
             mf.addEventListener('focusin', () => mf.blur());

@@ -190,6 +190,46 @@
         }
 
         /* ------------------------------------------------------------------ */
+        /* Hidden black-and-white worksheet mode (Ctrl+Alt+W) - strips all colour
+           from the sidebar and hides interactive chrome, leaving just the
+           expression cards, for print/screenshot worksheets. */
+        /* ------------------------------------------------------------------ */
+        #sidebar-panel.worksheet-bw-mode {
+            background: #ffffff !important;
+            --panel-bg:       #ffffff;
+            --bg-secondary:   #ffffff;
+            --border-color:   #000000;
+            --text-primary:   #000000;
+            --text-secondary: #333333;
+            --input-bg:       #ffffff;
+            --button-bg:      #000000;
+            --accent-color:   #000000;
+            --accent-hover:   #000000;
+        }
+
+        #sidebar-panel.worksheet-bw-mode .panel-header,
+        #sidebar-panel.worksheet-bw-mode .top-toolbar-row,
+        #sidebar-panel.worksheet-bw-mode .panel-section-bottom,
+        #sidebar-panel.worksheet-bw-mode .panel-divider,
+        #sidebar-panel.worksheet-bw-mode #temp-session-banner,
+        #sidebar-panel.worksheet-bw-mode .expr-remove-btn,
+        #sidebar-panel.worksheet-bw-mode .expr-color-dot,
+        #sidebar-panel.worksheet-bw-mode .expr-color-toggle-btn,
+        #sidebar-panel.worksheet-bw-mode .expr-color-hires-btn,
+        #sidebar-panel.worksheet-bw-mode .metadata-visibility-toggle {
+            display: none !important;
+        }
+
+        #sidebar-panel.worksheet-bw-mode .expr-card {
+            background: #ffffff !important;
+            border: 1px solid #000000 !important;
+            border-left-width: 3px !important;
+            border-left-color: #000000 !important;
+            --function-badge-bg: #000000 !important;
+            --function-badge-fg: #ffffff !important;
+        }
+
+        /* ------------------------------------------------------------------ */
         /* Base - iOS PWA fix: JS writes --actual-vh; CSS falls back to 100vh  */
         /* ------------------------------------------------------------------ */
         html, body {
@@ -2276,7 +2316,7 @@
                 <div class="panel-divider" style="margin-top: 0;"></div>
 
                 <!-- Bottom controls -->
-                <div class="panel-section" style="margin-top: 0;">
+                <div class="panel-section panel-section-bottom" style="margin-top: 0;">
                     <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;">
 
                         <!-- Row 1, spans 2 cols each -->
