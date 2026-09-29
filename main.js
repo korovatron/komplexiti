@@ -9211,6 +9211,16 @@ void main() {
         } catch { /* best-effort only */ }
     }
 
+    // Fixed, device/orientation-independent region used ONLY for the one-time GPU-vs-CPU safety
+    // check below - NOT for the actual render. Verification result is cached per shader source
+    // for the whole session (see _getOrCompileColorProgram), so if it instead used whatever the
+    // live viewport happened to be at first toggle-on, a chaotic/sensitive equation could verify
+    // as fine on a wide (landscape) screen but fail on a narrow (portrait) one purely because a
+    // different slice of the complex plane got sampled - not because the shader is actually any
+    // less trustworthy. A fixed region makes the verdict a property of the equation, not the
+    // device it happened to first be checked on.
+    _VERIFY_BOUNDS = { minX: -10, maxX: 10, minY: -5, maxY: 5 };
+
     _getVerifiedGLColorSetup(glCtx, lhs, rhs, compiled, varName, scope, minX, maxX, minY, maxY) {
         const transpiled = this._transpileColorExpr(lhs, rhs, varName, scope);
         if (!transpiled) return null;
@@ -9223,7 +9233,9 @@ void main() {
         if (!entry) return null;
 
         if (!entry.verified) {
-            const ok = this._verifyGLColorShader(glCtx, entry.program, compiled, varName, scope, transpiled.constantNames, minX, maxX, minY, maxY, lightScale);
+            const vb = this._VERIFY_BOUNDS;
+            const verifyLightScale = this._computeColorLightScaleCPU(compiled, varName, scope, vb) ?? lightScale;
+            const ok = this._verifyGLColorShader(glCtx, entry.program, compiled, varName, scope, transpiled.constantNames, vb.minX, vb.maxX, vb.minY, vb.maxY, verifyLightScale);
             if (!ok) { glCtx.programCache.set(fragSrc, null); return null; }
             entry.verified = true;
         }
