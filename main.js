@@ -7949,6 +7949,9 @@ class Komplexiti {
             ],
             'nested-cosine-fractal': [
                 { latex: 'x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\right)\\right)\\right)\\right)=0', colorMode: true }
+            ],
+            'cosine-exponential-fractal': [
+                { latex: 'e^{\\cos\\left(z^2\\right)}=0', colorMode: true }
             ]
         };
 
