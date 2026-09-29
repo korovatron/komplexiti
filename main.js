@@ -2730,7 +2730,8 @@ class Komplexiti {
                 this._hiResColorLayer = built
                     ? {
                         exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
-                        vp: { minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY }
+                        vp: { minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY },
+                        colorScopeKey: this._colorScopeKey(c)
                     }
                     : null;
                 hiResBtn.classList.remove('is-loading');
@@ -9248,6 +9249,21 @@ void main() {
     // Resolution is deliberately NOT full device-pixel size: it's capped well below that so the
     // per-frame getImageData reads below (needed for adaptive axis/marker colouring) stay cheap -
     // see the lesson in _buildAxisColorSamples about per-frame getImageData on a large canvas.
+    // Cheap content-dependency fingerprint: the CURRENT value of every named constant this
+    // colourable expression actually references (whole-token match against its own lhs/rhs text,
+    // not the whole app's scope - same reasoning as cascadeEvaluate's per-card equation cache).
+    // Lets a cached bitmap/snapshot detect "the equation text is unchanged but a constant it
+    // depends on was just dragged/edited", which a viewport-only validity check never notices on
+    // its own (dragging a point marker doesn't change the viewport at all).
+    _colorScopeKey(c) {
+        const target = this._colorableLhsRhs(c);
+        if (!target) return null;
+        const scope = this.buildExpressionScope(c.id);
+        const combined = `${target.lhs}|${target.rhs}`;
+        const relevantNames = Object.keys(scope).filter(k => new RegExp(`(?<![a-zA-Z0-9_])${k}(?![a-zA-Z0-9_])`).test(combined));
+        return relevantNames.sort().map(k => `${k}:${scope[k].re},${scope[k].im}`).join('|');
+    }
+
     _tryLiveGLColorLayer(c, vp) {
         if (typeof math === 'undefined') return null;
         const target = this._colorableLhsRhs(c);
@@ -9293,40 +9309,46 @@ void main() {
     }
 
     // Debounced "settle" trigger for an automatic one-off hi-res snapshot (same mechanism as the
-    // manual .expr-color-hires-btn click handler) - only fires once the viewport has genuinely
-    // stopped changing for SETTLE_MS, so a continuous pan/zoom gesture never pays for it, only
-    // the pause at the end of one. Called every frame the live GPU path succeeds.
+    // manual .expr-color-hires-btn click handler) - only fires once the viewport AND the
+    // equation's dependency values have both genuinely stopped changing for SETTLE_MS, so a
+    // continuous pan/zoom (or a continuous point-marker drag) never pays for it, only the pause
+    // at the end of one. Called every frame the live GPU path succeeds.
     _scheduleAutoHiRes(c, vp) {
         const SETTLE_MS = 200; // matches the app's other debounce cadences (locus/colour retrace) -
         // the re-arm-on-any-change check below already stops this firing during genuine motion
         // (including a slow inertia tail), so the delay only needs to cover "just stopped", not
         // guard against the render itself being expensive (it isn't, per the benchmarked cost).
+        const scopeKey = this._colorScopeKey(c);
 
-        // Nothing to do if a hi-res snapshot already covers this exact (expression, viewport).
+        // Nothing to do if a hi-res snapshot already covers this exact (expression, viewport,
+        // dependency values) state.
         const hr = this._hiResColorLayer;
-        if (hr && hr.exprId === c.id && this._isSameViewportRect(hr.vp, vp)) return;
+        if (hr && hr.exprId === c.id && this._isSameViewportRect(hr.vp, vp) && hr.colorScopeKey === scopeKey) return;
 
         // Only skip (re)arming when a timer is ALREADY actively counting down for this exact
-        // state - checking _autoHiResTimer's truthiness (not just the last-seen viewport) matters
-        // because colour mode can be toggled off then back on (or the equation edited) for an
-        // UNCHANGED viewport, resetting _hiResColorLayer to null without the viewport itself ever
-        // differing - relying on viewport-equality alone would then wrongly think "already handled"
-        // forever, since no genuine pan/zoom ever comes along afterwards to reset that bookkeeping.
+        // state - checking _autoHiResTimer's truthiness (not just the last-seen viewport/scope)
+        // matters because colour mode can be toggled off then back on (or the equation edited) for
+        // an UNCHANGED viewport, resetting _hiResColorLayer to null without the viewport itself
+        // ever differing - relying on viewport-equality alone would then wrongly think "already
+        // handled" forever, since no genuine pan/zoom ever comes along afterwards to reset that
+        // bookkeeping. Dragging a dependent constant is the same story, just via scopeKey instead.
         const last = this._lastLiveVpForAutoHiRes;
-        if (this._autoHiResTimer && last && last.exprId === c.id && this._isSameViewportRect(last, vp)) return;
+        if (this._autoHiResTimer && last && last.exprId === c.id && this._isSameViewportRect(last, vp) && last.colorScopeKey === scopeKey) return;
 
-        this._lastLiveVpForAutoHiRes = { exprId: c.id, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+        this._lastLiveVpForAutoHiRes = { exprId: c.id, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY, colorScopeKey: scopeKey };
         if (this._autoHiResTimer) clearTimeout(this._autoHiResTimer);
         this._autoHiResTimer = setTimeout(() => {
             this._autoHiResTimer = null;
             if (this.colorModeExpressionId !== c.id) return;
             const cur = this.viewport;
             if (!this._isSameViewportRect({ minX: cur.minX, maxX: cur.maxX, minY: cur.minY, maxY: cur.maxY }, vp)) return; // moved again since
+            if (this._colorScopeKey(c) !== scopeKey) return; // a dependency changed again since arming
             const built = this._buildHiResColorLayerCanvas(c);
             if (!built) return; // e.g. transpile/verification failed after all - stay on the live layer
             this._hiResColorLayer = {
                 exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
-                vp: { minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY }
+                vp: { minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY },
+                colorScopeKey: scopeKey
             };
             if (this.currentState === this.states.APP) this.drawCanvas();
         }, SETTLE_MS);
@@ -9353,12 +9375,18 @@ void main() {
             return;
         }
         const vp = this.viewport;
+        // Fingerprint of every constant this specific equation currently depends on (see
+        // _colorScopeKey) - lets both the hi-res snapshot and the CPU-fallback cache below detect
+        // "the equation text is unchanged but a constant it depends on was just dragged", which a
+        // viewport-only validity check would otherwise never notice (the whole point of this fix).
+        const scopeKey = this._colorScopeKey(c);
 
         // A one-off high-resolution snapshot (see the "high-resolution" button in
-        // createExpressionUI) stays on screen only for as long as the viewport is EXACTLY the
-        // one it was rendered for - any pan/zoom drops it instantly here, falling straight back
-        // to the ordinary live/lower-resolution layer below with no other bookkeeping needed.
-        if (this._hiResColorLayer && this._hiResColorLayer.exprId === c.id && this._isSameViewportRect(this._hiResColorLayer.vp, vp)) {
+        // createExpressionUI) stays on screen only for as long as the viewport AND the dependency
+        // values it was rendered for are both still exactly current - any pan/zoom OR a dragged/
+        // edited dependency drops it instantly here, falling straight back to the ordinary live/
+        // lower-resolution layer below with no other bookkeeping needed.
+        if (this._hiResColorLayer && this._hiResColorLayer.exprId === c.id && this._isSameViewportRect(this._hiResColorLayer.vp, vp) && this._hiResColorLayer.colorScopeKey === scopeKey) {
             this._drawColorLayerBitmap(ctx, this._hiResColorLayer);
             return;
         }
@@ -9378,12 +9406,17 @@ void main() {
                 ? {
                     exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
                     axisSamples: this._buildAxisColorSamples(built.canvas, built.minX, built.maxX, built.minY, built.maxY),
-                    fullImageData: this._getFullImageData(built.canvas)
+                    fullImageData: this._getFullImageData(built.canvas),
+                    colorScopeKey: scopeKey
                 }
                 : null;
         } else {
             const cc = this._colorLayerCache;
-            if (!this._isColorLayerCacheFresh(cc, vp)) this._scheduleColorLayerRetrace();
+            // Content-dependency change (e.g. a dragged point) is treated exactly like viewport
+            // staleness - keep showing the old (slightly stale) bitmap and debounce a rebuild,
+            // rather than rebuilding synchronously on every single drag step (would reintroduce
+            // the exact per-frame CPU-raster stutter this whole feature exists to avoid).
+            if (!this._isColorLayerCacheFresh(cc, vp) || cc.colorScopeKey !== scopeKey) this._scheduleColorLayerRetrace();
         }
         const cache = this._colorLayerCache;
         if (!cache?.canvas) return;
@@ -9428,14 +9461,16 @@ void main() {
                 return;
             }
             const vp = this.viewport;
+            const scopeKey = this._colorScopeKey(c);
             const cc = this._colorLayerCache;
-            if (cc && cc.exprId === c.id && this._isColorLayerCacheFresh(cc, vp)) return; // already fresh
+            if (cc && cc.exprId === c.id && this._isColorLayerCacheFresh(cc, vp) && cc.colorScopeKey === scopeKey) return; // already fresh
             const built = this._buildColorLayerCanvas(c);
             this._colorLayerCache = built
                 ? {
                     exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
                     axisSamples: this._buildAxisColorSamples(built.canvas, built.minX, built.maxX, built.minY, built.maxY),
-                    fullImageData: this._getFullImageData(built.canvas)
+                    fullImageData: this._getFullImageData(built.canvas),
+                    colorScopeKey: scopeKey
                 }
                 : null;
             if (this.currentState === this.states.APP) this.drawCanvas();
