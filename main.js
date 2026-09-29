@@ -2711,9 +2711,11 @@ class Komplexiti {
             if (window.goatcounter?.count) {
                 window.goatcounter.count({ path: 'Komplexiti - Domain Colouring toggled', event: true });
             }
-            this.updateAllCardMetadata();
             this.saveExpressions();
             if (this.currentState === this.states.APP) this.drawCanvas();
+            // AFTER drawCanvas(), not before: the hi-res button's visibility depends on
+            // _colorLayerCache.isLive, which drawCanvas() is what actually determines.
+            this.updateAllCardMetadata();
         });
 
         const hiResBtn = card.querySelector('.expr-color-hires-btn');
@@ -2915,8 +2917,10 @@ class Komplexiti {
                 this.colorModeExpressionId = pendingColorModeId;
                 this._colorLayerCache = null;
                 this._hiResColorLayer = null;
-                this.updateAllCardMetadata();
                 if (this.currentState === this.states.APP) this.drawCanvas();
+                // AFTER drawCanvas(): the hi-res button's visibility depends on
+                // _colorLayerCache.isLive, which drawCanvas() is what actually determines.
+                this.updateAllCardMetadata();
             });
         }
     }
@@ -7912,7 +7916,7 @@ class Komplexiti {
                 { latex: '\\frac{z-i}{2z+1}=0', colorMode: true }
             ],
             'nested-cosine-fractal': [
-                { latex: 'x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\right)\\right)\\right)\\right)\\right)\\right)\\right)\\right)\\right)=0', colorMode: true }
+                { latex: 'x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\cos\\left(x\\right)\\right)\\right)\\right)=0', colorMode: true }
             ]
         };
 
@@ -7976,8 +7980,10 @@ class Komplexiti {
                 this.colorModeExpressionId = pendingColorModeId;
                 this._colorLayerCache = null;
                 this._hiResColorLayer = null;
-                this.updateAllCardMetadata();
                 if (this.currentState === this.states.APP) this.drawCanvas();
+                // AFTER drawCanvas(): the hi-res button's visibility depends on
+                // _colorLayerCache.isLive, which drawCanvas() is what actually determines.
+                this.updateAllCardMetadata();
             });
         }
     }
@@ -8499,7 +8505,8 @@ class Komplexiti {
         const cols = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.width  / 6 * padScale)));
         const rows = Math.max(Math.round(96 * padScale), Math.min(Math.round(220 * padScale), Math.round(this.canvas.height / 6 * padScale)));
 
-        const canvas = this._rasterizeComplexColorGrid(compiled, varName, scope, minX, maxX, minY, maxY, cols, rows, vb);
+        const canvas = this._rasterizeComplexColorGridGL(target.lhs, target.rhs, compiled, varName, scope, minX, maxX, minY, maxY, cols, rows, vb)
+            || this._rasterizeComplexColorGrid(compiled, varName, scope, minX, maxX, minY, maxY, cols, rows, vb);
         if (!canvas) return null;
         return { canvas, minX, maxX, minY, maxY };
     }
@@ -8536,7 +8543,8 @@ class Komplexiti {
             rows = Math.max(1, Math.round(rows / overshoot));
         }
 
-        const canvas = this._rasterizeComplexColorGrid(compiled, varName, scope, vb.minX, vb.maxX, vb.minY, vb.maxY, cols, rows, vb);
+        const canvas = this._rasterizeComplexColorGridGL(target.lhs, target.rhs, compiled, varName, scope, vb.minX, vb.maxX, vb.minY, vb.maxY, cols, rows, vb)
+            || this._rasterizeComplexColorGrid(compiled, varName, scope, vb.minX, vb.maxX, vb.minY, vb.maxY, cols, rows, vb);
         if (!canvas) return null;
         return { canvas, minX: vb.minX, maxX: vb.maxX, minY: vb.minY, maxY: vb.maxY };
     }
@@ -8617,14 +8625,668 @@ class Komplexiti {
         return off;
     }
 
+    // =========================================================================
+    // WebGL-accelerated colour layer (drop-in fast path for _rasterizeComplexColorGrid above).
+    // Transpiles the SAME mathjs AST (lhs-rhs) that the CPU rasteriser evaluates node-by-node
+    // into a GLSL fragment shader that evaluates every pixel in parallel on the GPU - both
+    // _buildColorLayerCanvas and _buildHiResColorLayerCanvas try this FIRST and fall back to the
+    // CPU path unchanged whenever it returns null (unsupported function/construct, WebGL
+    // unavailable, shader compile/link failure, or the safety-net verification below fails) -
+    // correctness is never at risk, only speed. Benchmarked via a standalone prototype
+    // (tests/_webgl_prototype.html) at well under 1ms per frame even at 4K resolution on a
+    // discrete GPU, and still comfortably sub-1ms at this app's live grid size even under full
+    // SOFTWARE rendering (no GPU at all) - see /memories/repo/komplexiti-loci.md for the numbers.
+    // =========================================================================
+
+    // Shared GLSL "complex number as vec2(re,im)" runtime, always emitted in full regardless of
+    // which functions a given expression actually uses (unused GLSL functions cost nothing at
+    // runtime, and this avoids a second "which helpers does this expression need" bookkeeping
+    // pass). Mirrors the exact formulas already used elsewhere in this file (native complex ops,
+    // the Lanczos gamma approximation validated in the prototype, and the same Euler-transformed
+    // zeta series/reflection as komplexitiZeta at the top of this file) so the live-rendered
+    // picture matches the CPU path's own values, not just its general "shape".
+    get _GLSL_RUNTIME() {
+        return `
+precision highp float;
+varying vec2 vUv;
+uniform vec4 uBounds; // minX, maxX, minY, maxY
+uniform float uScale;
+const float PI = 3.14159265358979323846;
+const vec2 CI = vec2(0.0, 1.0);
+const vec2 C1 = vec2(1.0, 0.0);
+
+vec2 cmul(vec2 a, vec2 b) { return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
+vec2 cdiv(vec2 a, vec2 b) {
+    float d = b.x*b.x + b.y*b.y;
+    return vec2(a.x*b.x + a.y*b.y, a.y*b.x - a.x*b.y) / d;
+}
+vec2 conjv(vec2 a) { return vec2(a.x, -a.y); }
+vec2 cabsv(vec2 a) { return vec2(length(a), 0.0); }
+vec2 cargv(vec2 a) { return vec2(atan(a.y, a.x), 0.0); }
+vec2 crealv(vec2 a) { return vec2(a.x, 0.0); }
+vec2 cimagv(vec2 a) { return vec2(a.y, 0.0); }
+vec2 cexp(vec2 a) { float m = exp(a.x); return vec2(m*cos(a.y), m*sin(a.y)); }
+vec2 clog(vec2 a) { return vec2(log(length(a)), atan(a.y, a.x)); }
+vec2 clog10(vec2 a) { return clog(a) / log(10.0); }
+vec2 clog2(vec2 a)  { return clog(a) / log(2.0); }
+vec2 cpow(vec2 a, vec2 b) { return cexp(cmul(b, clog(a))); }
+vec2 csqrt(vec2 a) {
+    float r = length(a);
+    float re = sqrt(max((r + a.x) * 0.5, 0.0));
+    float imMag = sqrt(max((r - a.x) * 0.5, 0.0));
+    return vec2(re, a.y < 0.0 ? -imMag : imMag);
+}
+// GLSL ES 1.00 (WebGL1) has no built-in sinh/cosh - expand directly from exp().
+float sinhf(float x) { return (exp(x) - exp(-x)) * 0.5; }
+float coshf(float x) { return (exp(x) + exp(-x)) * 0.5; }
+vec2 csin(vec2 a)  { return vec2(sin(a.x)*coshf(a.y),  cos(a.x)*sinhf(a.y)); }
+vec2 ccos(vec2 a)  { return vec2(cos(a.x)*coshf(a.y), -sin(a.x)*sinhf(a.y)); }
+vec2 ctan(vec2 a)  { return cdiv(csin(a), ccos(a)); }
+vec2 csinh(vec2 a) { return vec2(sinhf(a.x)*cos(a.y), coshf(a.x)*sin(a.y)); }
+vec2 ccosh(vec2 a) { return vec2(coshf(a.x)*cos(a.y), sinhf(a.x)*sin(a.y)); }
+vec2 ctanh(vec2 a) { return cdiv(csinh(a), ccosh(a)); }
+vec2 casin(vec2 a) { return cmul(vec2(0.0,-1.0), clog(cmul(CI, a) + csqrt(C1 - cmul(a, a)))); }
+vec2 cacos(vec2 a) { return vec2(PI * 0.5, 0.0) - casin(a); }
+vec2 catan(vec2 a) {
+    vec2 iz = cmul(CI, a);
+    return cmul(vec2(0.0, 0.5), clog(cdiv(C1 - iz, C1 + iz)));
+}
+vec2 casinh(vec2 a) { return clog(a + csqrt(cmul(a, a) + C1)); }
+vec2 cacosh(vec2 a) { return clog(a + cmul(csqrt(a - C1), csqrt(a + C1))); }
+vec2 catanh(vec2 a) { return cmul(vec2(0.5, 0.0), clog(cdiv(C1 + a, C1 - a))); }
+vec2 ccsc(vec2 a)  { return cdiv(C1, csin(a)); }
+vec2 csec(vec2 a)  { return cdiv(C1, ccos(a)); }
+vec2 ccot(vec2 a)  { return cdiv(ccos(a), csin(a)); }
+vec2 ccsch(vec2 a) { return cdiv(C1, csinh(a)); }
+vec2 csech(vec2 a) { return cdiv(C1, ccosh(a)); }
+vec2 ccoth(vec2 a) { return cdiv(ccosh(a), csinh(a)); }
+vec2 cacsc(vec2 a)  { return casin(cdiv(C1, a)); }
+vec2 casec(vec2 a)  { return cacos(cdiv(C1, a)); }
+vec2 cacot(vec2 a)  { return catan(cdiv(C1, a)); }
+vec2 cacsch(vec2 a) { return casinh(cdiv(C1, a)); }
+vec2 casech(vec2 a) { return cacosh(cdiv(C1, a)); }
+vec2 cacoth(vec2 a) { return catanh(cdiv(C1, a)); }
+
+// Lanczos approximation (g=7, 9 terms) + reflection formula - matches the prototype validated
+// against the app's real gamma poles/values in tests/_webgl_prototype.html.
+vec2 cgammaPos(vec2 z) {
+    vec2 zm1 = vec2(z.x - 1.0, z.y);
+    vec2 x = vec2(0.99999999999980993, 0.0);
+    x += cdiv(vec2(676.5203681218851, 0.0),     zm1 + vec2(1.0, 0.0));
+    x += cdiv(vec2(-1259.1392167224028, 0.0),   zm1 + vec2(2.0, 0.0));
+    x += cdiv(vec2(771.32342877765313, 0.0),    zm1 + vec2(3.0, 0.0));
+    x += cdiv(vec2(-176.61502916214059, 0.0),   zm1 + vec2(4.0, 0.0));
+    x += cdiv(vec2(12.507343278686905, 0.0),    zm1 + vec2(5.0, 0.0));
+    x += cdiv(vec2(-0.13857109526572012, 0.0),  zm1 + vec2(6.0, 0.0));
+    x += cdiv(vec2(9.9843695780195716e-6, 0.0), zm1 + vec2(7.0, 0.0));
+    x += cdiv(vec2(1.5056327351493116e-7, 0.0), zm1 + vec2(8.0, 0.0));
+    vec2 t = zm1 + vec2(7.5, 0.0);
+    return cmul(vec2(sqrt(2.0 * PI), 0.0), cmul(cpow(t, vec2(zm1.x + 0.5, zm1.y)), cmul(cexp(-t), x)));
+}
+vec2 cgamma(vec2 z) {
+    if (z.x < 0.5) {
+        vec2 omz = vec2(1.0 - z.x, -z.y);
+        return cdiv(vec2(PI, 0.0), cmul(csin(cmul(vec2(PI, 0.0), z)), cgammaPos(omz)));
+    }
+    return cgammaPos(z);
+}
+
+// Same Euler-transformed eta-series + functional-equation reflection as komplexitiZeta (top of
+// this file) - ZETA_TERMS mirrors ZETA_SERIES_TERMS there; keep both in sync if either changes.
+const int ZETA_TERMS = 40;
+vec2 zetaTermPow(float base, float sRe, float sIm) {
+    float lnBase = log(base);
+    float r = exp(-sRe * lnBase);
+    float theta = -sIm * lnBase;
+    return vec2(r * cos(theta), r * sin(theta));
+}
+vec2 zetaEta(float sRe, float sIm) {
+    vec2 powCache[41];
+    for (int k = 0; k <= 40; k++) powCache[k] = zetaTermPow(float(k) + 1.0, sRe, sIm);
+    float binRow[41];
+    for (int i = 0; i <= 40; i++) binRow[i] = 0.0;
+    binRow[0] = 1.0;
+    float re = 0.0, im = 0.0, weight = 0.5;
+    for (int n = 0; n <= 40; n++) {
+        float rowRe = 0.0, rowIm = 0.0, sign = 1.0;
+        for (int k = 0; k <= 40; k++) {
+            if (k > n) break;
+            rowRe += sign * binRow[k] * powCache[k].x;
+            rowIm += sign * binRow[k] * powCache[k].y;
+            sign = -sign;
+        }
+        re += weight * rowRe;
+        im += weight * rowIm;
+        if (n < 40) {
+            binRow[n + 1] = 1.0;
+            for (int k = 40; k >= 1; k--) {
+                if (k > n) continue;
+                binRow[k] = binRow[k] + binRow[k - 1];
+            }
+            weight = weight * 0.5;
+        }
+    }
+    return vec2(re, im);
+}
+vec2 zetaDirect(float sRe, float sIm) {
+    vec2 eta = zetaEta(sRe, sIm);
+    float r = exp((1.0 - sRe) * 0.6931471805599453);
+    float theta = -sIm * 0.6931471805599453;
+    vec2 d = C1 - vec2(r * cos(theta), r * sin(theta));
+    float dd = d.x*d.x + d.y*d.y;
+    return vec2(eta.x*d.x + eta.y*d.y, eta.y*d.x - eta.x*d.y) / dd;
+}
+vec2 czeta(vec2 s) {
+    if (abs(s.x) < 1e-12 && abs(s.y) < 1e-12) return vec2(-0.5, 0.0);
+    if (s.x >= 0.5) return zetaDirect(s.x, s.y);
+    vec2 oms = vec2(1.0 - s.x, -s.y);
+    vec2 zOms = zetaDirect(oms.x, oms.y);
+    float lnPi = log(PI);
+    vec2 twoS = cexp(cmul(s, vec2(0.6931471805599453, 0.0)));
+    vec2 piSm1 = cexp(cmul(vec2(s.x - 1.0, s.y), vec2(lnPi, 0.0)));
+    vec2 halfPiS = vec2(PI * s.x * 0.5, PI * s.y * 0.5);
+    vec2 sinTerm = vec2(sin(halfPiS.x) * coshf(halfPiS.y), cos(halfPiS.x) * sinhf(halfPiS.y));
+    vec2 g = cgamma(oms);
+    vec2 acc = cmul(twoS, piSm1);
+    acc = cmul(acc, sinTerm);
+    acc = cmul(acc, g);
+    acc = cmul(acc, zOms);
+    return acc;
+}
+
+vec3 hsl2rgb(float h, float s, float l) {
+    float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+    float p = 2.0 * l - q;
+    vec3 t = vec3(h + 1.0/3.0, h, h - 1.0/3.0);
+    vec3 res;
+    for (int i = 0; i < 3; i++) {
+        float tt = t[i];
+        if (tt < 0.0) tt += 1.0;
+        if (tt > 1.0) tt -= 1.0;
+        float v;
+        if (tt < 1.0/6.0) v = p + (q - p) * 6.0 * tt;
+        else if (tt < 0.5) v = q;
+        else if (tt < 2.0/3.0) v = p + (q - p) * (2.0/3.0 - tt) * 6.0;
+        else v = p;
+        res[i] = v;
+    }
+    return res;
+}
+
+vec3 domainColor(vec2 w) {
+    float m = length(w);
+    float hue = atan(w.y, w.x);
+    if (hue < 0.0) hue += 2.0 * PI;
+    hue /= 2.0 * PI;
+    float lm = log(1.0 + m);
+    float light = lm / (lm + uScale);
+    return hsl2rgb(hue, 1.0, light);
+}
+
+vec2 worldPos() {
+    float x = mix(uBounds.x, uBounds.y, vUv.x);
+    // vUv.y=1 is the TOP of the displayed image (NDC y=+1) - top must map to maxY, matching
+    // the CPU rasteriser's row-0-is-top convention, NOT minY (that was the pan/zoom flip bug).
+    float y = mix(uBounds.z, uBounds.w, vUv.y);
+    return vec2(x, y);
+}
+`;
+    }
+
+    // Lazily creates (once) a shared offscreen WebGL canvas/context/quad buffer used for every
+    // colour-layer render - returns null (cached) if WebGL is unavailable at all on this device,
+    // so every caller can just check truthiness without repeating the getContext dance/catching.
+    _glColorContext() {
+        if (this._glColorCtx !== undefined) return this._glColorCtx;
+        try {
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl', { antialias: false, alpha: true, preserveDrawingBuffer: false, depth: false, stencil: false })
+                    || canvas.getContext('experimental-webgl');
+            if (!gl) { this._glColorCtx = null; return null; }
+            const quadBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+            this._glColorCtx = { canvas, gl, quadBuf, programCache: new Map() };
+        } catch {
+            this._glColorCtx = null;
+        }
+        return this._glColorCtx;
+    }
+
+    // Compiles+links a fragment shader (paired with a shared trivial full-screen-quad vertex
+    // shader) and caches the resulting {program, verified} ENTRY keyed by the exact generated
+    // source string - dragging a constant, or redrawing the same expression every pan/zoom
+    // frame, re-invokes this with byte-identical source (only the UNIFORM VALUES differ), so
+    // this cache turns repeated calls into a pure uniform-upload with no recompile. `verified`
+    // starts false and is flipped to true (or the whole entry to null) by the caller after
+    // running the safety-net check ONCE - callers must never re-run that check just because a
+    // new frame started, since it forces a synchronous GPU readback (see _verifyGLColorShader).
+    // Caches a `null` result too (a permanently-unsupported/buggy shader) so a failing expression
+    // isn't re-compiled (and re-logged) on every single redraw.
+    _getOrCompileColorProgram(glCtx, fragSrc) {
+        if (glCtx.programCache.has(fragSrc)) return glCtx.programCache.get(fragSrc);
+        const gl = glCtx.gl;
+        const compile = (type, src) => {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, src);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+                const log = gl.getShaderInfoLog(s);
+                gl.deleteShader(s);
+                throw new Error(log || 'shader compile error');
+            }
+            return s;
+        };
+        const vsSrc = `attribute vec2 aPos; varying vec2 vUv;
+            void main() { vUv = (aPos + 1.0) * 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+        let program = null;
+        try {
+            const vs = compile(gl.VERTEX_SHADER, vsSrc);
+            const fs = compile(gl.FRAGMENT_SHADER, fragSrc);
+            program = gl.createProgram();
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                const log = gl.getProgramInfoLog(program);
+                gl.deleteProgram(program);
+                throw new Error(log || 'program link error');
+            }
+        } catch (err) {
+            console.warn('[komplexiti] WebGL colour shader unavailable, using CPU fallback:', err.message || err);
+            program = null;
+        }
+        const entry = program ? { program, verified: false } : null;
+        glCtx.programCache.set(fragSrc, entry);
+        return entry;
+    }
+
+    // GLSL ES 1.00 float literals need a decimal point/exponent (a bare "5" parses as int).
+    _formatGLSLFloat(v) {
+        if (!Number.isFinite(v)) throw new Error('non-finite constant');
+        let s = String(v);
+        if (!/[.eE]/.test(s)) s += '.0';
+        return s;
+    }
+
+    // Small positive/negative integer exponents are unrolled into repeated cmul() calls (exact,
+    // and avoids cpow's log/exp round-trip near branch cuts) rather than always calling cpow -
+    // covers the overwhelmingly common polynomial case (z^2, z^3, ...) exactly and cheaply.
+    _emitIntegerPowIfPossible(exponentRawNode, baseGLSL, expGLSL) {
+        let en = exponentRawNode;
+        while (en && en.type === 'ParenthesisNode') en = en.content;
+        if (en && en.type === 'ConstantNode' && typeof en.value === 'number' && Number.isInteger(en.value) && Math.abs(en.value) <= 12) {
+            const n = en.value;
+            if (n === 0) return 'vec2(1.0, 0.0)';
+            const absN = Math.abs(n);
+            let expr = baseGLSL;
+            for (let k = 1; k < absN; k++) expr = `cmul(${expr}, ${baseGLSL})`;
+            return n > 0 ? expr : `cdiv(vec2(1.0, 0.0), ${expr})`;
+        }
+        return `cpow(${baseGLSL}, ${expGLSL})`;
+    }
+
+    // Recursively converts a mathjs AST node into a GLSL expression string operating on vec2
+    // complex values, or throws (caught by _transpileColorExpr) the moment it meets a construct
+    // this transpiler doesn't support - the caller treats ANY thrown error identically ("fall
+    // back to the CPU rasteriser"), so this never needs to distinguish failure reasons.
+    _nodeToGLSL(rawNode, ctx) {
+        let node = rawNode;
+        while (node && node.type === 'ParenthesisNode') node = node.content;
+        if (!node) throw new Error('empty node');
+        switch (node.type) {
+            case 'ConstantNode': {
+                if (typeof node.value !== 'number') throw new Error('non-numeric constant');
+                return `vec2(${this._formatGLSLFloat(node.value)}, 0.0)`;
+            }
+            case 'SymbolNode': {
+                const name = node.name;
+                if (name === ctx.varName) return 'z';
+                if (name === 'i') return 'vec2(0.0, 1.0)';
+                if (name === 'e') return `vec2(${this._formatGLSLFloat(Math.E)}, 0.0)`;
+                if (name === 'pi') return `vec2(${this._formatGLSLFloat(Math.PI)}, 0.0)`;
+                if (name === 'tau') return `vec2(${this._formatGLSLFloat(2 * Math.PI)}, 0.0)`;
+                if (name === 'phi') return `vec2(${this._formatGLSLFloat((1 + Math.sqrt(5)) / 2)}, 0.0)`;
+                if (Object.prototype.hasOwnProperty.call(ctx.scope, name)) {
+                    ctx.constants.add(name);
+                    return `uK_${name}`;
+                }
+                throw new Error(`unsupported symbol: ${name}`);
+            }
+            case 'OperatorNode': {
+                const fn = node.fn;
+                if (fn === 'pow') {
+                    if (node.args.length !== 2) throw new Error('pow arity');
+                    const a = this._nodeToGLSL(node.args[0], ctx);
+                    const b = this._nodeToGLSL(node.args[1], ctx);
+                    return this._emitIntegerPowIfPossible(node.args[1], a, b);
+                }
+                if (fn === 'unaryMinus') {
+                    if (node.args.length !== 1) throw new Error('neg arity');
+                    return `(-${this._nodeToGLSL(node.args[0], ctx)})`;
+                }
+                if (fn === 'unaryPlus') {
+                    if (node.args.length !== 1) throw new Error('pos arity');
+                    return this._nodeToGLSL(node.args[0], ctx);
+                }
+                if (node.args.length !== 2) throw new Error(`unsupported operator: ${fn}`);
+                const a = this._nodeToGLSL(node.args[0], ctx);
+                const b = this._nodeToGLSL(node.args[1], ctx);
+                if (fn === 'add') return `(${a} + ${b})`;
+                if (fn === 'subtract') return `(${a} - ${b})`;
+                if (fn === 'multiply') return `cmul(${a}, ${b})`;
+                if (fn === 'divide') return `cdiv(${a}, ${b})`;
+                throw new Error(`unsupported operator: ${fn}`);
+            }
+            case 'FunctionNode': {
+                const fname = node.fn?.name;
+                if (!fname) throw new Error('anonymous function call');
+                if (fname === 'pow') {
+                    if (node.args.length !== 2) throw new Error('pow arity');
+                    const a = this._nodeToGLSL(node.args[0], ctx);
+                    const b = this._nodeToGLSL(node.args[1], ctx);
+                    return this._emitIntegerPowIfPossible(node.args[1], a, b);
+                }
+                if (fname === 'log' && node.args.length === 2) {
+                    const a = this._nodeToGLSL(node.args[0], ctx);
+                    const b = this._nodeToGLSL(node.args[1], ctx);
+                    return `cdiv(clog(${a}), clog(${b}))`;
+                }
+                const SIMPLE_FN = {
+                    abs: 'cabsv', arg: 'cargv', conj: 'conjv', sqrt: 'csqrt',
+                    exp: 'cexp', log: 'clog', log10: 'clog10', log2: 'clog2',
+                    sin: 'csin', cos: 'ccos', tan: 'ctan',
+                    sinh: 'csinh', cosh: 'ccosh', tanh: 'ctanh',
+                    asin: 'casin', acos: 'cacos', atan: 'catan',
+                    asinh: 'casinh', acosh: 'cacosh', atanh: 'catanh',
+                    csc: 'ccsc', sec: 'csec', cot: 'ccot',
+                    csch: 'ccsch', sech: 'csech', coth: 'ccoth',
+                    acsc: 'cacsc', asec: 'casec', acot: 'cacot',
+                    acsch: 'cacsch', asech: 'casech', acoth: 'cacoth',
+                    gamma: 'cgamma', zeta: 'czeta', re: 'crealv', im: 'cimagv'
+                };
+                const glslFn = SIMPLE_FN[fname];
+                if (!glslFn || node.args.length !== 1) throw new Error(`unsupported function: ${fname}`);
+                return `${glslFn}(${this._nodeToGLSL(node.args[0], ctx)})`;
+            }
+            default:
+                throw new Error(`unsupported node type: ${node.type}`);
+        }
+    }
+
+    // Top-level transpile entry: returns { glslExpr, constantNames } or null (unsupported) -
+    // never throws, so callers never need their own try/catch.
+    _transpileColorExpr(lhs, rhs, varName, scope) {
+        try {
+            const node = this._extractColorTargetNode(lhs, rhs);
+            const ctx = { varName, scope, constants: new Set() };
+            const glslExpr = this._nodeToGLSL(node, ctx);
+            return { glslExpr, constantNames: [...ctx.constants] };
+        } catch {
+            return null;
+        }
+    }
+
+    _buildColorFragmentShaderSource(glslExpr, constantNames) {
+        const uniformDecls = constantNames.map(n => `uniform vec2 uK_${n};`).join('\n');
+        return `${this._GLSL_RUNTIME}
+${uniformDecls}
+void main() {
+    vec2 z = worldPos();
+    vec2 w = ${glslExpr};
+    if (!(w.x == w.x) || !(w.y == w.y) || abs(w.x) > 1e30 || abs(w.y) > 1e30) {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    } else {
+        gl_FragColor = vec4(domainColor(w), 1.0);
+    }
+}
+`;
+    }
+
+    // Cheap CPU calibration pass (same p90-of-log1p(|w|) statistic _rasterizeComplexColorGrid
+    // uses, just on a much smaller sample grid) - the GPU shader needs this SAME scale value
+    // uploaded as a uniform so the two paths render visually identically, but computing a true
+    // percentile requires collecting samples, which is far simpler to do once on the CPU than
+    // to implement a GPU reduction for what's only ever a one-off per rebuild anyway.
+    _computeColorLightScaleCPU(compiled, varName, scope, calibBounds, sampleN = 24) {
+        const { minX, maxX, minY, maxY } = calibBounds;
+        if (!(maxX > minX) || !(maxY > minY)) return null;
+        const lms = [];
+        for (let iy = 0; iy < sampleN; iy++) {
+            const y = maxY - (iy + 0.5) / sampleN * (maxY - minY);
+            for (let ix = 0; ix < sampleN; ix++) {
+                const x = minX + (ix + 0.5) / sampleN * (maxX - minX);
+                try {
+                    const val = this._mathValueToComplex(compiled.evaluate({ ...scope, [varName]: math.complex(x, y) }));
+                    const m = val ? Math.hypot(val.re, val.im) : NaN;
+                    if (val && isFinite(m)) lms.push(Math.log1p(m));
+                } catch { /* skip - matches CPU rasteriser's own try/catch-per-cell behaviour */ }
+            }
+        }
+        if (!lms.length) return 1;
+        lms.sort((a, b) => a - b);
+        const p90 = lms[Math.floor(0.9 * (lms.length - 1))];
+        return p90 > 0 ? p90 / 3 : 1;
+    }
+
+    // Safety net: renders a small verification grid and compares it against the CPU-evaluated
+    // colour at the same world points BEFORE ever trusting the shader for the real (visible)
+    // render - guards against a hand-transcribed GLSL formula bug (a wrong branch cut, a
+    // mis-copied Lanczos coefficient, a precision issue) silently showing an incorrect picture.
+    // Points where the CPU itself hits a singularity are skipped (GPU/CPU can legitimately
+    // disagree exactly AT a singularity without either being "wrong"); returns true only when
+    // at least 80% of the checkable points match within a small per-channel RGB tolerance.
+    _verifyGLColorShader(glCtx, program, compiled, varName, scope, constantNames, minX, maxX, minY, maxY, lightScale) {
+        const gl = glCtx.gl;
+        const VN = 9;
+        glCtx.canvas.width = VN;
+        glCtx.canvas.height = VN;
+        gl.viewport(0, 0, VN, VN);
+        this._drawColorProgram(glCtx, program, constantNames, scope, minX, maxX, minY, maxY, lightScale);
+        const pixels = new Uint8Array(VN * VN * 4);
+        gl.readPixels(0, 0, VN, VN, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+        const spanX = maxX - minX, spanY = maxY - minY;
+        let checked = 0, matched = 0;
+        for (let iy = 1; iy < VN - 1; iy += 2) {
+            for (let ix = 1; ix < VN - 1; ix += 2) {
+                const x = minX + (ix + 0.5) / VN * spanX;
+                // gl.readPixels rows are bottom-up (row 0 = smallest window-y = minY) - unlike
+                // the CPU rasteriser's own top-down row order, and unlike everywhere ELSE this
+                // shader's output is consumed (drawImage onto a normal 2D canvas, which the
+                // browser auto-flips to the usual top-down convention) - only this raw readPixels
+                // comparison needs the bottom-up mapping.
+                const y = minY + (iy + 0.5) / VN * spanY;
+                let val;
+                try { val = this._mathValueToComplex(compiled.evaluate({ ...scope, [varName]: math.complex(x, y) })); }
+                catch { continue; }
+                const m = val ? Math.hypot(val.re, val.im) : NaN;
+                if (!val || !isFinite(m)) continue;
+                const expected = this._complexToRGB(val.re, val.im, lightScale);
+                if (!expected) continue;
+                const idx = (iy * VN + ix) * 4;
+                checked++;
+                if (pixels[idx + 3] < 200) continue; // GPU thinks invalid where CPU doesn't - counts as a miss
+                const dr = Math.abs(pixels[idx] - expected[0]);
+                const dg = Math.abs(pixels[idx + 1] - expected[1]);
+                const db = Math.abs(pixels[idx + 2] - expected[2]);
+                if (dr <= 18 && dg <= 18 && db <= 18) matched++;
+            }
+        }
+        if (checked === 0) return true; // nothing meaningful to compare (e.g. all singular) - trust it
+        return matched / checked >= 0.8;
+    }
+
+    // Shared uniform-upload + draw step used by both the verification pass and the real render.
+    _drawColorProgram(glCtx, program, constantNames, scope, minX, maxX, minY, maxY, lightScale) {
+        const gl = glCtx.gl;
+        gl.useProgram(program);
+        const aPos = gl.getAttribLocation(program, 'aPos');
+        gl.bindBuffer(gl.ARRAY_BUFFER, glCtx.quadBuf);
+        gl.enableVertexAttribArray(aPos);
+        gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+        gl.uniform4f(gl.getUniformLocation(program, 'uBounds'), minX, maxX, minY, maxY);
+        gl.uniform1f(gl.getUniformLocation(program, 'uScale'), lightScale);
+        for (const name of constantNames) {
+            const v = scope[name];
+            gl.uniform2f(gl.getUniformLocation(program, `uK_${name}`), v?.re ?? 0, v?.im ?? 0);
+        }
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    // Shared by every colour-shader consumer (the one-off CPU-drop-in rasteriser below AND the
+    // fully-live per-frame path): transpiles, gets-or-compiles the program, and runs the safety-
+    // net verification check EXACTLY ONCE per distinct generated shader source (cached on the
+    // program-cache entry itself) - never re-verifies an already-trusted program just because a
+    // new frame/rebuild started, since that check forces a synchronous GPU readback and doing it
+    // every frame would reintroduce exactly the kind of per-frame stall this whole feature exists
+    // to avoid. Returns { program, constantNames, lightScale } or null.
+    _getVerifiedGLColorSetup(glCtx, lhs, rhs, compiled, varName, scope, minX, maxX, minY, maxY) {
+        const transpiled = this._transpileColorExpr(lhs, rhs, varName, scope);
+        if (!transpiled) return null;
+
+        const lightScale = this._computeColorLightScaleCPU(compiled, varName, scope, { minX, maxX, minY, maxY });
+        if (lightScale === null) return null;
+
+        const fragSrc = this._buildColorFragmentShaderSource(transpiled.glslExpr, transpiled.constantNames);
+        const entry = this._getOrCompileColorProgram(glCtx, fragSrc);
+        if (!entry) return null;
+
+        if (!entry.verified) {
+            const ok = this._verifyGLColorShader(glCtx, entry.program, compiled, varName, scope, transpiled.constantNames, minX, maxX, minY, maxY, lightScale);
+            if (!ok) { glCtx.programCache.set(fragSrc, null); return null; }
+            entry.verified = true;
+        }
+        return { program: entry.program, constantNames: transpiled.constantNames, lightScale };
+    }
+
+    // GPU drop-in replacement for _rasterizeComplexColorGrid - same signature/return contract
+    // (a small 2D canvas, or null) except it also needs the ALREADY-compiled mathjs node (reused
+    // for calibration + the safety-net check, not re-evaluated per pixel) and the raw lhs/rhs
+    // strings (to transpile). Returns null at the first sign of trouble, at which point the
+    // caller falls back to the CPU rasteriser with zero behavioural difference to the user.
+    _rasterizeComplexColorGridGL(lhs, rhs, compiled, varName, scope, minX, maxX, minY, maxY, cols, rows, calibBounds) {
+        const glCtx = this._glColorContext();
+        if (!glCtx) return null;
+        if (!(maxX - minX > 0) || !(maxY - minY > 0) || !(cols > 0) || !(rows > 0)) return null;
+
+        const setup = this._getVerifiedGLColorSetup(glCtx, lhs, rhs, compiled, varName, scope, calibBounds.minX, calibBounds.maxX, calibBounds.minY, calibBounds.maxY);
+        if (!setup) return null;
+        const { program, constantNames, lightScale } = setup;
+
+        const gl = glCtx.gl;
+        glCtx.canvas.width = cols;
+        glCtx.canvas.height = rows;
+        gl.viewport(0, 0, cols, rows);
+        this._drawColorProgram(glCtx, program, constantNames, scope, minX, maxX, minY, maxY, lightScale);
+
+        const off = document.createElement('canvas');
+        off.width = cols;
+        off.height = rows;
+        const offCtx = off.getContext('2d', { willReadFrequently: true });
+        offCtx.drawImage(glCtx.canvas, 0, 0);
+        return off;
+    }
+
+    // Fully-live GPU colour layer: recomputes the ENTIRE visible viewport, at the exact current
+    // pan/zoom bounds (no padding margin), every single call - i.e. every drawCanvas() frame,
+    // matching the polar-sweep locus tracer precedent (see /memories/repo/komplexiti-loci.md)
+    // now that a shader render has been benchmarked comfortably inside a frame budget even on
+    // software-rendered (zero GPU) hardware at this resolution. This structurally eliminates the
+    // "blank edge while waiting for a debounced retrace" symptom the padded/cached CPU path can
+    // show, since there is nothing to outrun - what's on screen this frame IS this frame's exact
+    // bounds. Returns null (falls back to the padded/debounced path in _drawColorLayer) whenever
+    // WebGL is unavailable, the expression can't be transpiled, or the safety-net check fails.
+    // Resolution is deliberately NOT full device-pixel size: it's capped well below that so the
+    // per-frame getImageData reads below (needed for adaptive axis/marker colouring) stay cheap -
+    // see the lesson in _buildAxisColorSamples about per-frame getImageData on a large canvas.
+    _tryLiveGLColorLayer(c, vp) {
+        if (typeof math === 'undefined') return null;
+        const target = this._colorableLhsRhs(c);
+        if (!target) return null;
+        if (!(vp.maxX - vp.minX > 0) || !(vp.maxY - vp.minY > 0)) return null;
+        const glCtx = this._glColorContext();
+        if (!glCtx) return null;
+
+        let compiled;
+        try { compiled = this._extractColorTargetNode(target.lhs, target.rhs).compile(); } catch { return null; }
+
+        const varName = c.equationVar;
+        const scope = this.buildExpressionScope(c.id);
+
+        const setup = this._getVerifiedGLColorSetup(glCtx, target.lhs, target.rhs, compiled, varName, scope, vp.minX, vp.maxX, vp.minY, vp.maxY);
+        if (!setup) return null;
+        const { program, constantNames, lightScale } = setup;
+
+        const aspect = this.canvas.width / this.canvas.height;
+        const CAP = 640, FLOOR = 260;
+        let cols, rows;
+        if (aspect >= 1) { cols = CAP; rows = Math.max(FLOOR, Math.round(CAP / aspect)); }
+        else { rows = CAP; cols = Math.max(FLOOR, Math.round(CAP * aspect)); }
+
+        const gl = glCtx.gl;
+        glCtx.canvas.width = cols;
+        glCtx.canvas.height = rows;
+        gl.viewport(0, 0, cols, rows);
+        this._drawColorProgram(glCtx, program, constantNames, scope, vp.minX, vp.maxX, vp.minY, vp.maxY, lightScale);
+
+        const off = document.createElement('canvas');
+        off.width = cols;
+        off.height = rows;
+        const offCtx = off.getContext('2d', { willReadFrequently: true });
+        offCtx.drawImage(glCtx.canvas, 0, 0);
+
+        return {
+            exprId: c.id, canvas: off, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY,
+            isLive: true,
+            axisSamples: this._buildAxisColorSamples(off, vp.minX, vp.maxX, vp.minY, vp.maxY),
+            fullImageData: this._getFullImageData(off)
+        };
+    }
+
+    // Debounced "settle" trigger for an automatic one-off hi-res snapshot (same mechanism as the
+    // manual .expr-color-hires-btn click handler) - only fires once the viewport has genuinely
+    // stopped changing for SETTLE_MS, so a continuous pan/zoom gesture never pays for it, only
+    // the pause at the end of one. Called every frame the live GPU path succeeds, but only ever
+    // (re)arms its timer when the viewport actually differs from the last call - drawCanvas() is
+    // invoked for lots of unrelated reasons (toggling a marker, editing a different card, etc.),
+    // and re-arming on every one of those would prevent the timer from ever reaching its delay
+    // during genuine continuous interaction, or would recompute needlessly on unrelated redraws.
+    _scheduleAutoHiRes(c, vp) {
+        const SETTLE_MS = 450; // deliberately longer than the old low-res retrace debounce (120ms)
+        // since this triggers a heavier render - avoids re-firing on brief natural pauses mid-drag.
+        const last = this._lastLiveVpForAutoHiRes;
+        if (last && last.exprId === c.id && this._isSameViewportRect(last, vp)) return;
+        this._lastLiveVpForAutoHiRes = { exprId: c.id, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
+        if (this._autoHiResTimer) clearTimeout(this._autoHiResTimer);
+        this._autoHiResTimer = setTimeout(() => {
+            this._autoHiResTimer = null;
+            if (this.colorModeExpressionId !== c.id) return;
+            const cur = this.viewport;
+            if (!this._isSameViewportRect({ minX: cur.minX, maxX: cur.maxX, minY: cur.minY, maxY: cur.maxY }, vp)) return; // moved again since
+            const built = this._buildHiResColorLayerCanvas(c);
+            if (!built) return; // e.g. transpile/verification failed after all - stay on the live layer
+            this._hiResColorLayer = {
+                exprId: c.id, canvas: built.canvas, minX: built.minX, maxX: built.maxX, minY: built.minY, maxY: built.maxY,
+                vp: { minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY }
+            };
+            if (this.currentState === this.states.APP) this.drawCanvas();
+        }, SETTLE_MS);
+    }
+
     // Draws the active phase/modulus colour layer (if any) beneath the grid/axes/expressions.
-    // Like the locus shading grids, this is a world-space raster: while pan/zoom is in
-    // progress the cached bitmap (built for a *padded* previous viewport, see
-    // _buildColorLayerCanvas) is re-projected onto the current viewport via worldToScreen, so it
-    // pans/scales along with everything else. As long as the current viewport still fits inside
-    // that padded rectangle (the common case for a moderate pan/zoom), the whole visible area
-    // stays coloured with no blank strip; only once the viewport spills outside it does a
-    // debounced rebuild (_scheduleColorLayerRetrace) fire, landing once pan/zoom settles.
+    // First tries a fully-live GPU render for the EXACT current viewport (_tryLiveGLColorLayer) -
+    // when available, this is recomputed fresh on every single call, so pan/zoom never shows a
+    // blank/stale edge. Only when that's unavailable (WebGL missing, expression unsupported by
+    // the transpiler, or the safety-net check fails) does it fall back to the older padded-cache
+    // CPU/GL-batch approach below: a world-space raster built for a *padded* previous viewport
+    // (see _buildColorLayerCanvas), re-projected onto the current viewport via worldToScreen. As
+    // long as the current viewport still fits inside that padded rectangle (the common case for
+    // a moderate pan/zoom), the whole visible area stays coloured with no blank strip; only once
+    // the viewport spills outside it does a debounced rebuild (_scheduleColorLayerRetrace) fire,
+    // landing once pan/zoom settles.
     _drawColorLayer(ctx) {
         if (this.colorModeExpressionId === null) return;
         const c = this.expressions.find(e => e.id === this.colorModeExpressionId);
@@ -8646,7 +9308,15 @@ class Komplexiti {
         }
         if (this._hiResColorLayer) this._hiResColorLayer = null;
 
-        if (!this._colorLayerCache || this._colorLayerCache.exprId !== c.id) {
+        const live = this._tryLiveGLColorLayer(c, vp);
+        if (live) {
+            this._colorLayerCache = live;
+            this._drawColorLayerBitmap(ctx, live);
+            this._scheduleAutoHiRes(c, vp);
+            return;
+        }
+
+        if (!this._colorLayerCache || this._colorLayerCache.exprId !== c.id || this._colorLayerCache.isLive) {
             const built = this._buildColorLayerCanvas(c);
             this._colorLayerCache = built
                 ? {
@@ -8944,8 +9614,14 @@ class Komplexiti {
         }
         const hiResBtn = card.querySelector('.expr-color-hires-btn');
         if (hiResBtn) {
+            // Hidden while the fully-live GPU path is active for THIS card - it already auto-
+            // renders a one-off hi-res pass on its own once pan/zoom settles (see
+            // _scheduleAutoHiRes), so a manual trigger would be redundant. Only shown when
+            // colouring is on but falling back to the CPU rasteriser (no WebGL, or this specific
+            // expression's shader failed to transpile/verify), where there's no automatic pass.
             const colorActive = colorEligible && this.colorModeExpressionId === c.id;
-            hiResBtn.style.display = colorActive ? '' : 'none';
+            const liveActive = colorActive && this._colorLayerCache?.isLive === true;
+            hiResBtn.style.display = (colorActive && !liveActive) ? '' : 'none';
             if (!colorActive) hiResBtn.classList.remove('is-loading');
         }
 
@@ -10756,8 +11432,10 @@ class Komplexiti {
                 this.colorModeExpressionId = pendingColorModeId;
                 this._colorLayerCache = null;
                 this._hiResColorLayer = null;
-                this.updateAllCardMetadata();
                 if (this.currentState === this.states.APP) this.drawCanvas();
+                // AFTER drawCanvas(): the hi-res button's visibility depends on
+                // _colorLayerCache.isLive, which drawCanvas() is what actually determines.
+                this.updateAllCardMetadata();
             });
         }
     }
