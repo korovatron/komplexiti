@@ -9255,8 +9255,10 @@ void main() {
     // and re-arming on every one of those would prevent the timer from ever reaching its delay
     // during genuine continuous interaction, or would recompute needlessly on unrelated redraws.
     _scheduleAutoHiRes(c, vp) {
-        const SETTLE_MS = 450; // deliberately longer than the old low-res retrace debounce (120ms)
-        // since this triggers a heavier render - avoids re-firing on brief natural pauses mid-drag.
+        const SETTLE_MS = 200; // matches the app's other debounce cadences (locus/colour retrace) -
+        // the re-arm-on-any-change check above already stops this firing during genuine motion
+        // (including a slow inertia tail), so the delay only needs to cover "just stopped", not
+        // guard against the render itself being expensive (it isn't, per the benchmarked cost).
         const last = this._lastLiveVpForAutoHiRes;
         if (last && last.exprId === c.id && this._isSameViewportRect(last, vp)) return;
         this._lastLiveVpForAutoHiRes = { exprId: c.id, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
