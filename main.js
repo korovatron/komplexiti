@@ -2705,6 +2705,7 @@ class Komplexiti {
                 this.colorModeExpressionId = null;
             } else {
                 this.colorModeExpressionId = c.id;
+                this._retryGLColorVerification(c);
             }
             this._colorLayerCache = null;
             this._hiResColorLayer = null;
@@ -9190,6 +9191,26 @@ void main() {
     // new frame/rebuild started, since that check forces a synchronous GPU readback and doing it
     // every frame would reintroduce exactly the kind of per-frame stall this whole feature exists
     // to avoid. Returns { program, constantNames, lightScale } or null.
+    // A failed GPU verification is cached as permanently unusable for the rest of the session
+    // (see _getVerifiedGLColorSetup below), but that failure can be a one-off transient GPU/driver
+    // state rather than a genuine shader problem. Called whenever colouring is freshly toggled ON
+    // for an expression, so the user always gets one new, independent attempt rather than being
+    // stuck on whatever this exact shader source happened to do earlier in the session.
+    _retryGLColorVerification(c) {
+        if (typeof math === 'undefined') return;
+        const glCtx = this._glColorContext();
+        if (!glCtx) return;
+        const target = this._colorableLhsRhs(c);
+        if (!target) return;
+        try {
+            const scope = this.buildExpressionScope(c.id);
+            const transpiled = this._transpileColorExpr(target.lhs, target.rhs, c.equationVar, scope);
+            if (!transpiled) return;
+            const fragSrc = this._buildColorFragmentShaderSource(transpiled.glslExpr, transpiled.constantNames);
+            glCtx.programCache.delete(fragSrc);
+        } catch { /* best-effort only */ }
+    }
+
     _getVerifiedGLColorSetup(glCtx, lhs, rhs, compiled, varName, scope, minX, maxX, minY, maxY) {
         const transpiled = this._transpileColorExpr(lhs, rhs, varName, scope);
         if (!transpiled) return null;
