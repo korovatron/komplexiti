@@ -5947,6 +5947,7 @@ class Komplexiti {
     // "polynomial" and solve for its (nonexistent) extra roots.
     _extractPolynomialCoeffsSafe(expr, varName, scope) {
         if (/(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(expr)) return null;
+        if (this._hasTranscendentalPowerOrLog(expr, varName)) return null;
         // A top-level product of 2+ factors (e.g. (z-1)^2*z^5*(z+0.5)^3) must go through the
         // factored, convolution-based path - differentiating the whole product directly can
         // freeze the tab even at maxDeg=6 (see _extractFactoredPolynomialCoeffs). When this IS
@@ -6245,7 +6246,7 @@ class Komplexiti {
     _solveGeneralEquation(lhs, rhs, varName, scope) {
         const hExpr = `(${lhs}) - (${rhs})`;
         const hasDivision = /\//.test(hExpr);
-        const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(hExpr);
+        const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(hExpr) || this._hasTranscendentalPowerOrLog(hExpr, varName);
         let coeffs = isNeverPolynomial ? null : this._extractPolynomialCoeffsSafe(hExpr, varName, scope);
         if ((!coeffs || coeffs.length < 2) && hasDivision) {
             const fast = this._tryFastRationalEquation(lhs, rhs, varName, scope);
@@ -6338,6 +6339,37 @@ class Komplexiti {
             } catch { /* skip - likely a pole */ }
         }
         return valid;
+    }
+
+    // Cheap AST-based detection of a genuine transcendental power/log structure that the plain
+    // isNeverPolynomial regex can't express (that regex only matches literal function-CALL names
+    // like "exp(" - it has no way to recognise caret-notation exponentials such as "e^z", "2^z",
+    // or a NESTED tower like "e^(e^z)", since those parse as a bare OperatorNode '^', not a
+    // FunctionNode). Matches the exact same candidate shape _tryExpLogPowSubstitution's own
+    // AST-scan looks for (any exp/log/log10/log2 call with a z-dependent argument, or any '^'
+    // whose base doesn't depend on z but whose exponent does) - keep both in sync if either
+    // changes. Deliberately just a presence check (no affine-argument/solvability requirement):
+    // even a candidate _tryExpLogPowSubstitution itself can't invert (e.g. e^(e^z)'s outer node,
+    // whose inner argument e^z isn't affine) still means repeated math.derivative calls on the
+    // WHOLE expression are unsafe - differentiating a nested exponential tower via the chain rule
+    // causes the same catastrophic expression-tree blowup already documented for the quotient-rule
+    // (division) and product-rule (multi-factor) cases, just via a different trigger shape.
+    _hasTranscendentalPowerOrLog(hExpr, varName) {
+        let root;
+        try { root = math.parse(hExpr); } catch { return false; }
+        const varRe = new RegExp(`(?<![a-zA-Z0-9_])${varName}(?![a-zA-Z0-9_])`);
+        const containsVar = node => varRe.test(node.toString());
+        let found = false;
+        root.traverse(node => {
+            if (found) return;
+            if (node.type === 'FunctionNode' && node.args?.length === 1 &&
+                (node.fn?.name === 'exp' || node.fn?.name === 'log' || node.fn?.name === 'log10' || node.fn?.name === 'log2')) {
+                if (containsVar(node.args[0])) found = true;
+            } else if (node.type === 'OperatorNode' && node.op === '^' && node.args?.length === 2) {
+                if (!containsVar(node.args[0]) && containsVar(node.args[1])) found = true;
+            }
+        });
+        return found;
     }
 
     // Closed-form solver for equations where the ONLY appearance of varName is inside a single
@@ -7654,7 +7686,7 @@ class Komplexiti {
             // fallbacks below with the same end result. This matters a lot in practice since
             // cascadeEvaluate re-parses every OTHER equation card on every keystroke typed anywhere.
             const hasDivision = /\//.test(hExpr);
-            const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(hExpr);
+            const isNeverPolynomial = hasDivision || /(?<![a-zA-Z])(?:sin|cos|tan|csc|sec|cot|sinh|cosh|tanh|csch|sech|coth|asin|acos|atan|asinh|acosh|atanh|asec|acsc|acot|asech|acsch|acoth|exp|log|log10|log2)\(/.test(hExpr) || this._hasTranscendentalPowerOrLog(hExpr, varName);
             // A top-level product of 2+ factors (e.g. (z-1)^2*z^5*(z+0.5)^3) MUST go through the
             // factored, convolution-based path - differentiating the whole product directly can
             // freeze the tab even at maxDeg=6, since the product-rule expression tree grows
@@ -9249,18 +9281,26 @@ void main() {
     // Debounced "settle" trigger for an automatic one-off hi-res snapshot (same mechanism as the
     // manual .expr-color-hires-btn click handler) - only fires once the viewport has genuinely
     // stopped changing for SETTLE_MS, so a continuous pan/zoom gesture never pays for it, only
-    // the pause at the end of one. Called every frame the live GPU path succeeds, but only ever
-    // (re)arms its timer when the viewport actually differs from the last call - drawCanvas() is
-    // invoked for lots of unrelated reasons (toggling a marker, editing a different card, etc.),
-    // and re-arming on every one of those would prevent the timer from ever reaching its delay
-    // during genuine continuous interaction, or would recompute needlessly on unrelated redraws.
+    // the pause at the end of one. Called every frame the live GPU path succeeds.
     _scheduleAutoHiRes(c, vp) {
         const SETTLE_MS = 200; // matches the app's other debounce cadences (locus/colour retrace) -
-        // the re-arm-on-any-change check above already stops this firing during genuine motion
+        // the re-arm-on-any-change check below already stops this firing during genuine motion
         // (including a slow inertia tail), so the delay only needs to cover "just stopped", not
         // guard against the render itself being expensive (it isn't, per the benchmarked cost).
+
+        // Nothing to do if a hi-res snapshot already covers this exact (expression, viewport).
+        const hr = this._hiResColorLayer;
+        if (hr && hr.exprId === c.id && this._isSameViewportRect(hr.vp, vp)) return;
+
+        // Only skip (re)arming when a timer is ALREADY actively counting down for this exact
+        // state - checking _autoHiResTimer's truthiness (not just the last-seen viewport) matters
+        // because colour mode can be toggled off then back on (or the equation edited) for an
+        // UNCHANGED viewport, resetting _hiResColorLayer to null without the viewport itself ever
+        // differing - relying on viewport-equality alone would then wrongly think "already handled"
+        // forever, since no genuine pan/zoom ever comes along afterwards to reset that bookkeeping.
         const last = this._lastLiveVpForAutoHiRes;
-        if (last && last.exprId === c.id && this._isSameViewportRect(last, vp)) return;
+        if (this._autoHiResTimer && last && last.exprId === c.id && this._isSameViewportRect(last, vp)) return;
+
         this._lastLiveVpForAutoHiRes = { exprId: c.id, minX: vp.minX, maxX: vp.maxX, minY: vp.minY, maxY: vp.maxY };
         if (this._autoHiResTimer) clearTimeout(this._autoHiResTimer);
         this._autoHiResTimer = setTimeout(() => {
