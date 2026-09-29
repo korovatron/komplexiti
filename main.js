@@ -8846,7 +8846,18 @@ vec3 hsl2rgb(float h, float s, float l) {
 }
 
 vec3 domainColor(vec2 w) {
-    float m = length(w);
+    // Numerically-stable magnitude ("scaled hypot"): naive length() = sqrt(x*x+y*y) squares each
+    // component FIRST, which overflows float32 (~3.4e38 max) once |component| exceeds only its
+    // SQUARE ROOT (~1.84e19) - even though the component itself is still comfortably finite. That
+    // overflow (Infinity) then propagates through log()/division below to NaN, which the GPU
+    // renders as a fixed mid-lightness (fully saturated hue, no shading) rather than visibly
+    // failing - the exact cause of "shading disappears into solid colour bands" at large |w|.
+    // Scaling by the larger component before squaring only ever squares a ratio <= 1, pushing the
+    // real breakdown point out to float32's actual range limit instead of its square root.
+    float ax = abs(w.x), ay = abs(w.y);
+    float amax = max(ax, ay), amin = min(ax, ay);
+    float ratio = amax > 0.0 ? amin / amax : 0.0;
+    float m = amax * sqrt(1.0 + ratio * ratio);
     float hue = atan(w.y, w.x);
     if (hue < 0.0) hue += 2.0 * PI;
     hue /= 2.0 * PI;
