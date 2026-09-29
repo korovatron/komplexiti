@@ -8689,6 +8689,10 @@ uniform float uScale;
 const float PI = 3.14159265358979323846;
 const vec2 CI = vec2(0.0, 1.0);
 const vec2 C1 = vec2(1.0, 0.0);
+// exp() overflows float32 (~3.4e38 max) once its argument exceeds ~88.7 - clamped comfortably
+// below that (with margin for GPU-vendor differences in the exact threshold) so exp() never
+// produces NaN/Infinity in the first place; see cexp/sinhf/coshf below.
+const float EXP_CLAMP = 80.0;
 
 vec2 cmul(vec2 a, vec2 b) { return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
 vec2 cdiv(vec2 a, vec2 b) {
@@ -8700,7 +8704,7 @@ vec2 cabsv(vec2 a) { return vec2(length(a), 0.0); }
 vec2 cargv(vec2 a) { return vec2(atan(a.y, a.x), 0.0); }
 vec2 crealv(vec2 a) { return vec2(a.x, 0.0); }
 vec2 cimagv(vec2 a) { return vec2(a.y, 0.0); }
-vec2 cexp(vec2 a) { float m = exp(a.x); return vec2(m*cos(a.y), m*sin(a.y)); }
+vec2 cexp(vec2 a) { float m = exp(min(a.x, EXP_CLAMP)); return vec2(m*cos(a.y), m*sin(a.y)); }
 vec2 clog(vec2 a) { return vec2(log(length(a)), atan(a.y, a.x)); }
 vec2 clog10(vec2 a) { return clog(a) / log(10.0); }
 vec2 clog2(vec2 a)  { return clog(a) / log(2.0); }
@@ -8711,9 +8715,16 @@ vec2 csqrt(vec2 a) {
     float imMag = sqrt(max((r - a.x) * 0.5, 0.0));
     return vec2(re, a.y < 0.0 ? -imMag : imMag);
 }
-// GLSL ES 1.00 (WebGL1) has no built-in sinh/cosh - expand directly from exp().
-float sinhf(float x) { return (exp(x) - exp(-x)) * 0.5; }
-float coshf(float x) { return (exp(x) + exp(-x)) * 0.5; }
+// GLSL ES 1.00 (WebGL1) has no built-in sinh/cosh - expand directly from exp(). exp()'s argument
+// is clamped to EXP_CLAMP first: NaN/Infinity handling in min/max/comparisons is implementation-
+// defined per the GLSL spec, so different GPU vendors/drivers can disagree on what happens once a
+// value genuinely overflows (observed: an equation that renders correctly on a desktop GPU showed
+// solid opaque black - instead of the intended transparent - in the equivalent overflowed region
+// on a different GPU/driver). Clamping the exp() ARGUMENT before it can overflow means the result
+// is always a well-defined (if approximate, right at the extreme edge of float32's range) finite
+// number on every platform, rather than relying on cross-vendor-consistent NaN/Infinity semantics.
+float sinhf(float x) { return (exp(min(x, EXP_CLAMP)) - exp(min(-x, EXP_CLAMP))) * 0.5; }
+float coshf(float x) { return (exp(min(x, EXP_CLAMP)) + exp(min(-x, EXP_CLAMP))) * 0.5; }
 vec2 csin(vec2 a)  { return vec2(sin(a.x)*coshf(a.y),  cos(a.x)*sinhf(a.y)); }
 vec2 ccos(vec2 a)  { return vec2(cos(a.x)*coshf(a.y), -sin(a.x)*sinhf(a.y)); }
 vec2 ctan(vec2 a)  { return cdiv(csin(a), ccos(a)); }
