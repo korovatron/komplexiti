@@ -1030,6 +1030,11 @@ class Komplexiti {
         this.canvas.classList.add('loaded');
         this.resizeCanvas();
         this.drawCanvas();
+        // This is the FIRST real draw of the colour layer (resizeCanvas/drawCanvas were no-ops
+        // while still on the title screen) - refresh card metadata now so the hi-res-snapshot
+        // button correctly reflects whether this draw actually went live via GPU, rather than
+        // staying stuck showing/hiding based on the stale pre-launch state.
+        this.updateAllCardMetadata();
 
         // Double rAF: panel must paint at left:-100% before mobile-open triggers the slide
         requestAnimationFrame(() => {
@@ -2862,6 +2867,10 @@ class Komplexiti {
 
     saveExpressions() {
         if (this.tempSession) return; // never overwrite saved state during a shared session
+        // Suppressed during loadExpressions()'s synthetic per-card 'input' replay (see below) -
+        // those replays run before colorModeExpressionId has been restored, so letting them save
+        // here would permanently overwrite the saved colorModeId with null on disk.
+        if (this._restoringExpressions) return;
         const data = {
             nextId:      this.nextExpressionId,
             colorModeId: this.colorModeExpressionId,
@@ -2880,6 +2889,7 @@ class Komplexiti {
     loadExpressions() {
         let hasLoaded = false;
         let pendingColorModeId = null;
+        this._restoringExpressions = true;
         try {
             const raw = localStorage.getItem('komplexiti-constants');
             if (raw) {
@@ -2914,17 +2924,21 @@ class Komplexiti {
         // Each card's math-field applies its latex (and dispatches its own 'input' event, which
         // clears colour mode as an edit) on a deferred requestAnimationFrame in createExpressionUI
         // - queuing this restore in a further requestAnimationFrame runs it after all of theirs.
-        if (pendingColorModeId !== null) {
-            requestAnimationFrame(() => {
+        // Also clears _restoringExpressions here (not synchronously) so every one of those
+        // per-card replay 'input' events - which all fire before this callback, per the above -
+        // has its own saveExpressions() call suppressed, not just the colour-mode restore itself.
+        requestAnimationFrame(() => {
+            this._restoringExpressions = false;
+            if (pendingColorModeId !== null) {
                 this.colorModeExpressionId = pendingColorModeId;
                 this._colorLayerCache = null;
                 this._hiResColorLayer = null;
-                if (this.currentState === this.states.APP) this.drawCanvas();
-                // AFTER drawCanvas(): the hi-res button's visibility depends on
-                // _colorLayerCache.isLive, which drawCanvas() is what actually determines.
-                this.updateAllCardMetadata();
-            });
-        }
+            }
+            if (this.currentState === this.states.APP) this.drawCanvas();
+            // AFTER drawCanvas(): the hi-res button's visibility depends on
+            // _colorLayerCache.isLive, which drawCanvas() is what actually determines.
+            this.updateAllCardMetadata();
+        });
     }
 
     // Returns { name, valueLaTeX } if the expression is a valid assignment, else null.
