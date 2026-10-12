@@ -223,7 +223,12 @@ class Komplexiti {
     // -------------------------------------------------------------------------
     // iOS PWA bottom-bar fix
     // Uses window.innerHeight (not visualViewport) to avoid transient heights
-    // from share sheets, screenshots, and tab switching on iOS.
+    // from share sheets, screenshots, and tab switching on iOS. All physical-point
+    // measurements (screen.width/height, --safe-area-top) are normalised by
+    // visualViewport.scale before being compared/added to innerHeight, since some
+    // devices/sessions run the standalone PWA at a non-1 zoom scale even with
+    // user-scalable=no - without this, the fix silently fails every time on those
+    // devices rather than just occasionally.
     // -------------------------------------------------------------------------
     fixIOSViewportBug() {
         let lastKnownHeight = 0;
@@ -239,25 +244,43 @@ class Komplexiti {
             const isPortrait = window.innerHeight > window.innerWidth;
 
             if (isIOS && isPWA && isPortrait) {
-                const screenPortraitHeight = Math.max(window.screen.height, window.screen.width);
+                // Force a style/layout flush so the computed style read below can't
+                // return a stale cached value for --safe-area-top.
+                void document.documentElement.offsetHeight;
+
+                // screen.width/height and --safe-area-top are reported in true physical
+                // points, but innerHeight (and --actual-vh) operate in whatever CSS-pixel
+                // zoom space the page is currently running at. These normally coincide
+                // (scale 1), but some devices/sessions run the standalone PWA at a
+                // visualViewport.scale other than 1 even with user-scalable=no. Dividing
+                // by scale brings everything into the same units; this is a no-op
+                // (divide by 1) on every device where scale is already 1.
+                const scale = (window.visualViewport && window.visualViewport.scale) || 1;
+
+                const screenPortraitHeight = Math.max(window.screen.height, window.screen.width) / scale;
                 const difference = screenPortraitHeight - viewportHeight;
 
-                if (difference > 15) {
+                if (difference > 2) {
                     const computedStyle = getComputedStyle(document.documentElement);
                     const safeTop = computedStyle.getPropertyValue('--safe-area-top');
-                    const safeTopPx = parseInt(safeTop) || 0;
-                    const heightWithSafeTop = viewportHeight + safeTopPx;
-                    const remainingShortfall = screenPortraitHeight - heightWithSafeTop;
+                    const safeTopPx = (parseInt(safeTop) || 0) / scale;
 
-                    if (remainingShortfall > 8 && difference <= 180) {
-                        viewportHeight = screenPortraitHeight;
-                    } else if (safeTopPx > 0) {
-                        viewportHeight = heightWithSafeTop;
-                    } else if (difference <= 180) {
+                    if (safeTopPx > 0) {
+                        // Trust the real measured inset - no upper cap. Capping this to a
+                        // value tuned for one device/screen size would silently break on
+                        // any device with a larger shortfall.
+                        viewportHeight = viewportHeight + safeTopPx;
+                    } else if (difference <= 180 / scale) {
+                        // Safe-area isn't resolved yet (common on cold launch) - fall back
+                        // to the known screen height as a best guess until a later retry
+                        // picks up the real inset. The (scaled) sanity cap only applies to
+                        // this guess, to avoid misfiring during unrelated large viewport
+                        // shrinks (e.g. on-screen keyboard open).
                         viewportHeight = screenPortraitHeight;
                     }
                 }
             }
+            // Landscape mode: skip compensation - CSS env() handles the notch automatically.
 
             document.documentElement.style.setProperty('--actual-vh', `${viewportHeight}px`);
 
