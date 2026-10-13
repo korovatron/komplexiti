@@ -1531,16 +1531,7 @@ class Komplexiti {
             if (this.currentState !== this.states.APP) return;
             const rect = this.canvas.getBoundingClientRect();
             const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-            // Cursor: pointer when hovering an intersection dot or badge close button, grab when
-            // hovering a draggable constant marker (unless a marker drag is already in progress).
-            const onDot    = this._locusIntersectionHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
-            const onMarker = this._constantMarkerHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.r);
-            const onClose = this._intersectionBadges?.some(b => b.closeBtn &&
-                mx >= b.closeBtn.x && mx <= b.closeBtn.x + b.closeBtn.w &&
-                my >= b.closeBtn.y && my <= b.closeBtn.y + b.closeBtn.h);
-            this.canvas.style.cursor = this.input.markerDrag.active ? 'grabbing'
-                : onMarker ? 'grab'
-                : (onDot || onClose) ? 'pointer' : '';
+            this._updateCanvasCursor(mx, my);
             const tooltip = document.getElementById('extrema-tooltip');
             if (!tooltip || !this._extremaHitTargets?.length) { if (tooltip) tooltip.style.display = 'none'; return; }
             const hit = this._extremaHitTargets.find(t => Math.hypot(mx - t.x, my - t.y) < t.r);
@@ -1568,6 +1559,20 @@ class Komplexiti {
     // =========================================================================
     // Pointer / mouse handling
     // =========================================================================
+
+    // Cursor: closed hand while actively panning or dragging a marker, pointer when
+    // hovering an intersection dot or badge close button, grab when hovering a
+    // draggable constant marker, crosshair otherwise (idle desktop/mouse mode).
+    _updateCanvasCursor(mx, my) {
+        const onDot    = this._locusIntersectionHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.hitR);
+        const onMarker = this._constantMarkerHits?.some(t => Math.hypot(mx - t.x, my - t.y) < t.r);
+        const onClose  = this._intersectionBadges?.some(b => b.closeBtn &&
+            mx >= b.closeBtn.x && mx <= b.closeBtn.x + b.closeBtn.w &&
+            my >= b.closeBtn.y && my <= b.closeBtn.y + b.closeBtn.h);
+        this.canvas.style.cursor = (this.input.markerDrag.active || (this.input.mouse.down && this.input.dragging)) ? 'grabbing'
+            : onMarker ? 'grab'
+            : (onDot || onClose) ? 'pointer' : 'crosshair';
+    }
 
     handlePointerStart(clientX, clientY) {
         this.stopMousePanInertia();
@@ -1599,14 +1604,17 @@ class Komplexiti {
     }
 
     handlePointerMove(clientX, clientY) {
+        const rect = this.canvas.getBoundingClientRect();
+        const cx   = clientX - rect.left;
+        const cy   = clientY - rect.top;
+        this.input.mouse.x = cx;
+        this.input.mouse.y = cy;
+
         if (this.input.markerDrag.active) {
             this._updateMarkerDrag(clientX, clientY);
             return;
         }
         if (!this.input.mouse.down) return;
-        const rect   = this.canvas.getBoundingClientRect();
-        const cx     = clientX - rect.left;
-        const cy     = clientY - rect.top;
         const now    = performance.now();
         const deltaX = cx - this.input.lastX;
         const deltaY = cy - this.input.lastY;
@@ -1630,6 +1638,7 @@ class Komplexiti {
 
             this.input.dragging          = true;
             this.input.viewportPanActive = true;
+            this.canvas.style.cursor     = 'grabbing';
             this.drawCanvas();
         }
         this.input.lastX = cx;
@@ -1640,6 +1649,7 @@ class Komplexiti {
         if (this.input.markerDrag.active) {
             this.input.markerDrag.active = false;
             this.input.markerDrag.exprId = null;
+            this._updateCanvasCursor(this.input.mouse.x, this.input.mouse.y);
             // Domain colouring isn't kept live during the drag itself (too expensive per-frame,
             // same reasoning as pan/zoom's own debounced retrace) - force one full rebuild now
             // the point has settled, so the colour layer reflects its final value.
@@ -1684,6 +1694,7 @@ class Komplexiti {
         this.input.mouse.down        = false;
         this.input.dragging          = false;
         this.input.viewportPanActive = false;
+        this._updateCanvasCursor(this.input.mouse.x, this.input.mouse.y);
     }
 
     // =========================================================================
