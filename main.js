@@ -3222,6 +3222,11 @@ class Komplexiti {
             return isFinite(val) ? String(val) : _;
         });
         for (let p = 0; p < 3; p++) {
+            // \sqrt[n]{x} (nth root, from the keyboard's shift-√ button). MathLive renders a
+            // single-character index bare (\sqrt[2]{x}) but wraps a multi-character one in braces
+            // (\sqrt[{10}]{x}) - strip either form and rewrite as an explicit power so a complex
+            // radicand goes through the SAME complex ^ operator used everywhere else in the app.
+            e = e.replace(/\\sqrt\s*\[\{?([^{}\[\]]*)\}?\]\s*\{([^{}]*)\}/g, '(($2)^(1/($1)))');
             e = e.replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt($1)');
         }
         // \mathrm{...} (upright text, semantically a no-op here) must unwrap BEFORE \operatorname,
